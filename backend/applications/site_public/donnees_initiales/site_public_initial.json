@@ -1,0 +1,459 @@
+{
+  "configuration": {
+    "nom_bureau": "",
+    "slogan": "Économie de la construction, pièces écrites, pilotage et qualité d'exécution",
+    "sigle": "",
+    "description_courte": "Bureau d'études dédié au chiffrage, aux métrés, aux CCTP, au pilotage des travaux et à la maîtrise contractuelle des opérations bâtiment et VRD.",
+    "titre_hero": "L'ingénierie économique et documentaire au service de vos ouvrages",
+    "sous_titre_hero": "Étude de prix, métrés, pièces écrites, maîtrise d'œuvre, OPC, qualité chantier et réception : une approche rigoureuse pour piloter vos opérations de bout en bout.",
+    "etiquette_hero": "Bureau d'études spécialisé bâtiment · VRD · économie · conduite d'opération",
+    "texte_cta_principal": "Nos prestations",
+    "texte_cta_secondaire": "Nous contacter",
+    "texte_cta_bandeau": "Vous avez un projet de construction ?",
+    "texte_description_bandeau": "Nous intervenons de l'estimation préalable à la réception des travaux, avec une logique commune de chiffrage, rédaction, suivi contractuel et qualité.",
+    "carousel_accueil": [
+      {
+        "titre": "Études de prix, métrés et rentabilité",
+        "sous_titre": "Déboursé sec, prix de vente, variantes et seuils critiques pour décider sur des bases fiables.",
+        "image_url": "",
+        "cta_texte": "Découvrir l'économie",
+        "cta_lien": "/prestations/economie-de-la-construction",
+        "couleur_fond": "linear-gradient(135deg, #0f172a 0%, #1d4ed8 48%, #f59e0b 100%)"
+      },
+      {
+        "titre": "CCTP, DPGF, CCAP et mémoire technique",
+        "sous_titre": "Des pièces écrites structurées, conformes et directement exploitables pour les marchés publics comme privés.",
+        "image_url": "",
+        "cta_texte": "Voir les prestations",
+        "cta_lien": "/prestations",
+        "couleur_fond": "linear-gradient(135deg, #1f2937 0%, #0f766e 50%, #d97706 100%)"
+      },
+      {
+        "titre": "MOE travaux, OPC, qualité et réception",
+        "sous_titre": "Préparation de chantier, coordination, suivi des modifications, délais, réception et clôture documentaire.",
+        "image_url": "",
+        "cta_texte": "Notre méthode",
+        "cta_lien": "/notre-methode",
+        "couleur_fond": "linear-gradient(135deg, #312e81 0%, #0f172a 55%, #b45309 100%)"
+      }
+    ],
+    "contenu_accueil": {
+      "metadata": {
+        "titre_par_defaut": "Accueil",
+        "description_par_defaut": "Économie de la construction, dimensionnement voirie, métrés, pièces écrites et accompagnement maîtrise d'œuvre."
+      },
+      "hero": {
+        "sous_titre_secours": "De l'avant-projet à la réception des travaux : estimations, dimensionnements, métrés, pièces écrites et suivi d'exécution dans une plateforme intégrée.",
+        "indicateurs": [
+          "Économie de la construction",
+          "Dimensionnement VRD",
+          "Bâtiment",
+          "Assistance MOE"
+        ]
+      },
+      "sections": {
+        "prestations_badge": "Nos domaines d'intervention",
+        "prestations_titre": "Nos expertises",
+        "prestations_description": "Des études rigoureuses, documentées et exploitables à chaque étape de votre projet.",
+        "prestations_bouton": "Voir toutes nos prestations en détail",
+        "valeurs_badge": "Pourquoi nous faire confiance",
+        "valeurs_titre": "Notre engagement qualité",
+        "secteurs_badge": "À qui nous nous adressons",
+        "secteurs_titre": "Nos clients et partenaires",
+        "secteurs_description": "Nous intervenons auprès des acteurs de la construction, de la conception à la réception.",
+        "pilotage_badge": "Méthodes et garanties",
+        "pilotage_titre": "Un pilotage d'opération structuré",
+        "pilotage_description": "Notre organisation s'appuie sur les référentiels métier lus dans la bibliothèque documentaire du bureau : étude de prix, pièces écrites, conduite d'opération, qualité chantier et gestion contractuelle.",
+        "demarche_badge": "Comment nous travaillons",
+        "demarche_titre": "Notre démarche",
+        "demarche_description": "Une méthode éprouvée pour des études fiables, documentées et exploitables.",
+        "demarche_bouton": "Prendre contact",
+        "realisations_badge": "Nos travaux",
+        "realisations_titre": "Réalisations récentes",
+        "realisations_bouton": "Voir toutes nos références",
+        "contact_badge": "Parlons de votre projet",
+        "contact_titre": "Nous contacter",
+        "contact_description": "Présentez votre besoin, votre contexte et vos objectifs. Nous reviendrons vers vous pour qualifier votre demande.",
+        "contact_courriel": "Courriel",
+        "contact_telephone": "Téléphone",
+        "contact_collaborateur_question": "Vous êtes un collaborateur ?",
+        "contact_collaborateur_bouton": "Espace de travail",
+        "contact_formulaire_titre": "Votre demande"
+      },
+      "secteurs": [
+        {
+          "titre": "Maîtres d'ouvrage",
+          "icone": "Building2",
+          "description": "Collectivités, promoteurs, aménageurs et bailleurs sociaux : accompagnement au chiffrage, au suivi budgétaire et au contrôle des coûts.",
+          "tags": [
+            "Estimation préalable",
+            "Contrôle des coûts",
+            "Bilan d'opération"
+          ]
+        },
+        {
+          "titre": "Maîtres d'œuvre",
+          "icone": "FileText",
+          "description": "Architectes et bureaux d'études techniques : appui en économie de la construction pour les phases AVP, PRO, DCE, VISA et DET.",
+          "tags": [
+            "DPGF / DQE / BPU",
+            "Pièces écrites",
+            "Suivi financier"
+          ]
+        },
+        {
+          "titre": "Entreprises BTP",
+          "icone": "Hammer",
+          "description": "Entreprises générales, spécialisées et artisans : chiffrage, analyse de rentabilité et structuration des réponses aux appels d'offres.",
+          "tags": [
+            "Chiffrage",
+            "Appels d'offres",
+            "Analyse de rentabilité"
+          ]
+        }
+      ],
+      "pilotage": [
+        {
+          "titre": "Étude de prix analytique",
+          "icone": "Calculator",
+          "description": "Décomposition du déboursé sec, frais de chantier, frais généraux, aléas et marge cible pour fiabiliser les offres et variantes."
+        },
+        {
+          "titre": "Pièces écrites et CCTP",
+          "icone": "FileText",
+          "description": "Rédaction structurée par lot, consistance des ouvrages, points particuliers et conformité aux DTU, NF P et guides de référence."
+        },
+        {
+          "titre": "MOE travaux et réception",
+          "icone": "BarChart3",
+          "description": "Visa, préparation de chantier, facturation, travaux modificatifs, gestion des délais, réception et remise d'ouvrage."
+        },
+        {
+          "titre": "OPC et coordination",
+          "icone": "Clock",
+          "description": "Ordonnancement, pilotage des interfaces, check-lists, retours d'expérience et maîtrise des délais en marchés à lots séparés."
+        },
+        {
+          "titre": "Qualité chantier",
+          "icone": "Shield",
+          "description": "Plans d'assurance qualité, formalisation des contrôles, traçabilité de l'exécution et vérification de conformité."
+        },
+        {
+          "titre": "Cadre contractuel",
+          "icone": "TrendingUp",
+          "description": "Lecture du marché, négociation, avenants, règlement définitif des comptes et garanties post-réception."
+        }
+      ]
+    },
+    "pays": "France",
+    "meta_titre": "",
+    "meta_description": "Bureau d'études spécialisé en économie de la construction, métrés, CCTP, appels d'offres, maîtrise d'œuvre et pilotage des travaux.",
+    "mots_cles": "économie de la construction, cctp, étude de prix, métrés, opc, maîtrise d'œuvre, dpgf, bpu, dqe"
+  },
+  "prestations": [
+    {
+      "titre": "Économie de la construction",
+      "categorie": "economie",
+      "description_courte": "Estimations préalables, DPGF, BPU, DQE, analyses de rentabilité, révision et actualisation des prix. Du chiffrage initial au bilan final.",
+      "description_longue": "Notre mission en économie de la construction couvre l'ensemble du cycle d'une opération : de l'estimation préalable lors des premières esquisses jusqu'au bilan définitif après réception des travaux. Nous produisons des DPGF (Décomposition du Prix Global et Forfaitaire), BPU (Bordereau des Prix Unitaires) et DQE (Détail Quantitatif Estimatif) conformes aux exigences des marchés publics et privés. Notre approche analytique permet d'identifier, ligne par ligne, les postes à risque, les marges réelles et les leviers d'optimisation.",
+      "icone": "TrendingUp",
+      "couleur": "primaire",
+      "points_forts": [
+        "Déboursé sec et prix de vente (méthode analytique)",
+        "Analyse de rentabilité par ligne de prix",
+        "Révision des prix (indices BT, TP)",
+        "DPGF, BPU, DQE conformes marchés publics"
+      ],
+      "avantages": [
+        {
+          "icone": "BarChart3",
+          "titre": "Visibilité financière complète",
+          "description": "Chaque poste est chiffré, justifié et traçable."
+        },
+        {
+          "icone": "TrendingUp",
+          "titre": "Analyse de rentabilité",
+          "description": "Identification des postes à risque et des marges réelles."
+        },
+        {
+          "icone": "FileText",
+          "titre": "Documents de marché",
+          "description": "DPGF, BPU, DQE conformes aux exigences contractuelles."
+        }
+      ],
+      "livrables": [
+        "Estimation préalable tous corps d'état",
+        "DPGF / BPU / DQE",
+        "Note de calcul des prix",
+        "Analyse de rentabilité",
+        "Rapport de révision des prix"
+      ],
+      "ordre_affichage": 10
+    },
+    {
+      "titre": "Dimensionnement voirie",
+      "categorie": "vrd",
+      "description_courte": "Dimensionnement de chaussées neuves selon la méthode SETRA/LCPC, quantitatifs VRD, terrassements, drainage et aménagements urbains.",
+      "description_longue": "Nous réalisons le dimensionnement de chaussées neuves et de renforcement selon la méthode rationnelle SETRA/LCPC (Guide Technique 1994). Nos calculs intègrent les données de trafic, la portance des sols (PF2, PF3, PF4), la durée de service et les classes de matériaux. Chaque étude est accompagnée d'une note technique justificative avec domaines de validité.",
+      "icone": "Hammer",
+      "couleur": "amber",
+      "points_forts": [
+        "Méthode SETRA/LCPC 1994",
+        "Structures de chaussée multicouches",
+        "Notes techniques détaillées",
+        "Quantitatifs VRD complets"
+      ],
+      "avantages": [
+        {
+          "icone": "Hammer",
+          "titre": "Méthode de référence",
+          "description": "Calculs conformes au Guide Technique SETRA/LCPC."
+        },
+        {
+          "icone": "Calculator",
+          "titre": "Quantitatifs complets",
+          "description": "Terrassements, VRD, drainage, bordures, signalisation."
+        },
+        {
+          "icone": "FileText",
+          "titre": "Note technique justificative",
+          "description": "Avec domaines de validité et alertes de dépassement."
+        }
+      ],
+      "livrables": [
+        "Note de calcul de dimensionnement",
+        "Structures de chaussée proposées",
+        "Quantitatifs VRD",
+        "Rapport technique avec alternatives"
+      ],
+      "ordre_affichage": 20
+    },
+    {
+      "titre": "Pré-dimensionnement bâtiment",
+      "categorie": "batiment",
+      "description_courte": "Pré-dimensionnement encadré pour fondations superficielles, dallages, maçonnerie et soubassements. Alertes de domaine de validité intégrées.",
+      "description_longue": "Notre module de pré-dimensionnement bâtiment est un outil sérieux de cohérence technique, conforme aux Eurocodes et DTU applicables. Il couvre les fondations superficielles, les dallages sur terre-plein, les soubassements et les éléments de maçonnerie. Chaque résultat est accompagné de sa condition de validité : si le cas sort du cadre simplifié, une alerte explicite vous en informe.",
+      "icone": "Building2",
+      "couleur": "green",
+      "points_forts": [
+        "Fondations superficielles",
+        "Dallages sur terre-plein",
+        "Maçonneries et soubassements",
+        "Alertes domaine de validité"
+      ],
+      "avantages": [
+        {
+          "icone": "Building2",
+          "titre": "Outil de cohérence technique",
+          "description": "Conforme Eurocodes et DTU applicables."
+        },
+        {
+          "icone": "Shield",
+          "titre": "Sécurité encadrée",
+          "description": "Alertes explicites si le cas sort du cadre simplifié."
+        },
+        {
+          "icone": "FileText",
+          "titre": "Notes assistées",
+          "description": "Documentation technique produite automatiquement."
+        }
+      ],
+      "livrables": [
+        "Note de pré-dimensionnement",
+        "Résultats par élément (fondations, dallage…)",
+        "Conditions de validité",
+        "Recommandations pour étude approfondie si nécessaire"
+      ],
+      "ordre_affichage": 30
+    },
+    {
+      "titre": "Métrés quantitatifs",
+      "categorie": "economie",
+      "description_courte": "Relevés de métrés manuels et semi-automatiques, quantitatifs par lot, traçabilité complète des sources, gestion des variantes.",
+      "description_longue": "Nos métrés quantitatifs sont réalisés par lot, par zone ou par phase, avec une traçabilité complète de chaque mesure. Nous gérons les variantes et les comparaisons de solutions techniques. La plateforme permet d'importer et d'analyser des fichiers DWG/DXF pour accélérer les relevés sur plans.",
+      "icone": "Calculator",
+      "couleur": "indigo",
+      "points_forts": [
+        "Métrés par lots et sous-lots",
+        "Traçabilité des sources",
+        "Variantes et comparaisons",
+        "Import DWG/DXF assisté"
+      ],
+      "avantages": [
+        {
+          "icone": "Calculator",
+          "titre": "Précision et traçabilité",
+          "description": "Chaque mesure est sourcée et vérifiable."
+        },
+        {
+          "icone": "Layers",
+          "titre": "Organisation par lot",
+          "description": "Quantitatifs structurés pour faciliter l'établissement des prix."
+        },
+        {
+          "icone": "FileText",
+          "titre": "Tableaux exportables",
+          "description": "Formats compatibles DPGF et tableurs."
+        }
+      ],
+      "livrables": [
+        "Tableaux de métrés par lot",
+        "Récapitulatif des quantités",
+        "Export compatible DPGF",
+        "Variantes quantifiées"
+      ],
+      "ordre_affichage": 40
+    },
+    {
+      "titre": "Assistance maîtrise d'œuvre",
+      "categorie": "assistance",
+      "description_courte": "Rédaction de pièces écrites (CCTP, CCAP, RC), assistance AVP/PRO/DCE, VISA, DET et AOR. Suivi financier et ordres de service.",
+      "description_longue": "Nous intervenons en assistance à maîtrise d'œuvre à toutes les phases d'une opération : AVP, PRO, DCE, ACT, VISA, DET, AOR. Nous rédigeons l'ensemble des pièces écrites (CCTP lot par lot, CCAP, RC, DPGF) et assurons le suivi économique du chantier (situations, attachements, ordres de service, pénalités, comptes rendus, PV de réception).",
+      "icone": "FileText",
+      "couleur": "purple",
+      "points_forts": [
+        "CCTP, CCAP, RC, DPGF",
+        "Situations et attachements",
+        "Comptes rendus de chantier",
+        "Suivi économique complet"
+      ],
+      "avantages": [
+        {
+          "icone": "FileText",
+          "titre": "Pièces écrites complètes",
+          "description": "CCTP lot par lot, CCAP, règlement de consultation."
+        },
+        {
+          "icone": "TrendingUp",
+          "titre": "Suivi économique",
+          "description": "Situations, révisions de prix, bilan à l'achèvement."
+        },
+        {
+          "icone": "Clock",
+          "titre": "Réactivité sur le terrain",
+          "description": "Ordres de service, comptes rendus, PV de réception."
+        }
+      ],
+      "livrables": [
+        "CCTP par lot",
+        "CCAP et règlement de consultation",
+        "DPGF / BPU / DQE",
+        "Ordres de service",
+        "Comptes rendus de chantier",
+        "PV de réception"
+      ],
+      "ordre_affichage": 50
+    },
+    {
+      "titre": "Appels d'offres",
+      "categorie": "documents",
+      "description_courte": "Analyse des dossiers de consultation, vérification de conformité, constitution du dossier de réponse, mémoire technique et offre financière.",
+      "description_longue": "Nous accompagnons les entreprises dans la réponse aux appels d'offres : analyse du DCE (CCTP, CCAP, RC, DPGF), vérification des pièces manquantes, préparation du calendrier de réponse, rédaction du mémoire technique et constitution de l'offre financière. Notre connaissance des marchés publics (CCAG Travaux 2021) garantit la conformité de votre dossier.",
+      "icone": "Megaphone",
+      "couleur": "rose",
+      "points_forts": [
+        "Analyse des pièces du DCE",
+        "Mémoire technique assisté",
+        "Vérification de conformité",
+        "Offre financière optimisée"
+      ],
+      "avantages": [
+        {
+          "icone": "Megaphone",
+          "titre": "Conformité garantie",
+          "description": "Vérification exhaustive des pièces requises."
+        },
+        {
+          "icone": "FileText",
+          "titre": "Mémoire technique",
+          "description": "Rédaction structurée et valorisation de vos compétences."
+        },
+        {
+          "icone": "TrendingUp",
+          "titre": "Offre compétitive",
+          "description": "Optimisation de l'offre financière par analyse des risques."
+        }
+      ],
+      "livrables": [
+        "Analyse du DCE",
+        "Mémoire technique",
+        "Offre financière (DPGF renseignée)",
+        "Liste de pièces à fournir",
+        "Planning de réponse"
+      ],
+      "ordre_affichage": 60
+    }
+  ],
+  "statistiques": [
+    {
+      "valeur": "15+",
+      "unite": "",
+      "libelle": "ans d'expertise en construction",
+      "ordre_affichage": 10
+    },
+    {
+      "valeur": "500+",
+      "unite": "",
+      "libelle": "projets chiffrés et suivis",
+      "ordre_affichage": 20
+    },
+    {
+      "valeur": "100%",
+      "unite": "",
+      "libelle": "données hébergées localement",
+      "ordre_affichage": 30
+    },
+    {
+      "valeur": "6",
+      "unite": "",
+      "libelle": "domaines d'expertise couverts",
+      "ordre_affichage": 40
+    }
+  ],
+  "valeurs": [
+    {
+      "icone": "Shield",
+      "titre": "Fiabilité",
+      "description": "Chaque calcul est documenté, tracé et vérifiable. Nos méthodes sont conformes aux guides techniques de référence.",
+      "ordre_affichage": 10
+    },
+    {
+      "icone": "BarChart3",
+      "titre": "Précision",
+      "description": "Moteurs de calcul paramétrables (SETRA/LCPC, Eurocodes, DTU). Aucune valeur figée sans justification.",
+      "ordre_affichage": 20
+    },
+    {
+      "icone": "Clock",
+      "titre": "Réactivité",
+      "description": "Plateforme numérique intégrée pour une production rapide, des mises à jour en temps réel et des échanges efficaces.",
+      "ordre_affichage": 30
+    },
+    {
+      "icone": "Users",
+      "titre": "Collaboration",
+      "description": "Espace partagé pour maîtres d'ouvrage, maîtres d'œuvre, entreprises et co-traitants.",
+      "ordre_affichage": 40
+    }
+  ],
+  "demarche": [
+    {
+      "numero": "01",
+      "titre": "Analyse du besoin",
+      "description": "Nous étudions votre projet, ses contraintes techniques, financières et contractuelles pour vous proposer une intervention précisément adaptée à votre situation.",
+      "ordre_affichage": 10
+    },
+    {
+      "numero": "02",
+      "titre": "Production rigoureuse",
+      "description": "Nos études sont réalisées avec des outils métier éprouvés, une traçabilité complète des calculs et une documentation exhaustive conforme aux référentiels techniques.",
+      "ordre_affichage": 20
+    },
+    {
+      "numero": "03",
+      "titre": "Accompagnement continu",
+      "description": "Nous vous accompagnons de l'avant-projet à la réception des travaux, avec des mises à jour en temps réel, des rapports clairs et une disponibilité terrain.",
+      "ordre_affichage": 30
+    }
+  ]
+}

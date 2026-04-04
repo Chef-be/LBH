@@ -1,0 +1,618 @@
+# ============================================================
+# compose.yaml — {{ nom_plateforme }}
+# Généré automatiquement par l'installateur
+# Date : {{ date_installation }}
+# Préfixe conteneurs : {{ prefixe_conteneurs }}
+# ============================================================
+# NE PAS MODIFIER MANUELLEMENT — Regénérer via l'installateur
+# ou modifier le gabarit : installateur/gabarits/compose/compose.yaml.j2
+# ============================================================
+
+name: {{ prefixe_conteneurs }}
+
+# ------------------------------------------------------------
+# VOLUMES PERSISTANTS
+# ------------------------------------------------------------
+volumes:
+  {{ prefixe_conteneurs }}-donnees-postgresql:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/postgresql
+
+  {{ prefixe_conteneurs }}-donnees-redis:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/redis
+
+  {{ prefixe_conteneurs }}-donnees-minio:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/minio
+
+  {{ prefixe_conteneurs }}-journaux:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/journaux
+
+  {{ prefixe_conteneurs }}-medias:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/medias
+
+  {{ prefixe_conteneurs }}-statiques:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/statiques
+
+  {{ prefixe_conteneurs }}-donnees-roundcube:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/roundcube/db
+
+  {{ prefixe_conteneurs }}-temp-roundcube:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: {{ racine_projet_hote }}/volumes/{{ prefixe_conteneurs }}/roundcube/temp
+
+# ------------------------------------------------------------
+# RÉSEAU DÉDIÉ
+# ------------------------------------------------------------
+networks:
+  {{ prefixe_conteneurs }}-reseau:
+    driver: bridge
+    name: {{ prefixe_conteneurs }}-reseau
+
+# ============================================================
+# SERVICES
+# ============================================================
+services:
+
+  # ----------------------------------------------------------
+  # PROXY — Point d'entrée Plesk (port {{ port_entree_plesk }})
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-nginx:
+    image: nginx:1.27-alpine
+    container_name: {{ prefixe_conteneurs }}-nginx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PORT_ENTREE_PLESK}:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - {{ prefixe_conteneurs }}-statiques:/var/www/statiques:ro
+      - {{ prefixe_conteneurs }}-medias:/var/www/medias:ro
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/nginx:rw
+    depends_on:
+      {{ prefixe_conteneurs }}-frontend:
+        condition: service_healthy
+      {{ prefixe_conteneurs }}-backend:
+        condition: service_healthy
+      {{ prefixe_conteneurs }}-roundcube:
+        condition: service_started
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    environment:
+      - TZ=${FUSEAU_HORAIRE}
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # INTERFACE — Next.js
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${ENVIRONNEMENT}
+    container_name: {{ prefixe_conteneurs }}-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    # Pas de montage source en production : le build standalone est embarqué dans l'image.
+    # HOSTNAME=0.0.0.0 nécessaire pour que le serveur Next.js écoute sur toutes les interfaces
+    # (sinon il se lie à l'IP du conteneur uniquement, rendant le healthcheck curl inaccessible).
+    environment:
+      - NODE_ENV=${ENVIRONNEMENT}
+      - TZ=${FUSEAU_HORAIRE}
+      - PREFIXE_CONTENEURS=${PREFIXE_CONTENEURS}
+      - NEXTAUTH_SECRET=${SECRET_NEXTAUTH}
+      - NEXTAUTH_URL=${URL_BASE}
+      - NEXT_PUBLIC_API_URL=/api
+      - NEXT_PUBLIC_NOM_PLATEFORME=${NOM_PLATEFORME}
+      - NEXT_PUBLIC_PREFIXE=${PREFIXE_CONTENEURS}
+      - URL_BACKEND=${URL_BACKEND}
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      {{ prefixe_conteneurs }}-backend:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/sante"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # WEBMAIL — Roundcube
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-roundcube:
+    image: roundcube/roundcubemail:latest
+    container_name: {{ prefixe_conteneurs }}-roundcube
+    restart: unless-stopped
+    expose:
+      - "80"
+    volumes:
+      - ./roundcube/config:/var/roundcube/config:ro
+      - {{ prefixe_conteneurs }}-donnees-roundcube:/var/roundcube/db:rw
+      - {{ prefixe_conteneurs }}-temp-roundcube:/tmp/roundcube-temp:rw
+    environment:
+      - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://${COURRIEL_HOTE_IMAP:-{{ courriel_hote_smtp }}}
+      - ROUNDCUBEMAIL_DEFAULT_PORT=${COURRIEL_PORT_IMAP:-993}
+      - ROUNDCUBEMAIL_SMTP_SERVER=ssl://${COURRIEL_HOTE_SMTP}
+      - ROUNDCUBEMAIL_SMTP_PORT=${COURRIEL_PORT_SMTP}
+      - ROUNDCUBEMAIL_DB_TYPE=sqlite
+      - ROUNDCUBEMAIL_REQUEST_PATH=/roundcube/
+      - ROUNDCUBEMAIL_PLUGINS=zipdownload
+      - ROUNDCUBEMAIL_SKIN=elastic
+      - ROUNDCUBEMAIL_UPLOAD_MAX_FILESIZE=25M
+      - ROUNDCUBEMAIL_USERNAME_DOMAIN=
+      - TZ=${FUSEAU_HORAIRE}
+      - ROUNDCUBE_DES_KEY=${SECRET_DJANGO}
+      - ROUNDCUBE_SENT_MBOX=${COURRIEL_DOSSIER_ENVOYES:-INBOX.Sent}
+      - ROUNDCUBE_DRAFTS_MBOX=${COURRIEL_DOSSIER_BROUILLONS:-INBOX.Drafts}
+      - ROUNDCUBE_JUNK_MBOX=${COURRIEL_DOSSIER_INDESIRABLES:-INBOX.Spam}
+      - ROUNDCUBE_TRASH_MBOX=${COURRIEL_DOSSIER_CORBEILLE:-INBOX.Trash}
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # CŒUR APPLICATIF — Django
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - ./backend:/app:rw
+      - ./calculs:/app/calculs:ro
+      - {{ prefixe_conteneurs }}-medias:/app/medias:rw
+      - {{ prefixe_conteneurs }}-statiques:/app/statiques:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/backend:rw
+      - ${CHEMIN_RESSOURCES_DOCUMENTAIRES}:/ressources:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host_proc:ro
+      - /:/hostfs:ro
+    environment:
+      - DJANGO_SETTINGS_MODULE=configuration.parametres.${ENVIRONNEMENT}
+      - SECRET_DJANGO=${SECRET_DJANGO}
+      - NOM_PLATEFORME=${NOM_PLATEFORME}
+      - PREFIXE_CONTENEURS=${PREFIXE_CONTENEURS}
+      - BDD_HOTE=${BDD_HOTE}
+      - BDD_PORT=${BDD_PORT}
+      - BDD_NOM=${BDD_NOM}
+      - BDD_UTILISATEUR=${BDD_UTILISATEUR}
+      - BDD_MOT_DE_PASSE=${BDD_MOT_DE_PASSE}
+      - REDIS_HOTE=${REDIS_HOTE}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_MOT_DE_PASSE=${REDIS_MOT_DE_PASSE}
+      - URL_REDIS=${URL_REDIS}
+      - CELERY_COURTIER=${CELERY_COURTIER}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
+      - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
+      - MINIO_SSL=${MINIO_SSL}
+      - COURRIEL_HOTE_SMTP=${COURRIEL_HOTE_SMTP}
+      - COURRIEL_PORT_SMTP=${COURRIEL_PORT_SMTP}
+      - COURRIEL_TLS=${COURRIEL_TLS}
+      - COURRIEL_SSL=${COURRIEL_SSL}
+      - COURRIEL_UTILISATEUR=${COURRIEL_UTILISATEUR}
+      - COURRIEL_MOT_DE_PASSE=${COURRIEL_MOT_DE_PASSE}
+      - TZ=${FUSEAU_HORAIRE}
+      - DEBUG=${DEBUG}
+      - URL_BASE=${URL_BASE}
+      - DOMAINES_AUTORISES=${DOMAINES_AUTORISES}
+      - SUPERVISION_HOST_PROC_PATH=/host_proc
+      - SUPERVISION_HOST_FS_PATH=/hostfs
+    depends_on:
+      {{ prefixe_conteneurs }}-postgresql:
+        condition: service_healthy
+      {{ prefixe_conteneurs }}-redis:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/sante/"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # SERVICES FASTAPI
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-services:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-services
+    restart: unless-stopped
+    expose:
+      - "8001"
+    volumes:
+      - ./services:/app:rw
+      - {{ prefixe_conteneurs }}-medias:/app/medias:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/services:rw
+    environment:
+      - TZ=${FUSEAU_HORAIRE}
+      - BDD_URL=${DATABASE_URL}
+      - REDIS_URL=${URL_REDIS}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
+      - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
+      - SECRET_API=${SECRET_DJANGO}
+    depends_on:
+      {{ prefixe_conteneurs }}-postgresql:
+        condition: service_healthy
+      {{ prefixe_conteneurs }}-redis:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/sante"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # BASE DE DONNÉES — PostgreSQL + PostGIS
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-postgresql:
+    image: postgis/postgis:16-3.4
+    container_name: {{ prefixe_conteneurs }}-postgresql
+    restart: unless-stopped
+    expose:
+      - "5432"
+    ports:
+      - "127.0.0.1:${PORT_POSTGRESQL_LOCAL}:5432"
+    volumes:
+      - {{ prefixe_conteneurs }}-donnees-postgresql:/var/lib/postgresql/data:rw
+      - ./scripts/installation/init-postgresql.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    environment:
+      - POSTGRES_DB=${BDD_NOM}
+      - POSTGRES_USER=${BDD_UTILISATEUR}
+      - POSTGRES_PASSWORD=${BDD_MOT_DE_PASSE}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - TZ=${FUSEAU_HORAIRE}
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BDD_UTILISATEUR} -d ${BDD_NOM}"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # CACHE ET FILE D'ATTENTE — Redis
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-redis:
+    image: redis:7-alpine
+    container_name: {{ prefixe_conteneurs }}-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - {{ prefixe_conteneurs }}-donnees-redis:/data:rw
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+    environment:
+      - TZ=${FUSEAU_HORAIRE}
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # STOCKAGE OBJET — MinIO
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-minio:
+    image: minio/minio:latest
+    container_name: {{ prefixe_conteneurs }}-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:${PORT_MINIO_API}:9000"
+      - "127.0.0.1:${PORT_MINIO_CONSOLE}:9001"
+    volumes:
+      - {{ prefixe_conteneurs }}-donnees-minio:/data:rw
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCES_CLE}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_CLE}
+      - TZ=${FUSEAU_HORAIRE}
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # TRAITEMENT ASYNCHRONE — Celery Worker
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-celery
+    restart: unless-stopped
+    command: celery -A configuration worker --loglevel=info --concurrency=4 -Q principale,documents,calculs,courriels
+    volumes:
+      - ./backend:/app:rw
+      - {{ prefixe_conteneurs }}-medias:/app/medias:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/celery:rw
+      - ${CHEMIN_RESSOURCES_DOCUMENTAIRES}:/ressources:ro
+    environment:
+      - DJANGO_SETTINGS_MODULE=configuration.parametres.${ENVIRONNEMENT}
+      - SECRET_DJANGO=${SECRET_DJANGO}
+      - CELERY_COURTIER=${CELERY_COURTIER}
+      - CELERY_RESULTATS=${CELERY_RESULTATS}
+      - URL_REDIS=${URL_REDIS}
+      - REDIS_HOTE=${REDIS_HOTE}
+      - REDIS_PORT=${REDIS_PORT}
+      - BDD_HOTE=${BDD_HOTE}
+      - BDD_PORT=${BDD_PORT}
+      - BDD_NOM=${BDD_NOM}
+      - BDD_UTILISATEUR=${BDD_UTILISATEUR}
+      - BDD_MOT_DE_PASSE=${BDD_MOT_DE_PASSE}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
+      - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
+      - TZ=${FUSEAU_HORAIRE}
+    depends_on:
+      {{ prefixe_conteneurs }}-redis:
+        condition: service_healthy
+      {{ prefixe_conteneurs }}-postgresql:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    # Surcharge du healthcheck de l'image backend (qui teste curl :8000 — absent sur un worker Celery)
+    healthcheck:
+      test: ["CMD", "celery", "-A", "configuration", "inspect", "ping", "--timeout=10"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # ORDONNANCEUR — Celery Beat
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-celery-beat
+    restart: unless-stopped
+    command: celery -A configuration beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./backend:/app:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/celery-beat:rw
+    environment:
+      - DJANGO_SETTINGS_MODULE=configuration.parametres.${ENVIRONNEMENT}
+      - SECRET_DJANGO=${SECRET_DJANGO}
+      - CELERY_COURTIER=${CELERY_COURTIER}
+      - URL_REDIS=${URL_REDIS}
+      - REDIS_HOTE=${REDIS_HOTE}
+      - REDIS_PORT=${REDIS_PORT}
+      - BDD_HOTE=${BDD_HOTE}
+      - BDD_PORT=${BDD_PORT}
+      - BDD_NOM=${BDD_NOM}
+      - BDD_UTILISATEUR=${BDD_UTILISATEUR}
+      - BDD_MOT_DE_PASSE=${BDD_MOT_DE_PASSE}
+      - TZ=${FUSEAU_HORAIRE}
+    depends_on:
+      {{ prefixe_conteneurs }}-redis:
+        condition: service_healthy
+      {{ prefixe_conteneurs }}-postgresql:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    # Surcharge du healthcheck de l'image backend (beat n'expose pas de serveur HTTP)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import celery; print('ok')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # OCR — Tesseract 5 + Python
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-ocr:
+    build:
+      context: ./services/ocr
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-ocr
+    restart: unless-stopped
+    expose:
+      - "8010"
+    volumes:
+      - ./services/ocr:/app:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/ocr:rw
+    environment:
+      - TZ=${FUSEAU_HORAIRE}
+      - OCR_LANGUES=${OCR_LANGUES}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
+      - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
+    depends_on:
+      {{ prefixe_conteneurs }}-minio:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/sante"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # ANALYSE PDF
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-analyse-pdf:
+    build:
+      context: ./services/analyse-pdf
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-analyse-pdf
+    restart: unless-stopped
+    expose:
+      - "8011"
+    volumes:
+      - ./services/analyse-pdf:/app:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/analyse-pdf:rw
+    environment:
+      - TZ=${FUSEAU_HORAIRE}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
+      - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
+    depends_on:
+      {{ prefixe_conteneurs }}-minio:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/sante"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ----------------------------------------------------------
+  # ANALYSE CAO — DXF/DWG
+  # ----------------------------------------------------------
+  {{ prefixe_conteneurs }}-analyse-cao:
+    build:
+      context: ./services/analyse-cao
+      dockerfile: Dockerfile
+    container_name: {{ prefixe_conteneurs }}-analyse-cao
+    restart: unless-stopped
+    expose:
+      - "8012"
+    volumes:
+      - ./services/analyse-cao:/app:rw
+      - {{ prefixe_conteneurs }}-journaux:/var/log/app/analyse-cao:rw
+    environment:
+      - TZ=${FUSEAU_HORAIRE}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
+      - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
+    depends_on:
+      {{ prefixe_conteneurs }}-minio:
+        condition: service_healthy
+    networks:
+      - {{ prefixe_conteneurs }}-reseau
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/sante"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

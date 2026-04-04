@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 3 %}
+{% block titre %}Base de données{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Base de données et services</h1>
+    <p class="text-gray-500">Configurez les accès à la base de données PostgreSQL et au stockage MinIO. Des mots de passe sécurisés ont été pré-générés.</p>
+  </div>
+
+  <form method="POST" class="space-y-5">
+
+    <div class="carte space-y-5">
+      <h2 class="font-semibold text-gray-800">Base de données PostgreSQL</h2>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Nom de la base</label>
+          <input type="text" name="bdd_nom" value="{{ config.get('bdd_nom', bdd_nom_defaut) }}" required
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-primaire-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Utilisateur</label>
+          <input type="text" name="bdd_utilisateur" value="{{ config.get('bdd_utilisateur', bdd_utilisateur_defaut) }}" required
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-primaire-500 outline-none">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe base de données <span class="text-danger-500">*</span></label>
+        <div class="flex gap-2">
+          <input type="text" name="bdd_mot_de_passe" id="bdd_mdp" value="{{ bdd_mdp_defaut }}" required
+            class="flex-1 border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-primaire-500 outline-none">
+          <button type="button" onclick="regenerer('bdd_mdp')" class="px-3 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 text-sm">
+            🔄 Régénérer
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="carte space-y-5">
+      <h2 class="font-semibold text-gray-800">Cache Redis</h2>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe Redis (laisser vide = sans authentification)</label>
+        <input type="text" name="redis_mot_de_passe" value=""
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-primaire-500 outline-none"
+          placeholder="Vide pour sans mot de passe (recommandé pour réseau Docker isolé)">
+      </div>
+    </div>
+
+    <div class="carte space-y-5">
+      <h2 class="font-semibold text-gray-800">Stockage objet MinIO</h2>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Clé d'accès MinIO</label>
+          <div class="flex gap-2">
+            <input type="text" name="minio_acces_cle" id="minio_cle" value="{{ minio_cle_defaut }}" required
+              class="flex-1 border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-primaire-500 outline-none">
+            <button type="button" onclick="regenerer('minio_cle')" class="px-3 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 text-sm">🔄</button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Clé secrète MinIO</label>
+          <div class="flex gap-2">
+            <input type="text" name="minio_secret_cle" id="minio_secret" value="{{ minio_secret_defaut }}" required
+              class="flex-1 border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-primaire-500 outline-none">
+            <button type="button" onclick="regenerer('minio_secret')" class="px-3 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 text-sm">🔄</button>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500">⚠️ Notez ces identifiants. Ils seront utilisés pour accéder à la console MinIO.</p>
+    </div>
+
+    <div class="flex justify-between">
+      <a href="{{ url_for('etape2_ports') }}" class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">← Retour</a>
+      <button type="submit" class="px-6 py-2.5 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold">Continuer →</button>
+    </div>
+  </form>
+</div>
+
+<script>
+async function regenerer(id) {
+  const rep = await fetch('/api/generer-secret');
+  const data = await rep.json();
+  document.getElementById(id).value = data.secret.substring(0, 32);
+}
+</script>
+{% endblock %}

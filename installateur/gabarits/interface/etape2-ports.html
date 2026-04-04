@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 2 %}
+{% block titre %}Configuration des ports{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Configuration des ports réseau</h1>
+    <p class="text-gray-500">
+      Les ports suggérés ci-dessous sont <strong>libres et sans conflit</strong> sur votre serveur.
+      L'installateur vérifie automatiquement les ports utilisés par Plesk, les services système
+      et les conteneurs Docker existants.
+    </p>
+  </div>
+
+  <form method="POST" id="formulaire-ports" class="space-y-5">
+    <div class="carte space-y-5">
+      <h2 class="font-semibold text-gray-800">
+        Ports d'écoute — préfixe conteneurs : <code class="text-primaire-700">{{ prefixe }}</code>
+      </h2>
+
+      {% set champs = [
+        ("port_entree_plesk",      "Port d'entrée Plesk (proxy → Nginx)",          "Port exposé sur 127.0.0.1 pour le proxy inverse Plesk. Plesk redirige le trafic HTTP/HTTPS vers ce port.",         suggestions.entree_plesk),
+        ("port_minio_api",         "Port API MinIO (stockage objet)",               "API S3-compatible — accès restreint à 127.0.0.1, jamais exposé publiquement.",                                       suggestions.minio_api),
+        ("port_minio_console",     "Port console MinIO",                            "Interface d'administration MinIO — accès restreint à 127.0.0.1.",                                                    suggestions.minio_console),
+        ("port_postgresql_local",  "Port PostgreSQL local",                         "Accès direct à la base depuis pgAdmin/DBeaver en local. Optionnel — peut être désactivé en production.",              suggestions.postgresql_local),
+      ] %}
+
+      {% for nom, libelle, aide, suggestion in champs %}
+      <div class="flex items-start gap-4">
+        <div class="flex-1">
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ libelle }}</label>
+          <div class="flex flex-wrap gap-3 items-center">
+            <input type="number" name="{{ nom }}" value="{{ suggestion }}" min="1024" max="65535"
+              id="{{ nom }}"
+              class="w-36 border border-gray-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-primaire-500 outline-none"
+              oninput="verifierPort(this)"
+            >
+            <!-- Indicateur d'état -->
+            <span id="statut-{{ nom }}" class="flex items-center gap-1.5 text-sm text-gray-400">
+              <span class="indicateur-icone">…</span>
+              <span class="indicateur-texte">Vérification…</span>
+            </span>
+          </div>
+          <!-- Message d'avertissement Plesk -->
+          <div id="avert-{{ nom }}" class="hidden mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"></div>
+          <p class="text-xs text-gray-500 mt-1">{{ aide }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Légende -->
+    <div class="carte bg-gray-50 border-gray-200 flex flex-wrap gap-4 text-sm text-gray-600">
+      <span class="flex items-center gap-1.5">✅ <strong>Libre et sûr</strong> — recommandé</span>
+      <span class="flex items-center gap-1.5">⚠️ <strong>Risque de conflit</strong> — port réservé Plesk / service connu</span>
+      <span class="flex items-center gap-1.5">❌ <strong>Occupé</strong> — déjà utilisé, choisir un autre</span>
+    </div>
+
+    <!-- Info Plesk -->
+    <div class="carte bg-blue-50 border-blue-200">
+      <div class="text-sm text-blue-800">
+        <strong>Configuration Plesk requise après installation :</strong>
+        Dans Plesk → Domaines → votre domaine → Proxy inverse, ajoutez une règle
+        <code class="bg-blue-100 px-1 rounded">http://127.0.0.1:[PORT_ENTRÉE]</code>.
+        Les ports MinIO, PostgreSQL et services internes ne sont jamais exposés directement.
+      </div>
+    </div>
+
+    <!-- Blocage si ports invalides -->
+    <div id="alerte-bloquante" class="hidden carte bg-red-50 border-red-300 text-red-800 text-sm">
+      ⛔ Un ou plusieurs ports sont occupés ou en conflit. Corrigez-les avant de continuer.
+    </div>
+
+    <div class="flex justify-between">
+      <a href="{{ url_for('etape1_identite') }}" class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">
+        ← Retour
+      </a>
+      <button type="submit" id="btn-continuer"
+        class="px-6 py-2.5 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+        Continuer →
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Vérification des ports — Plateforme LBH — Étape 2
+// ---------------------------------------------------------------------------
+
+const etatsPort = {};  // { nomChamp: "ok" | "occupe" | "avertissement" | "invalide" }
+
+async function verifierPort(input) {
+  const port = parseInt(input.value);
+  const nom = input.id;
+  const divStatut = document.getElementById('statut-' + nom);
+  const divAvert = document.getElementById('avert-' + nom);
+  const icone = divStatut.querySelector('.indicateur-icone');
+  const texte = divStatut.querySelector('.indicateur-texte');
+
+  // Validation de base
+  if (!port || port < 1024 || port > 65535) {
+    icone.textContent = '❌';
+    texte.textContent = 'Port invalide (1024–65535)';
+    divStatut.className = 'flex items-center gap-1.5 text-sm text-red-600 font-medium';
+    divAvert.classList.add('hidden');
+    etatsPort[nom] = 'invalide';
+    mettreAjourBouton();
+    return;
+  }
+
+  // Vérification en cours
+  icone.textContent = '⏳';
+  texte.textContent = 'Vérification…';
+  divStatut.className = 'flex items-center gap-1.5 text-sm text-gray-400';
+  etatsPort[nom] = 'attente';
+
+  try {
+    const rep = await fetch(`/api/verifier-port/${port}`);
+    const data = await rep.json();
+
+    if (!data.libre) {
+      // Port occupé — bloquant
+      icone.textContent = '❌';
+      texte.textContent = 'Occupé — choisir un autre port';
+      divStatut.className = 'flex items-center gap-1.5 text-sm text-red-600 font-medium';
+      divAvert.classList.add('hidden');
+      etatsPort[nom] = 'occupe';
+
+    } else if (data.avertissement) {
+      // Port libre mais réservé Plesk/système — avertissement non bloquant
+      icone.textContent = '⚠️';
+      texte.textContent = 'Risque de conflit';
+      divStatut.className = 'flex items-center gap-1.5 text-sm text-amber-600 font-medium';
+      divAvert.textContent = '⚠️ ' + data.avertissement + ' — ce port est connu comme réservé par Plesk ou un service système. Préférez utiliser le port suggéré.';
+      divAvert.classList.remove('hidden');
+      etatsPort[nom] = 'avertissement';
+
+    } else {
+      // Libre et sûr
+      icone.textContent = '✅';
+      texte.textContent = 'Libre et disponible';
+      divStatut.className = 'flex items-center gap-1.5 text-sm text-green-600 font-medium';
+      divAvert.classList.add('hidden');
+      etatsPort[nom] = 'ok';
+    }
+  } catch (e) {
+    icone.textContent = '?';
+    texte.textContent = 'Impossible de vérifier';
+    divStatut.className = 'flex items-center gap-1.5 text-sm text-gray-400';
+    etatsPort[nom] = 'ok';  // Laisser passer en cas d'erreur réseau
+  }
+
+  mettreAjourBouton();
+}
+
+function mettreAjourBouton() {
+  const inputs = document.querySelectorAll('input[type=number]');
+  const tousVerifies = inputs.length > 0 && [...inputs].every(i => etatsPort[i.id] !== undefined && etatsPort[i.id] !== 'attente');
+  const aucunBloquant = Object.values(etatsPort).every(e => e !== 'occupe' && e !== 'invalide');
+
+  const btn = document.getElementById('btn-continuer');
+  const alerte = document.getElementById('alerte-bloquante');
+
+  if (tousVerifies && !aucunBloquant) {
+    btn.disabled = true;
+    alerte.classList.remove('hidden');
+  } else {
+    btn.disabled = false;
+    alerte.classList.add('hidden');
+  }
+}
+
+// Vérification automatique au chargement de la page
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('input[type=number]').forEach(input => verifierPort(input));
+});
+
+// Blocage de la soumission si ports invalides
+document.getElementById('formulaire-ports').addEventListener('submit', async (e) => {
+  const bloquants = Object.values(etatsPort).filter(e => e === 'occupe' || e === 'invalide');
+  if (bloquants.length > 0) {
+    e.preventDefault();
+    document.getElementById('alerte-bloquante').classList.remove('hidden');
+  }
+});
+</script>
+{% endblock %}

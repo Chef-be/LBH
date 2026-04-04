@@ -1,0 +1,175 @@
+"""Contenu éditorial par défaut de la page d'accueil du site public."""
+
+from copy import deepcopy
+
+
+CONTENU_ACCUEIL_PAR_DEFAUT = {
+    "metadata": {
+        "titre_par_defaut": "Accueil",
+        "description_par_defaut": (
+            "Économie de la construction, dimensionnement voirie, métrés, "
+            "pièces écrites et accompagnement maîtrise d'œuvre."
+        ),
+    },
+    "hero": {
+        "sous_titre_secours": (
+            "De l'avant-projet à la réception des travaux : estimations, "
+            "dimensionnements, métrés, pièces écrites et suivi d'exécution "
+            "dans une plateforme intégrée."
+        ),
+        "indicateurs": [
+            "Économie de la construction",
+            "Dimensionnement VRD",
+            "Bâtiment",
+            "Assistance MOE",
+        ],
+    },
+    "sections": {
+        "prestations_badge": "Nos domaines d'intervention",
+        "prestations_titre": "Nos expertises",
+        "prestations_description": (
+            "Des études rigoureuses, documentées et exploitables à chaque "
+            "étape de votre projet."
+        ),
+        "prestations_bouton": "Voir toutes nos prestations en détail",
+        "valeurs_badge": "Pourquoi nous faire confiance",
+        "valeurs_titre": "Notre engagement qualité",
+        "secteurs_badge": "À qui nous nous adressons",
+        "secteurs_titre": "Nos clients et partenaires",
+        "secteurs_description": (
+            "Nous intervenons auprès des acteurs de la construction, de la "
+            "conception à la réception."
+        ),
+        "pilotage_badge": "Méthodes et garanties",
+        "pilotage_titre": "Un pilotage d'opération structuré",
+        "pilotage_description": (
+            "Notre organisation s'appuie sur les référentiels métier lus dans "
+            "la bibliothèque documentaire du bureau : étude de prix, pièces "
+            "écrites, conduite d'opération, qualité chantier et gestion "
+            "contractuelle."
+        ),
+        "demarche_badge": "Comment nous travaillons",
+        "demarche_titre": "Notre démarche",
+        "demarche_description": (
+            "Une méthode éprouvée pour des études fiables, documentées et "
+            "exploitables."
+        ),
+        "demarche_bouton": "Prendre contact",
+        "realisations_badge": "Nos travaux",
+        "realisations_titre": "Réalisations récentes",
+        "realisations_bouton": "Voir toutes nos références",
+        "contact_badge": "Parlons de votre projet",
+        "contact_titre": "Nous contacter",
+        "contact_description": (
+            "Présentez votre besoin, votre contexte et vos objectifs. Nous "
+            "reviendrons vers vous pour qualifier votre demande."
+        ),
+        "contact_courriel": "Courriel",
+        "contact_telephone": "Téléphone",
+        "contact_collaborateur_question": "Vous êtes un collaborateur ?",
+        "contact_collaborateur_bouton": "Espace de travail",
+        "contact_formulaire_titre": "Votre demande",
+    },
+    "secteurs": [
+        {
+            "titre": "Maîtres d'ouvrage",
+            "icone": "Building2",
+            "description": (
+                "Collectivités, promoteurs, aménageurs et bailleurs sociaux : "
+                "accompagnement au chiffrage, au suivi budgétaire et au "
+                "contrôle des coûts."
+            ),
+            "tags": [
+                "Estimation préalable",
+                "Contrôle des coûts",
+                "Bilan d'opération",
+            ],
+        },
+        {
+            "titre": "Maîtres d'œuvre",
+            "icone": "FileText",
+            "description": (
+                "Architectes et bureaux d'études techniques : appui en "
+                "économie de la construction pour les phases AVP, PRO, DCE, "
+                "VISA et DET."
+            ),
+            "tags": [
+                "DPGF / DQE / BPU",
+                "Pièces écrites",
+                "Suivi financier",
+            ],
+        },
+        {
+            "titre": "Entreprises BTP",
+            "icone": "Hammer",
+            "description": (
+                "Entreprises générales, spécialisées et artisans : "
+                "chiffrage, analyse de rentabilité et structuration des "
+                "réponses aux appels d'offres."
+            ),
+            "tags": [
+                "Chiffrage",
+                "Appels d'offres",
+                "Analyse de rentabilité",
+            ],
+        },
+    ],
+    "pilotage": [
+        {
+            "titre": "Étude de prix analytique",
+            "icone": "Calculator",
+            "description": (
+                "Décomposition du déboursé sec, frais de chantier, frais "
+                "généraux, aléas et marge cible pour fiabiliser les offres et "
+                "variantes."
+            ),
+        },
+        {
+            "titre": "Pièces écrites et CCTP",
+            "icone": "FileText",
+            "description": (
+                "Rédaction structurée par lot, consistance des ouvrages, "
+                "points particuliers et conformité aux DTU, NF P et guides de "
+                "référence."
+            ),
+        },
+        {
+            "titre": "MOE travaux et réception",
+            "icone": "BarChart3",
+            "description": (
+                "Visa, préparation de chantier, facturation, travaux "
+                "modificatifs, gestion des délais, réception et remise "
+                "d'ouvrage."
+            ),
+        },
+        {
+            "titre": "OPC et coordination",
+            "icone": "Clock",
+            "description": (
+                "Ordonnancement, pilotage des interfaces, check-lists, retours "
+                "d'expérience et maîtrise des délais en marchés à lots séparés."
+            ),
+        },
+        {
+            "titre": "Qualité chantier",
+            "icone": "Shield",
+            "description": (
+                "Plans d'assurance qualité, formalisation des contrôles, "
+                "traçabilité de l'exécution et vérification de conformité."
+            ),
+        },
+        {
+            "titre": "Cadre contractuel",
+            "icone": "TrendingUp",
+            "description": (
+                "Lecture du marché, négociation, avenants, règlement définitif "
+                "des comptes et garanties post-réception."
+            ),
+        },
+    ],
+}
+
+
+def contenu_accueil_par_defaut() -> dict:
+    """Retourne une copie indépendante du contenu d'accueil par défaut."""
+    return deepcopy(CONTENU_ACCUEIL_PAR_DEFAUT)

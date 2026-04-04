@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 6 %}
+{% block titre %}Récapitulatif{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Récapitulatif avant installation</h1>
+    <p class="text-gray-500">Vérifiez la configuration avant de lancer l'installation. Cette opération peut prendre plusieurs minutes.</p>
+  </div>
+
+  <div class="grid grid-cols-2 gap-5">
+
+    <div class="carte space-y-3">
+      <h2 class="font-semibold text-gray-800 border-b pb-2">Identité</h2>
+      <div><span class="text-gray-500 text-sm">Nom :</span> <span class="font-medium">{{ config.nom_plateforme }}</span></div>
+      <div><span class="text-gray-500 text-sm">Préfixe :</span> <code class="bg-gray-100 px-1.5 py-0.5 rounded text-primaire-700 font-mono">{{ config.prefixe_conteneurs }}</code></div>
+      <div><span class="text-gray-500 text-sm">URL :</span> <span class="text-primaire-600">{{ config.url_base }}</span></div>
+      <div><span class="text-gray-500 text-sm">Fuseau :</span> {{ config.fuseau_horaire }}</div>
+      <div><span class="text-gray-500 text-sm">Environnement :</span> <span class="capitalize">{{ config.environnement }}</span></div>
+    </div>
+
+    <div class="carte space-y-3">
+      <h2 class="font-semibold text-gray-800 border-b pb-2">Ports</h2>
+      <div><span class="text-gray-500 text-sm">Entrée Plesk :</span> <code class="font-mono">127.0.0.1:{{ config.port_entree_plesk }}</code></div>
+      <div><span class="text-gray-500 text-sm">MinIO API :</span> <code class="font-mono">127.0.0.1:{{ config.port_minio_api }}</code></div>
+      <div><span class="text-gray-500 text-sm">MinIO Console :</span> <code class="font-mono">127.0.0.1:{{ config.port_minio_console }}</code></div>
+      <div><span class="text-gray-500 text-sm">PostgreSQL local :</span> <code class="font-mono">127.0.0.1:{{ config.port_postgresql_local }}</code></div>
+    </div>
+
+    <div class="carte space-y-3">
+      <h2 class="font-semibold text-gray-800 border-b pb-2">Base de données</h2>
+      <div><span class="text-gray-500 text-sm">Base :</span> <code class="font-mono">{{ config.bdd_nom }}</code></div>
+      <div><span class="text-gray-500 text-sm">Utilisateur :</span> <code class="font-mono">{{ config.bdd_utilisateur }}</code></div>
+      <div><span class="text-gray-500 text-sm">Mot de passe :</span> <span class="text-gray-400">••••••••</span></div>
+    </div>
+
+    <div class="carte space-y-3">
+      <h2 class="font-semibold text-gray-800 border-b pb-2">Administrateur</h2>
+      <div><span class="text-gray-500 text-sm">Nom :</span> {{ config.admin_prenom }} {{ config.admin_nom }}</div>
+      <div><span class="text-gray-500 text-sm">Courriel :</span> {{ config.admin_courriel }}</div>
+      <div><span class="text-gray-500 text-sm">Mot de passe :</span> <span class="text-gray-400">••••••••</span></div>
+    </div>
+
+  </div>
+
+  <div class="carte bg-blue-50 border-blue-200">
+    <div class="font-semibold text-blue-800 mb-2">Ce qui va se passer :</div>
+    <ol class="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+      <li>Génération du fichier <code>.env</code> et du <code>compose.yaml</code> personnalisés</li>
+      <li>Création des répertoires de volumes Docker</li>
+      <li>Construction des images Docker (peut prendre 5 à 15 minutes)</li>
+      <li>Démarrage de tous les conteneurs</li>
+      <li>Application des migrations de base de données</li>
+      <li>Création du compte super-administrateur</li>
+      <li>Verrouillage de l'installateur</li>
+    </ol>
+  </div>
+
+  <div class="flex justify-between">
+    <a href="{{ url_for('etape5_administrateur') }}" class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">← Modifier</a>
+    <form method="POST">
+      <button type="submit"
+        class="px-8 py-3 bg-succes-600 hover:bg-succes-700 text-white rounded-lg font-bold text-lg transition-colors shadow-md">
+        🚀 Lancer l'installation
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

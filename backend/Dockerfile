@@ -1,0 +1,75 @@
+# ============================================================
+# Dockerfile — Cœur applicatif Django
+# Plateforme BEE — Bureau d'Études Économiste
+# ============================================================
+
+FROM python:3.11-slim-bookworm AS base
+
+# Métadonnées
+LABEL maintainer="Plateforme BEE"
+LABEL description="Cœur applicatif Django — Bureau d'Études Économiste"
+
+# Variables d'environnement Python
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Répertoire de travail
+WORKDIR /app
+
+# Installation des dépendances système
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Compilation Python
+    build-essential \
+    # PostgreSQL
+    libpq-dev \
+    # Traitement de fichiers
+    libffi-dev \
+    libxml2-dev \
+    libxslt-dev \
+    libcairo2 \
+    libpango-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    shared-mime-info \
+    # LibreOffice pour la conversion DOCX → PDF
+    libreoffice \
+    libreoffice-writer \
+    # GDAL / GEOS / PROJ pour Django GeoDjango + PostGIS
+    libgdal-dev \
+    libgeos-dev \
+    libproj-dev \
+    # Outils réseau
+    curl \
+    # Nettoyage
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installation des dépendances Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copie du code applicatif
+COPY . .
+
+# Création de l'utilisateur non-root pour la production
+RUN groupadd -r bee && useradd -r -g bee bee \
+    && mkdir -p /app/statiques /app/medias /var/log/bee/backend \
+    && chown -R bee:bee /app /var/log/bee
+
+# Port exposé (interne uniquement — via bee-nginx)
+EXPOSE 8000
+
+# Script de démarrage
+COPY scripts/demarrage.sh /usr/local/bin/demarrage.sh
+RUN chmod +x /usr/local/bin/demarrage.sh
+
+# Vérification de santé
+HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=5 \
+    CMD curl -f http://localhost:8000/api/sante/ || exit 1
+
+# En production, passer à l'utilisateur bee
+# USER bee
+
+CMD ["/usr/local/bin/demarrage.sh"]

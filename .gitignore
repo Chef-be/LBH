@@ -1,0 +1,115 @@
+# ============================================================
+# PLATEFORME BEE — Fichiers exclus du versionnement
+# ============================================================
+
+# Secrets et configuration locale
+.env
+.env.local
+.env.production
+.env.*.local
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Volumes Docker (données persistantes — ne pas versionner)
+volumes/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+backend/statiques/
+backend/medias/
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+.nuxt/
+dist/
+build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.yarn/
+.yarn-integrity
+.pnpm-debug.log*
+
+# Éditeurs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Journaux
+*.log
+logs/
+journaux/
+
+# Fichiers temporaires
+tmp/
+temp/
+.tmp/
+
+# Tests
+.coverage
+htmlcov/
+.pytest_cache/
+coverage/
+
+# MinIO (ne pas versionner les données objet)
+minio-data/
+
+# Certificats SSL
+ssl/
+certs/
+
+# Sauvegardes
+*.sql.gz
+*.dump
+*.bak
+sauvegardes/
+backups/
+
+# Fichiers générés par l'installateur
+installateur/.installation-terminee
+
+# Documentation générée automatiquement
+docs/api/generee/

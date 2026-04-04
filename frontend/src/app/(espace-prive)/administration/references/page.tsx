@@ -1,0 +1,490 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { api, ErreurApi, extraireListeResultats, requeteApiAvecProgression } from "@/crochets/useApi";
+import { EditeurTexteRiche } from "@/composants/ui/EditeurTexteRiche";
+import { ActionsRapidesAdaptatives } from "@/composants/ui/ActionsRapides";
+import {
+  AlertCircle,
+  CheckCircle,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
+import {
+  AlerteAdmin,
+  CarteSectionAdmin,
+  EntetePageAdmin,
+} from "@/composants/administration/Presentation";
+
+interface Realisation {
+  id: string;
+  titre: string;
+  description: string;
+  client: string;
+  lieu: string;
+  annee: number | null;
+  montant_travaux_ht: number | null;
+  image_principale?: string | null;
+  tags: string[];
+  est_publie: boolean;
+  ordre_affichage: number;
+}
+
+const REALISATION_VIDE = {
+  titre: "",
+  description: "",
+  client: "",
+  lieu: "",
+  annee: "",
+  montant_travaux_ht: "",
+  tagsTexte: "",
+  est_publie: true,
+  ordre_affichage: 100,
+};
+
+function ModalReference({
+  initial,
+  onEnregistrer,
+  onFermer,
+}: {
+  initial: Realisation | null;
+  onEnregistrer: (valeur: FormData | Record<string, unknown>) => Promise<void>;
+  onFermer: () => void;
+}) {
+  const [form, setForm] = useState({
+    titre: initial?.titre ?? REALISATION_VIDE.titre,
+    description: initial?.description ?? REALISATION_VIDE.description,
+    client: initial?.client ?? REALISATION_VIDE.client,
+    lieu: initial?.lieu ?? REALISATION_VIDE.lieu,
+    annee: initial?.annee ? String(initial.annee) : REALISATION_VIDE.annee,
+    montant_travaux_ht:
+      typeof initial?.montant_travaux_ht === "number"
+        ? String(initial.montant_travaux_ht)
+        : REALISATION_VIDE.montant_travaux_ht,
+    tagsTexte: initial?.tags?.join(", ") ?? REALISATION_VIDE.tagsTexte,
+    est_publie: initial?.est_publie ?? REALISATION_VIDE.est_publie,
+    ordre_affichage: initial?.ordre_affichage ?? REALISATION_VIDE.ordre_affichage,
+  });
+  const [imageFichier, setImageFichier] = useState<File | null>(null);
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const apercuImage = useMemo(() => {
+    if (imageFichier) return URL.createObjectURL(imageFichier);
+    return initial?.image_principale ?? null;
+  }, [imageFichier, initial?.image_principale]);
+
+  const maj = (champ: keyof typeof form, valeur: string | boolean | number) =>
+    setForm((precedent) => ({ ...precedent, [champ]: valeur }));
+
+  const soumettre = async () => {
+    if (!form.titre.trim()) {
+      setErreur("Le titre est requis.");
+      return;
+    }
+
+    const tags = form.tagsTexte
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    const chargeUtile = {
+      titre: form.titre.trim(),
+      description: form.description,
+      client: form.client.trim(),
+      lieu: form.lieu.trim(),
+      annee: form.annee ? Number(form.annee) : null,
+      montant_travaux_ht: form.montant_travaux_ht ? Number(form.montant_travaux_ht) : null,
+      tags,
+      est_publie: form.est_publie,
+      ordre_affichage: Number(form.ordre_affichage) || 100,
+    };
+
+    setChargement(true);
+    setErreur(null);
+    try {
+      if (imageFichier) {
+        const formData = new FormData();
+        Object.entries(chargeUtile).forEach(([cle, valeur]) => {
+          if (Array.isArray(valeur)) {
+            formData.append(cle, JSON.stringify(valeur));
+            return;
+          }
+          formData.append(cle, valeur === null ? "" : String(valeur));
+        });
+        formData.append("image_principale", imageFichier);
+        await onEnregistrer(formData);
+      } else {
+        await onEnregistrer(chargeUtile);
+      }
+      onFermer();
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Erreur lors de l'enregistrement.");
+    } finally {
+      setChargement(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="font-semibold text-slate-800">
+            {initial ? "Modifier la référence" : "Nouvelle référence"}
+          </h2>
+          <button onClick={onFermer} className="text-slate-400 hover:text-slate-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-5 p-6">
+          {erreur && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {erreur}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div>
+              <label className="libelle-champ">
+                Titre <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                className="champ-saisie w-full"
+                value={form.titre}
+                onChange={(event) => maj("titre", event.target.value)}
+                placeholder="Réhabilitation d'un équipement public"
+              />
+            </div>
+            <div>
+              <label className="libelle-champ">Client</label>
+              <input
+                type="text"
+                className="champ-saisie w-full"
+                value={form.client}
+                onChange={(event) => maj("client", event.target.value)}
+                placeholder="Commune, promoteur, bailleur…"
+              />
+            </div>
+            <div>
+              <label className="libelle-champ">Lieu</label>
+              <input
+                type="text"
+                className="champ-saisie w-full"
+                value={form.lieu}
+                onChange={(event) => maj("lieu", event.target.value)}
+                placeholder="Ville, région, zone d'activité…"
+              />
+            </div>
+            <div>
+              <label className="libelle-champ">Mots-clés</label>
+              <input
+                type="text"
+                className="champ-saisie w-full"
+                value={form.tagsTexte}
+                onChange={(event) => maj("tagsTexte", event.target.value)}
+                placeholder="VRD, CCTP, DCE, métrés"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Séparez les mots-clés par des virgules.
+              </p>
+            </div>
+            <div>
+              <label className="libelle-champ">Année</label>
+              <input
+                type="number"
+                className="champ-saisie w-full"
+                min={1900}
+                max={2100}
+                value={form.annee}
+                onChange={(event) => maj("annee", event.target.value)}
+                placeholder="2026"
+              />
+            </div>
+            <div>
+              <label className="libelle-champ">Montant travaux HT</label>
+              <input
+                type="number"
+                className="champ-saisie w-full"
+                min={0}
+                step="0.01"
+                value={form.montant_travaux_ht}
+                onChange={(event) => maj("montant_travaux_ht", event.target.value)}
+                placeholder="1250000"
+              />
+            </div>
+            <div>
+              <label className="libelle-champ">Ordre d&apos;affichage</label>
+              <input
+                type="number"
+                className="champ-saisie w-full"
+                min={1}
+                max={999}
+                value={form.ordre_affichage}
+                onChange={(event) => maj("ordre_affichage", Number(event.target.value) || 100)}
+              />
+            </div>
+            <div className="space-y-3">
+              <label className="libelle-champ">Visuel principal</label>
+              <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50">
+                Choisir une image
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => setImageFichier(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              {apercuImage && (
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={apercuImage}
+                    alt={form.titre || "Aperçu référence"}
+                    className="h-48 w-full object-cover"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded text-primaire-600"
+              checked={form.est_publie}
+              onChange={(event) => maj("est_publie", event.target.checked)}
+            />
+            <span className="text-sm font-medium text-slate-700">
+              Référence publiée et visible sur le site
+            </span>
+          </label>
+
+          <div>
+            <label className="libelle-champ">Description détaillée</label>
+            <EditeurTexteRiche
+              valeur={form.description}
+              onChange={(html) => maj("description", html)}
+              placeholder="Présentez le contexte, la mission confiée, les enjeux et les livrables réalisés…"
+              hauteurMinimale="min-h-[22rem]"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 rounded-b-3xl border-t border-slate-200 bg-slate-50 px-6 py-4">
+          <button onClick={onFermer} className="btn-secondaire">
+            Annuler
+          </button>
+          <button onClick={soumettre} disabled={chargement} className="btn-primaire disabled:opacity-60">
+            {chargement ? "Enregistrement…" : (
+              <>
+                <Save className="h-4 w-4" />
+                Enregistrer
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function PageAdministrationReferences() {
+  const [realisations, setRealisations] = useState<Realisation[]>([]);
+  const [chargement, setChargement] = useState(true);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [succes, setSucces] = useState<string | null>(null);
+  const [modalOuvert, setModalOuvert] = useState(false);
+  const [referenceEnEdition, setReferenceEnEdition] = useState<Realisation | null>(null);
+
+  const charger = async () => {
+    try {
+      const data = await api.get<Realisation[]>("/api/site/realisations/");
+      setRealisations(extraireListeResultats(data));
+    } catch {
+      setErreur("Impossible de charger les références.");
+    } finally {
+      setChargement(false);
+    }
+  };
+
+  useEffect(() => {
+    void charger();
+  }, []);
+
+  const flash = (message: string) => {
+    setSucces(message);
+    setTimeout(() => setSucces(null), 3000);
+  };
+
+  const enregistrer = async (valeur: FormData | Record<string, unknown>) => {
+    if (referenceEnEdition) {
+      if (valeur instanceof FormData) {
+        await requeteApiAvecProgression(`/api/site/realisations/${referenceEnEdition.id}/`, {
+          method: "PATCH",
+          corps: valeur,
+        });
+      } else {
+        await api.patch(`/api/site/realisations/${referenceEnEdition.id}/`, valeur);
+      }
+      flash("Référence modifiée.");
+    } else {
+      if (valeur instanceof FormData) {
+        await requeteApiAvecProgression("/api/site/realisations/", {
+          method: "POST",
+          corps: valeur,
+        });
+      } else {
+        await api.post("/api/site/realisations/", valeur);
+      }
+      flash("Référence créée.");
+    }
+    await charger();
+  };
+
+  const basculerPublication = async (item: Realisation) => {
+    try {
+      await api.patch(`/api/site/realisations/${item.id}/`, {
+        est_publie: !item.est_publie,
+      });
+      flash(item.est_publie ? "Référence masquée." : "Référence publiée.");
+      await charger();
+    } catch {
+      setErreur("Impossible de modifier la publication.");
+    }
+  };
+
+  const supprimer = async (reference: Realisation) => {
+    if (!window.confirm(`Supprimer définitivement la référence « ${reference.titre} » ?`)) return;
+    try {
+      await api.supprimer(`/api/site/realisations/${reference.id}/`);
+      flash("Référence supprimée.");
+      await charger();
+    } catch {
+      setErreur("Impossible de supprimer la référence.");
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <EntetePageAdmin
+        titre="Références et réalisations"
+        description="Publiez des fiches projet cliquables avec image, descriptif détaillé et informations de mission."
+        actions={(
+          <button
+            onClick={() => {
+              setReferenceEnEdition(null);
+              setModalOuvert(true);
+            }}
+            className="btn-primaire"
+          >
+            <Plus className="h-4 w-4" />
+            Nouvelle référence
+          </button>
+        )}
+        statistiques={[
+          { libelle: "Total", valeur: `${realisations.length} référence${realisations.length > 1 ? "s" : ""}` },
+          { libelle: "Publiées", valeur: `${realisations.filter((item) => item.est_publie).length}` },
+          { libelle: "Hors ligne", valeur: `${realisations.filter((item) => !item.est_publie).length}` },
+          { libelle: "Avec image", valeur: `${realisations.filter((item) => Boolean(item.image_principale)).length}` },
+        ]}
+      />
+
+      {succes && <AlerteAdmin type="succes">{succes}</AlerteAdmin>}
+      {erreur && (
+        <AlerteAdmin type="erreur" action={<button onClick={() => setErreur(null)} className="ml-auto"><X className="h-4 w-4" /></button>}>
+          {erreur}
+        </AlerteAdmin>
+      )}
+
+      <CarteSectionAdmin
+        titre="Bibliothèque des références"
+        description="Les références publiées alimentent directement la page publique et ses fiches détail."
+      >
+      <div className="-m-5 divide-y divide-slate-100">
+        {chargement ? (
+          <div className="py-12 text-center text-sm text-slate-400">Chargement…</div>
+        ) : realisations.length === 0 ? (
+          <div className="py-12 text-center text-sm text-slate-400">
+            Aucune référence publiée pour le moment.
+          </div>
+        ) : (
+          realisations.map((item) => (
+            <div key={item.id} className="flex items-center gap-4 px-4 py-4 transition-colors hover:bg-slate-50">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReferenceEnEdition(item);
+                      setModalOuvert(true);
+                    }}
+                    className="truncate font-medium text-slate-800 transition-colors hover:text-primaire-600"
+                  >
+                    {item.titre}
+                  </button>
+                  {!item.est_publie && <span className="badge-neutre text-xs">Hors ligne</span>}
+                </div>
+                <p className="mt-1 text-xs text-slate-400">
+                  {[item.client, item.lieu, item.annee].filter(Boolean).join(" · ") || "Sans précision"}
+                </p>
+              </div>
+
+              <ActionsRapidesAdaptatives
+                actions={[
+                  {
+                    titre: "Voir la page publique",
+                    icone: ExternalLink,
+                    href: `/references/${item.id}`,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                  },
+                  {
+                    titre: item.est_publie ? "Masquer" : "Publier",
+                    icone: item.est_publie ? Eye : EyeOff,
+                    onClick: () => basculerPublication(item),
+                  },
+                  {
+                    titre: "Modifier",
+                    icone: Pencil,
+                    variante: "primaire",
+                    onClick: () => {
+                      setReferenceEnEdition(item);
+                      setModalOuvert(true);
+                    },
+                  },
+                  {
+                    titre: "Supprimer",
+                    icone: Trash2,
+                    variante: "danger",
+                    onClick: () => supprimer(item),
+                  },
+                ]}
+              />
+            </div>
+          ))
+        )}
+      </div>
+      </CarteSectionAdmin>
+
+      {modalOuvert && (
+        <ModalReference
+          initial={referenceEnEdition}
+          onEnregistrer={enregistrer}
+          onFermer={() => {
+            setModalOuvert(false);
+            setReferenceEnEdition(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}

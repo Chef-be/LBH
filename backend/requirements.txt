@@ -1,0 +1,97 @@
+# ============================================================
+# Dépendances Python — Plateforme BEE
+# Cœur applicatif Django
+# ============================================================
+
+# --- Framework principal ---
+Django==5.2
+djangorestframework==3.15.2
+django-cors-headers==4.6.0
+django-filter==24.3
+
+# --- Authentification et sécurité ---
+djangorestframework-simplejwt==5.4.0
+django-allauth==65.4.0
+
+# --- Base de données ---
+psycopg2-binary==2.9.10
+django-extensions==3.2.3
+
+# --- File d'attente et tâches asynchrones ---
+celery==5.4.0
+django-celery-beat==2.9.0
+django-celery-results==2.5.1
+redis==5.2.1
+
+# --- Stockage objet ---
+django-storages==1.14.4
+boto3==1.37.12
+minio==7.2.15
+
+# --- Génération de documents ---
+python-docx==1.1.2
+mammoth==1.8.0
+openpyxl==3.1.5
+Pillow==11.1.0
+WeasyPrint==64.1
+
+# --- Traitement PDF ---
+PyMuPDF==1.25.3
+pdfplumber==0.11.5
+
+# --- Traitement CAO ---
+ezdxf==1.4.3
+
+# --- OCR ---
+pytesseract==0.3.13
+easyocr==1.7.2
+
+# --- Traitement de données ---
+pandas==2.2.3
+numpy==2.1.3
+
+# --- Géospatial ---
+django-geojson==4.1.0
+Shapely==2.0.7
+
+# --- Webmail ---
+IMAPClient==3.0.1
+
+# --- Validation et sérialisation ---
+marshmallow==3.23.1
+jsonschema==4.23.0
+
+# --- Recherche plein texte ---
+django-watson==1.6.0
+
+# --- Journalisation structurée ---
+structlog==25.1.0
+
+# --- Supervision ---
+django-health-check==4.2.1
+psutil==7.0.0
+
+# --- Gestion des paramètres ---
+django-constance==4.2.0
+django-configurations==2.5.1
+
+# --- Client HTTP asynchrone ---
+httpx==0.28.1
+requests==2.32.3
+
+# --- Utilitaires ---
+python-decouple==3.8
+python-magic==0.4.27
+unidecode==1.3.8
+python-dateutil==2.9.0.post0
+
+# --- Tests ---
+pytest==8.3.5
+pytest-django==4.9.0
+pytest-cov==6.0.0
+factory-boy==3.3.3
+faker==37.1.0
+
+# --- Serveur WSGI ---
+gunicorn==23.0.0
+uvicorn==0.34.0

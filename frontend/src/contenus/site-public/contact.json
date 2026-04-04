@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "titre_page": "Nous contacter",
+    "description_page": "Contactez le bureau pour vos projets de construction, demandes d'information, devis ou partenariats."
+  },
+  "hero": {
+    "badge": "Parlons de votre projet",
+    "titre": "Nous contacter",
+    "description": "Présentez votre besoin, votre contexte et vos objectifs. Nous reviendrons vers vous pour qualifier votre demande."
+  },
+  "coordonnees": {
+    "titre": "Coordonnées",
+    "courriel": "Courriel",
+    "telephone": "Téléphone",
+    "adresse": "Adresse",
+    "delai_titre": "Délai de réponse",
+    "delai_valeur": "Sous 24 à 48 heures ouvrées"
+  },
+  "exemples": {
+    "titre": "Exemples de demandes",
+    "liste": [
+      "Demande de devis pour un chiffrage",
+      "Accompagnement maîtrise d'œuvre",
+      "Réponse à un appel d'offres",
+      "Analyse de rentabilité",
+      "Dimensionnement voirie ou bâtiment"
+    ]
+  },
+  "espace_prive": {
+    "question": "Vous êtes un collaborateur ?",
+    "bouton": "Espace de travail"
+  },
+  "formulaire": {
+    "titre": "Votre demande"
+  }
+}

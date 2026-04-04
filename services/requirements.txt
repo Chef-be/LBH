@@ -1,0 +1,12 @@
+# Dépendances — Services FastAPI principaux
+fastapi==0.115.11
+uvicorn==0.34.0
+psycopg2-binary==2.9.10
+redis==5.2.1
+minio==7.2.15
+structlog==25.1.0
+httpx==0.28.1
+pydantic==2.11.0
+python-multipart==0.0.20
+python-jose==3.4.0
+passlib==1.7.4

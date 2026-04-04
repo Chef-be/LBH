@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block titre %}Installation terminée{% endblock %}
+{% block progression %}{% endblock %}
+
+{% block contenu %}
+<div class="text-center py-12 space-y-6">
+  <div class="text-6xl">🔒</div>
+  <h1 class="text-2xl font-bold text-gray-800">L'installateur est verrouillé</h1>
+  <p class="text-gray-500 max-w-md mx-auto">
+    La plateforme <strong>{{ info.get('nom_plateforme', 'Votre plateforme') }}</strong> a été installée avec succès le
+    {{ info.get('date', '') }}.
+    L'installateur est désormais désactivé pour des raisons de sécurité.
+  </p>
+  {% if info.get('prefixe') %}
+  <div class="bg-gray-100 rounded-lg p-4 inline-block text-left">
+    <div class="text-sm space-y-1 text-gray-600">
+      <div><strong>Préfixe conteneurs :</strong> <code class="font-mono">{{ info.prefixe }}</code></div>
+      <div><strong>Date d'installation :</strong> {{ info.get('date', 'inconnue') }}</div>
+    </div>
+  </div>
+  {% endif %}
+  <div class="text-sm text-gray-400 mt-6">
+    Pour réinstaller, supprimez le fichier
+    <code class="bg-gray-100 px-1.5 py-0.5 rounded font-mono">installateur/.installation-terminee</code>
+    et redémarrez l'installateur.
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "titre_page": "Nos prestations",
+    "description_page": "Découvrez les prestations du bureau : économie de la construction, dimensionnement voirie, bâtiment, métrés, assistance maîtrise d'œuvre et appels d'offres."
+  },
+  "hero": {
+    "badge": "Nos domaines d'intervention",
+    "titre": "Nos prestations",
+    "description": "De l'estimation préalable à la réception des travaux, nous intervenons sur l'économie, les métrés, les pièces écrites, la voirie, le bâtiment et les consultations."
+  },
+  "cta_bas_page": {
+    "titre": "Votre projet nécessite une expertise combinée ?",
+    "description": "Nous pouvons intervenir sur plusieurs volets d'une même opération pour conserver une cohérence technique, économique et documentaire.",
+    "bouton": "Nous en parler"
+  },
+  "categories": {
+    "economie": "Économie de la construction",
+    "vrd": "Voirie et réseaux divers",
+    "batiment": "Bâtiment",
+    "assistance": "Assistance maîtrise d'œuvre",
+    "documents": "Documents de marché",
+    "autre": "Autres prestations"
+  },
+  "detail": {
+    "retour": "Toutes nos prestations",
+    "bouton_contact": "Demander un devis",
+    "bloc_points_forts": "Ce que nous réalisons",
+    "bloc_description": "En détail",
+    "bloc_avantages": "Ce que vous gagnez",
+    "bloc_livrables": "Livrables"
+  }
+}

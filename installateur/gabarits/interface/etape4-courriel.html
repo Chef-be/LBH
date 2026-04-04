@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 4 %}
+{% block titre %}Configuration du courriel{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Configuration du courriel</h1>
+    <p class="text-gray-500">Permet l'envoi de notifications et de courriels automatiques. Vous pouvez ignorer cette étape et la configurer plus tard dans les paramètres.</p>
+  </div>
+
+  <form method="POST" class="space-y-5">
+    <div class="carte space-y-5">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold text-gray-800">Serveur SMTP sortant</h2>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" id="ignorer_courriel" onchange="basculerCourriel(this.checked)"
+            class="rounded">
+          Ignorer pour l'instant
+        </label>
+      </div>
+
+      <div id="champs-courriel" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Serveur SMTP</label>
+            <input type="text" name="courriel_hote_smtp" placeholder="mail.exemple.com"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Port SMTP</label>
+            <select name="courriel_port_smtp" class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-primaire-500 outline-none">
+              <option value="587">587 (STARTTLS — recommandé)</option>
+              <option value="465">465 (SSL/TLS)</option>
+              <option value="25">25 (Non sécurisé)</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <input type="checkbox" name="courriel_tls" value="true" checked id="tls_check">
+          <label for="tls_check" class="text-sm text-gray-700">Utiliser STARTTLS (recommandé)</label>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
+            <input type="email" name="courriel_utilisateur" placeholder="noreply@exemple.com"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+            <input type="password" name="courriel_mot_de_passe"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Expéditeur affiché</label>
+          <input type="text" name="courriel_expediteur" placeholder="Mon Bureau d'Études <noreply@exemple.com>"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Courriel administrateur (alertes système)</label>
+          <input type="email" name="courriel_administrateur" placeholder="admin@exemple.com"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-between">
+      <a href="{{ url_for('etape3_base_de_donnees') }}" class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">← Retour</a>
+      <button type="submit" class="px-6 py-2.5 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold">Continuer →</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function basculerCourriel(ignorer) {
+  document.getElementById('champs-courriel').style.opacity = ignorer ? '0.4' : '1';
+  document.getElementById('champs-courriel').querySelectorAll('input, select').forEach(el => el.disabled = ignorer);
+}
+</script>
+{% endblock %}

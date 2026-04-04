@@ -1,0 +1,42 @@
+[
+  {
+    "code": "registre_chantier",
+    "libelle": "Registre et traçabilité de chantier",
+    "description": "Comptes rendus, constats, ordres de service et arbitrages sont centralisés et exploitables."
+  },
+  {
+    "code": "planning_detaille",
+    "libelle": "Planning détaillé et recalage",
+    "description": "Le calendrier d'exécution est consolidé, recalé et partagé avec les intervenants."
+  },
+  {
+    "code": "visa_execution",
+    "libelle": "Visa des documents d'exécution",
+    "description": "Les plans, fiches techniques et documents d'exécution sont suivis et visés."
+  },
+  {
+    "code": "suivi_qualite",
+    "libelle": "Suivi qualité et PAQ",
+    "description": "Les engagements qualité, autocontrôles et remarques du plan d'assurance qualité sont suivis."
+  },
+  {
+    "code": "plan_controle_exterieur",
+    "libelle": "Plan de contrôle extérieur",
+    "description": "Les essais, visas, validations et preuves de conformité sont planifiés puis tracés."
+  },
+  {
+    "code": "gestion_modifications",
+    "libelle": "Gestion des modifications et avenants",
+    "description": "Les écarts, travaux modificatifs et incidences de délai ou de coût sont identifiés."
+  },
+  {
+    "code": "opr_preparees",
+    "libelle": "OPR et réception préparées",
+    "description": "Les opérations préalables à la réception, réserves et levées sont anticipées."
+  },
+  {
+    "code": "dossier_ouvrage",
+    "libelle": "Dossier d'ouvrage constitué",
+    "description": "DOE, notices, PV, garanties et documents de fin d'opération sont rassemblés."
+  }
+]

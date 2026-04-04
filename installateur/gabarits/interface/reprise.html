@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 0 %}
+{% block titre %}Reprise de l'installation{% endblock %}
+{% block progression %}{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Reprise de l'installation</h1>
+    <p class="text-gray-500">
+      Préfixe détecté : <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm">{{ plateforme.prefixe or "inconnu" }}</code>
+    </p>
+  </div>
+
+  <!-- État des conteneurs -->
+  <div class="carte">
+    <h2 class="text-lg font-semibold text-gray-800 mb-3">État des services</h2>
+
+    {% if plateforme.conteneurs %}
+    <div class="space-y-2">
+      {% for c in plateforme.conteneurs %}
+      {% set sain = 'healthy' in c.Status.lower() %}
+      {% set demarre = 'starting' in c.Status.lower() %}
+      <div class="flex items-center justify-between p-2.5 rounded-lg border {{ 'border-succes-200 bg-succes-50' if sain else ('border-alerte-200 bg-alerte-50' if demarre else 'border-danger-200 bg-danger-50') }}">
+        <div class="flex items-center gap-2">
+          <span>{{ '✅' if sain else ('⏳' if demarre else '❌') }}</span>
+          <code class="text-sm font-mono">{{ c.Name }}</code>
+        </div>
+        <span class="text-xs text-gray-500">{{ c.Status }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="p-4 bg-alerte-50 border border-alerte-200 rounded-lg text-alerte-800 text-sm">
+      Aucun conteneur actif détecté. Utilisez la commande suivante pour les démarrer :
+      <pre class="mt-2 bg-white border rounded p-2 text-xs font-mono">docker compose up -d</pre>
+    </div>
+    {% endif %}
+
+    {% if plateforme.conteneurs %}
+    <div class="mt-4 flex gap-3">
+      <button onclick="relancerServices()" id="btn-relancer"
+              class="px-4 py-2 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg text-sm font-medium transition-colors">
+        Relancer les services arrêtés
+      </button>
+      <button onclick="actualiserEtat()"
+              class="px-4 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 rounded-lg text-sm transition-colors">
+        Actualiser l'état
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Création du compte administrateur -->
+  {% if plateforme.certains_actifs %}
+  <div class="carte">
+    <h2 class="text-lg font-semibold text-gray-800 mb-1">Compte super-administrateur</h2>
+
+    {% if plateforme.admin_existe %}
+    <div class="p-3 bg-succes-100 border border-succes-200 rounded-lg text-succes-800 text-sm mb-4">
+      ✅ Un super-administrateur existe déjà sur cette installation.
+      Vous pouvez en créer un supplémentaire ci-dessous si nécessaire.
+    </div>
+    {% else %}
+    <div class="p-3 bg-alerte-100 border border-alerte-200 rounded-lg text-alerte-800 text-sm mb-4">
+      ⚠️ Aucun super-administrateur n'a été créé. Renseignez le formulaire ci-dessous.
+    </div>
+    {% endif %}
+
+    {% if erreur %}
+    <div class="p-3 bg-danger-100 border border-danger-200 rounded-lg text-danger-800 text-sm mb-4">
+      ❌ {{ erreur }}
+    </div>
+    {% endif %}
+
+    {% if lancer_creation %}
+    <!-- Formulaire soumis — lancement automatique -->
+    <div id="creation-en-cours" class="space-y-3">
+      <div class="flex items-center gap-3 p-3 bg-gray-50 border rounded-lg">
+        <span id="icone-creation" class="text-xl">🔄</span>
+        <div>
+          <div id="statut-creation" class="font-medium text-gray-700">Création du compte en cours...</div>
+          <div id="detail-creation" class="text-sm text-gray-500"></div>
+        </div>
+      </div>
+      <div id="bloc-succes-admin" class="hidden p-4 bg-succes-50 border border-succes-200 rounded-lg text-center">
+        <div class="text-3xl mb-2">🎉</div>
+        <div class="font-semibold text-succes-800">Compte créé avec succès !</div>
+        <div class="text-succes-700 text-sm mt-1">Vous pouvez maintenant vous connecter à la plateforme.</div>
+      </div>
+      <div id="bloc-erreur-admin" class="hidden p-3 bg-danger-50 border border-danger-200 rounded-lg">
+        <div class="font-semibold text-danger-800">Erreur lors de la création</div>
+        <div id="msg-erreur-admin" class="text-danger-700 text-sm font-mono mt-1 whitespace-pre-wrap"></div>
+        <a href="{{ url_for('reprise') }}" class="mt-3 inline-block px-4 py-2 bg-danger-600 text-white rounded-lg text-sm">Réessayer</a>
+      </div>
+    </div>
+    <script>
+    (async function() {
+      try {
+        const rep = await fetch('/api/installer/admin-seulement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await rep.json();
+        if (data.succes) {
+          document.getElementById('icone-creation').textContent = '✅';
+          document.getElementById('statut-creation').textContent = data.message;
+          document.getElementById('bloc-succes-admin').classList.remove('hidden');
+        } else {
+          document.getElementById('icone-creation').textContent = '❌';
+          document.getElementById('statut-creation').textContent = 'Échec de la création.';
+          document.getElementById('bloc-erreur-admin').classList.remove('hidden');
+          document.getElementById('msg-erreur-admin').textContent = data.erreur;
+        }
+      } catch(e) {
+        document.getElementById('icone-creation').textContent = '❌';
+        document.getElementById('statut-creation').textContent = 'Erreur réseau.';
+      }
+    })();
+    </script>
+
+    {% else %}
+    <!-- Formulaire de création -->
+    <form method="POST" action="{{ url_for('reprise') }}" class="space-y-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Prénom</label>
+          <input type="text" name="admin_prenom" required
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primaire-500 focus:border-primaire-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Nom</label>
+          <input type="text" name="admin_nom" required
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primaire-500 focus:border-primaire-500">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Adresse de courriel (identifiant de connexion)</label>
+        <input type="email" name="admin_courriel" required
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primaire-500 focus:border-primaire-500">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe (min. 12 caractères)</label>
+          <input type="password" name="admin_mot_de_passe" required minlength="12" id="mdp"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primaire-500 focus:border-primaire-500"
+                 oninput="evaluerForce(this.value)">
+          <!-- Jauge de force -->
+          <div class="mt-1.5 h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+            <div id="jauge-force" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
+          </div>
+          <div id="libelle-force" class="text-xs text-gray-400 mt-0.5"></div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Confirmer le mot de passe</label>
+          <input type="password" name="admin_mot_de_passe_confirm" required minlength="12"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primaire-500 focus:border-primaire-500">
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-2">
+        <a href="{{ url_for('accueil') }}" class="px-4 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 rounded-lg text-sm">
+          ← Retour
+        </a>
+        <button type="submit"
+                class="px-6 py-2.5 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold text-sm transition-colors">
+          Créer le compte →
+        </button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Lien retour -->
+  <div class="flex justify-between items-center text-sm text-gray-500">
+    <a href="{{ url_for('accueil') }}" class="hover:text-primaire-700">← Retour à l'accueil</a>
+    <span>Installateur v{{ version_installateur if version_installateur is defined else "1.1.0" }}</span>
+  </div>
+
+</div>
+
+<script>
+function evaluerForce(mdp) {
+  let score = 0;
+  if (mdp.length >= 12) score++;
+  if (/[A-Z]/.test(mdp)) score++;
+  if (/[a-z]/.test(mdp)) score++;
+  if (/[0-9]/.test(mdp)) score++;
+  if (/[^A-Za-z0-9]/.test(mdp)) score++;
+  const niveaux = [
+    { pct: 0,   couleur: 'bg-gray-300',   libelle: '' },
+    { pct: 20,  couleur: 'bg-danger-500',  libelle: 'Très faible' },
+    { pct: 40,  couleur: 'bg-alerte-500',  libelle: 'Faible' },
+    { pct: 60,  couleur: 'bg-yellow-400',  libelle: 'Moyen' },
+    { pct: 80,  couleur: 'bg-succes-400',  libelle: 'Fort' },
+    { pct: 100, couleur: 'bg-succes-600',  libelle: 'Très fort' },
+  ];
+  const n = niveaux[score];
+  const jauge = document.getElementById('jauge-force');
+  jauge.style.width = n.pct + '%';
+  jauge.className = 'h-full rounded-full transition-all duration-300 ' + n.couleur;
+  document.getElementById('libelle-force').textContent = n.libelle;
+}
+
+async function relancerServices() {
+  const btn = document.getElementById('btn-relancer');
+  btn.disabled = true;
+  btn.textContent = 'Relancement en cours...';
+  try {
+    const rep = await fetch('/api/etat-conteneurs');
+    // Simple actualisation — l'utilisateur peut aussi utiliser docker compose up -d manuellement
+    setTimeout(() => location.reload(), 3000);
+  } catch(e) {
+    btn.textContent = 'Erreur — réessayez';
+    btn.disabled = false;
+  }
+}
+
+function actualiserEtat() {
+  location.reload();
+}
+</script>
+{% endblock %}

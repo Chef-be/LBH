@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 1 %}
+{% block titre %}Identité de la plateforme{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Identité de la plateforme</h1>
+    <p class="text-gray-500">Donnez un nom à votre plateforme et définissez le préfixe de vos conteneurs Docker.</p>
+  </div>
+
+  <form method="POST" class="space-y-5">
+
+    <div class="carte space-y-5">
+      <h2 class="font-semibold text-gray-800">Nommage de la plateforme</h2>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Nom de la plateforme <span class="text-danger-500">*</span></label>
+        <input type="text" name="nom_plateforme" required
+          placeholder="Ex : LBH Economiste"
+          value="{{ config.get('nom_plateforme', '') }}"
+          class="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primaire-500 focus:border-transparent outline-none"
+        >
+        <p class="text-xs text-gray-500 mt-1">Affiché dans l'interface, les courriels et les en-têtes de documents.</p>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Slogan / Sous-titre</label>
+        <input type="text" name="slogan"
+          placeholder="Ex : Économie de la construction — VRD — Bâtiment"
+          value="{{ config.get('slogan', '') }}"
+          class="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primaire-500 outline-none"
+        >
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Préfixe des conteneurs Docker <span class="text-danger-500">*</span>
+        </label>
+        <div class="flex gap-3 items-center">
+          <input type="text" name="prefixe_conteneurs" id="prefixe" required
+            placeholder="Ex : lbh"
+            value="{{ config.get('prefixe_conteneurs', '') }}"
+            pattern="[a-z0-9-]+" maxlength="20"
+            class="w-48 border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primaire-500 outline-none font-mono"
+            oninput="mettreAJourPrevisualisation(this.value)"
+          >
+          <div class="text-sm text-gray-500">
+            → Les conteneurs s'appelleront : <span id="previsu" class="font-mono text-primaire-700 font-semibold">lbh</span>-backend, <span id="previsu2" class="font-mono text-primaire-700 font-semibold">lbh</span>-postgresql...
+          </div>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">Minuscules et tirets uniquement. Évite les conflits si vous avez d'autres projets Docker sur ce serveur.</p>
+      </div>
+    </div>
+
+    <div class="carte space-y-5">
+      <h2 class="font-semibold text-gray-800">Accès et localisation</h2>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Adresse web de la plateforme (URL de base)</label>
+        <input type="url" name="url_base"
+          placeholder="https://lbh-economiste.com"
+          value="{{ config.get('url_base', '') }}"
+          class="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primaire-500 outline-none"
+        >
+        <p class="text-xs text-gray-500 mt-1">Utilisée dans les courriels automatiques et les liens de la plateforme.</p>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Fuseau horaire <span class="text-danger-500">*</span></label>
+        <select name="fuseau_horaire" class="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primaire-500 outline-none bg-white">
+          {% for fh in fuseaux %}
+          <option value="{{ fh }}" {% if fh == 'Europe/Paris' or fh == config.get('fuseau_horaire') %}selected{% endif %}>
+            {{ fh }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Environnement</label>
+        <div class="flex gap-4">
+          {% for env, libelle, desc in [('production', 'Production', 'Serveur réel'), ('recette', 'Recette', 'Tests avant mise en prod'), ('developpement', 'Développement', 'Poste de développement')] %}
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="environnement" value="{{ env }}" {% if env == 'production' %}checked{% endif %}
+              class="text-primaire-600">
+            <div>
+              <div class="font-medium text-sm">{{ libelle }}</div>
+              <div class="text-xs text-gray-500">{{ desc }}</div>
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-between">
+      <a href="{{ url_for('accueil') }}" class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+        ← Retour
+      </a>
+      <button type="submit" class="px-6 py-2.5 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold transition-colors">
+        Continuer →
+      </button>
+    </div>
+
+  </form>
+</div>
+
+<script>
+function mettreAJourPrevisualisation(valeur) {
+  valeur = valeur.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'plateforme';
+  document.getElementById('previsu').textContent = valeur;
+  document.getElementById('previsu2').textContent = valeur;
+}
+// Initialiser
+document.getElementById('prefixe') && mettreAJourPrevisualisation(document.getElementById('prefixe').value || 'lbh');
+</script>
+{% endblock %}

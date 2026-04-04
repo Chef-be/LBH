@@ -1,0 +1,67 @@
+{
+  "metadata": {
+    "titre_page": "Références et réalisations",
+    "description_page": "Découvrez des opérations menées en économie de la construction, VRD, bâtiment, assistance à maîtrise d'œuvre et appels d'offres."
+  },
+  "hero": {
+    "badge": "Notre expérience terrain",
+    "titre": "Références et réalisations",
+    "description": "Des opérations variées, menées avec rigueur, pour des acteurs publics et privés de la construction."
+  },
+  "etat_vide": {
+    "sur_titre": "Nos domaines d'intervention",
+    "titre": "Types de missions réalisées",
+    "description": "Nous intervenons sur des opérations de toute nature et toute taille, en milieu public comme privé."
+  },
+  "liste": {
+    "titre": "Nos réalisations"
+  },
+  "secteurs": {
+    "titre": "Secteurs d'intervention",
+    "liste": [
+      "Logements collectifs",
+      "Bâtiments publics",
+      "Voirie communale",
+      "Zones d'activités",
+      "Réhabilitation",
+      "Lotissements"
+    ]
+  },
+  "cta": {
+    "titre": "Votre projet peut devenir notre prochaine référence",
+    "description": "Contactez-nous pour échanger sur votre opération et le cadre de notre intervention.",
+    "bouton": "Nous contacter"
+  },
+  "domaines_exemple": [
+    {
+      "titre": "VRD — Lotissement résidentiel",
+      "lieu": "Région Sud-Est",
+      "tags": ["Dimensionnement voirie", "Métrés VRD", "DCE"]
+    },
+    {
+      "titre": "Réhabilitation centre-bourg",
+      "lieu": "Commune rurale",
+      "tags": ["Économie TCE", "DPGF", "Suivi chantier"]
+    },
+    {
+      "titre": "Bâtiment tertiaire — Phase DCE",
+      "lieu": "Zone d'activités",
+      "tags": ["Pièces écrites", "BPU/DPGF", "CCTP"]
+    },
+    {
+      "titre": "Appel d'offres — Travaux VRD",
+      "lieu": "Collectivité locale",
+      "tags": ["Mémoire technique", "Offre financière"]
+    },
+    {
+      "titre": "Chiffrage — Extension école",
+      "lieu": "Commune périurbaine",
+      "tags": ["Estimation préalable", "AMO"]
+    },
+    {
+      "titre": "Analyse rentabilité — Promotion",
+      "lieu": "Centre-ville",
+      "tags": ["Analyse de rentabilité", "Bilan d'opération"]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# Dépendances — Service Analyse PDF
+fastapi==0.115.11
+uvicorn==0.34.0
+PyMuPDF==1.25.3
+pdfplumber==0.11.5
+python-multipart==0.0.20
+minio==7.2.15
+structlog==25.1.0
+httpx==0.28.1
+pydantic==2.11.0
+pandas==2.2.3

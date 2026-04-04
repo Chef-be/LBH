@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block titre %}Installation{% endblock %} — Installateur LBH</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primaire: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 800:'#1e40af', 900:'#1e3a5f' },
+            succes: { 100:'#dcfce7', 500:'#22c55e', 700:'#15803d' },
+            alerte: { 100:'#fef3c7', 500:'#f59e0b', 700:'#b45309' },
+            danger: { 100:'#fee2e2', 500:'#ef4444', 700:'#b91c1c' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .etape-active { @apply bg-primaire-700 text-white; }
+    .etape-terminee { @apply bg-succes-500 text-white; }
+    .etape-attente { @apply bg-gray-200 text-gray-500; }
+    .carte { @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- En-tête -->
+  <header class="bg-primaire-900 text-white py-4 px-6 shadow-lg">
+    <div class="max-w-4xl mx-auto flex items-center gap-3">
+      <div class="w-10 h-10 bg-primaire-600 rounded-lg flex items-center justify-center text-xl font-bold">L</div>
+      <div>
+        <div class="text-lg font-semibold">Installateur de la plateforme LBH</div>
+        <div class="text-primaire-300 text-sm">Assistant de configuration initiale</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Progression -->
+  {% block progression %}
+  <div class="bg-white border-b border-gray-200 py-4">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="flex items-center gap-2 overflow-x-auto">
+        {% set etapes = [
+          (0, "Accueil"),
+          (1, "Identité"),
+          (2, "Ports"),
+          (3, "Base de données"),
+          (4, "Courriel"),
+          (5, "Administrateur"),
+          (6, "Récapitulatif"),
+        ] %}
+        {% for num, libelle in etapes %}
+          <div class="flex items-center gap-2 flex-shrink-0">
+            {% if num < etape_actuelle %}
+              <div class="w-7 h-7 rounded-full bg-succes-500 text-white flex items-center justify-center text-sm font-bold">✓</div>
+            {% elif num == etape_actuelle %}
+              <div class="w-7 h-7 rounded-full bg-primaire-700 text-white flex items-center justify-center text-sm font-bold">{{ num }}</div>
+            {% else %}
+              <div class="w-7 h-7 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-sm">{{ num }}</div>
+            {% endif %}
+            <span class="text-sm {% if num == etape_actuelle %}font-semibold text-primaire-700{% elif num < etape_actuelle %}text-succes-700{% else %}text-gray-400{% endif %}">{{ libelle }}</span>
+            {% if not loop.last %}<div class="w-8 h-px bg-gray-300 mx-1"></div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endblock %}
+
+  <!-- Contenu principal -->
+  <main class="max-w-4xl mx-auto px-6 py-8">
+    {% block contenu %}{% endblock %}
+  </main>
+
+  <!-- Pied de page -->
+  <footer class="text-center text-gray-400 text-sm py-6">
+    Installateur de plateforme — Version 1.2
+  </footer>
+
+</body>
+</html>

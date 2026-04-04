@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>{{ planning.intitule }}</title>
+  <style>
+    @page {
+      size: A4 landscape;
+      margin: 1.1cm;
+    }
+    body {
+      font-family: sans-serif;
+      color: #0f172a;
+      font-size: 10px;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 6px 0;
+    }
+    .meta {
+      margin-bottom: 14px;
+      color: #475569;
+    }
+    .resume {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .bloc {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 140px;
+      background: #f8fafc;
+    }
+    .bloc strong {
+      display: block;
+      font-size: 14px;
+      color: #0f172a;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      border-bottom: 1px solid #e2e8f0;
+      padding: 6px 7px;
+      vertical-align: top;
+    }
+    th {
+      text-align: left;
+      font-size: 9px;
+      color: #475569;
+      background: #f8fafc;
+    }
+    .gantt {
+      position: relative;
+      height: 18px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+      min-width: 260px;
+    }
+    .barre {
+      position: absolute;
+      top: 0;
+      height: 18px;
+      border-radius: 999px;
+      background: #2563eb;
+    }
+    .barre.critique {
+      background: #e11d48;
+    }
+    .muted {
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <h1>{{ planning.intitule }}</h1>
+  <div class="meta">
+    Projet {{ planning.suivi.projet.reference }} | Source {{ planning.get_source_donnees_display }} | Début de référence {{ planning.date_debut_reference|date:"d/m/Y" }}
+  </div>
+
+  <div class="resume">
+    <div class="bloc">
+      <span class="muted">Durée totale</span>
+      <strong>{{ planning.synthese_calcul.duree_totale_jours }} j</strong>
+    </div>
+    <div class="bloc">
+      <span class="muted">Tâches</span>
+      <strong>{{ planning.synthese_calcul.nb_taches }}</strong>
+    </div>
+    <div class="bloc">
+      <span class="muted">Tâches critiques</span>
+      <strong>{{ planning.synthese_calcul.nb_taches_critiques }}</strong>
+    </div>
+    <div class="bloc">
+      <span class="muted">Conflits ressources lissés</span>
+      <strong>{{ planning.synthese_calcul.nb_conflits_ressources|default:"0" }}</strong>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>N°</th>
+        <th>Tâche</th>
+        <th>Début</th>
+        <th>Fin</th>
+        <th>Durée</th>
+        <th>Équipe</th>
+        <th>Dépendances</th>
+        <th>Gantt</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ligne in lignes %}
+        <tr>
+          <td>{{ ligne.tache.numero_ordre }}</td>
+          <td>
+            <strong>{{ ligne.tache.designation }}</strong><br>
+            <span class="muted">
+              {{ ligne.tache.quantite }} {{ ligne.tache.unite }} | {{ ligne.tache.heures_totales }} h
+              {% if ligne.tache.est_critique %}| Critique{% endif %}
+            </span>
+          </td>
+          <td>{{ ligne.tache.date_debut_calculee|date:"d/m/Y" }}</td>
+          <td>{{ ligne.tache.date_fin_calculee|date:"d/m/Y" }}</td>
+          <td>{{ ligne.tache.duree_jours }} j</td>
+          <td>{{ ligne.equipe }}</td>
+          <td>{{ ligne.dependances }}</td>
+          <td>
+            <div class="gantt">
+              <div class="barre {% if ligne.tache.est_critique %}critique{% endif %}" style="left: {{ ligne.left }}%; width: {{ ligne.width }}%;"></div>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

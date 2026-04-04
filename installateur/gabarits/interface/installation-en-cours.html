@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 7 %}
+{% block titre %}Installation en cours{% endblock %}
+{% block progression %}{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Installation en cours</h1>
+    <p class="text-gray-500">Veuillez patienter pendant la mise en place de votre plateforme <strong>{{ config.nom_plateforme }}</strong>.</p>
+  </div>
+
+  <div class="carte" id="progression-installation">
+    <div class="space-y-3" id="liste-etapes">
+      <!-- Remplie dynamiquement -->
+    </div>
+    <div id="barre-globale" class="mt-6">
+      <div class="flex justify-between text-sm text-gray-600 mb-1">
+        <span>Progression globale</span>
+        <span id="pct-global">0%</span>
+      </div>
+      <div class="w-full bg-gray-200 rounded-full h-3">
+        <div id="barre-remplissage" class="bg-primaire-600 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="bloc-erreur" class="carte bg-danger-50 border-danger-200 hidden">
+    <div class="font-semibold text-danger-800 mb-2">❌ Une erreur est survenue</div>
+    <p id="message-erreur" class="text-danger-700 text-sm font-mono whitespace-pre-wrap"></p>
+    <div class="mt-4 flex gap-3">
+      <button onclick="relancerInstallation()" class="px-4 py-2 bg-danger-600 text-white rounded-lg text-sm hover:bg-danger-700">
+        Réessayer
+      </button>
+      <a href="{{ url_for('etape6_recapitulatif') }}" class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">
+        Modifier la configuration
+      </a>
+    </div>
+  </div>
+
+  <div id="bloc-succes" class="carte bg-succes-50 border-succes-200 hidden text-center py-8">
+    <div class="text-5xl mb-4">🎉</div>
+    <h2 class="text-xl font-bold text-succes-800 mb-2">Installation réussie !</h2>
+    <p class="text-succes-700 mb-4">La plateforme <strong>{{ config.nom_plateforme }}</strong> est opérationnelle.</p>
+    <div class="bg-white rounded-lg p-4 inline-block text-left mb-6 border border-succes-200">
+      <div class="text-sm text-gray-600 space-y-1">
+        <div><strong>Adresse :</strong> <a href="{{ config.url_base }}" target="_blank" class="text-primaire-600 underline">{{ config.url_base }}</a></div>
+        <div><strong>Préfixe conteneurs :</strong> <code class="bg-gray-100 px-1 rounded">{{ config.prefixe_conteneurs }}</code></div>
+        <div><strong>Administrateur :</strong> {{ config.admin_courriel }}</div>
+      </div>
+    </div>
+    <div>
+      <a href="{{ config.url_base }}" target="_blank"
+         class="px-6 py-3 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold transition-colors">
+        Ouvrir la plateforme →
+      </a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const ETAPES = [
+  { id: "fichiers",      libelle: "Génération du fichier .env et compose.yaml" },
+  { id: "volumes",       libelle: "Création des répertoires de volumes Docker" },
+  { id: "construction",  libelle: "Construction des images Docker (peut prendre plusieurs minutes)..." },
+  { id: "demarrage",     libelle: "Démarrage des conteneurs" },
+  { id: "sante",         libelle: "Vérification de l'état de santé des services" },
+  { id: "migrations",    libelle: "Application des migrations de base de données" },
+  { id: "superadmin",    libelle: "Création du compte super-administrateur" },
+  { id: "verrou",        libelle: "Verrouillage de l'installateur" },
+];
+
+let etapeActuelle = 0;
+
+function rendreLigneEtape(etape, statut, message) {
+  const icones = { attente: '⏳', cours: '🔄', succes: '✅', erreur: '❌' };
+  const couleurs = { attente: 'text-gray-400', cours: 'text-primaire-600 font-medium', succes: 'text-succes-700', erreur: 'text-danger-700' };
+  return `
+    <div class="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
+      <span class="text-lg w-6 text-center">${icones[statut]}</span>
+      <div class="flex-1">
+        <div class="${couleurs[statut]}">${etape.libelle}</div>
+        ${message ? `<div class="text-xs text-gray-500 mt-0.5">${message}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function mettreAJourInterface() {
+  const liste = document.getElementById('liste-etapes');
+  let html = '';
+  ETAPES.forEach((etape, i) => {
+    let statut = 'attente', message = '';
+    if (i < etapeActuelle) { statut = 'succes'; }
+    else if (i === etapeActuelle) { statut = 'cours'; }
+    html += rendreLigneEtape(etape, statut, message);
+  });
+  liste.innerHTML = html;
+  const pct = Math.round(etapeActuelle / ETAPES.length * 100);
+  document.getElementById('pct-global').textContent = pct + '%';
+  document.getElementById('barre-remplissage').style.width = pct + '%';
+}
+
+async function executerEtape(etape) {
+  const rep = await fetch('/api/installer/etapes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ etape: etape.id }),
+  });
+  return await rep.json();
+}
+
+async function lancerInstallation() {
+  mettreAJourInterface();
+  for (let i = 0; i < ETAPES.length; i++) {
+    etapeActuelle = i;
+    mettreAJourInterface();
+    const resultat = await executerEtape(ETAPES[i]);
+    if (!resultat.succes) {
+      // Afficher l'erreur
+      document.getElementById('bloc-erreur').classList.remove('hidden');
+      document.getElementById('message-erreur').textContent = resultat.erreur;
+      // Marquer l'étape en erreur
+      const lignes = document.querySelectorAll('#liste-etapes > div');
+      if (lignes[i]) {
+        lignes[i].querySelector('span').textContent = '❌';
+        lignes[i].querySelector('div div').className += ' text-danger-700';
+      }
+      return;
+    }
+  }
+  etapeActuelle = ETAPES.length;
+  mettreAJourInterface();
+  document.getElementById('bloc-succes').classList.remove('hidden');
+}
+
+function relancerInstallation() {
+  document.getElementById('bloc-erreur').classList.add('hidden');
+  lancerInstallation();
+}
+
+// Démarrer automatiquement
+lancerInstallation();
+</script>
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% set etape_actuelle = 5 %}
+{% block titre %}Compte administrateur{% endblock %}
+
+{% block contenu %}
+<div class="space-y-6">
+  <div class="carte">
+    <h1 class="text-2xl font-bold text-primaire-900 mb-1">Compte super-administrateur</h1>
+    <p class="text-gray-500">Ce compte aura tous les droits sur la plateforme. Choisissez un mot de passe robuste.</p>
+  </div>
+
+  {% if erreur %}
+  <div class="carte bg-danger-50 border-danger-200">
+    <div class="text-danger-800 font-medium">❌ {{ erreur }}</div>
+  </div>
+  {% endif %}
+
+  <form method="POST" class="space-y-5">
+    <div class="carte space-y-5">
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Prénom <span class="text-danger-500">*</span></label>
+          <input type="text" name="admin_prenom" required
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Nom <span class="text-danger-500">*</span></label>
+          <input type="text" name="admin_nom" required
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Adresse de courriel <span class="text-danger-500">*</span></label>
+        <input type="email" name="admin_courriel" required
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+        <p class="text-xs text-gray-500 mt-1">Identifiant de connexion à la plateforme.</p>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Mot de passe <span class="text-danger-500">*</span></label>
+        <input type="password" name="admin_mot_de_passe" id="mdp" required minlength="12"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none"
+          oninput="evaluerForce(this.value)">
+        <div id="force-barre" class="h-1.5 mt-2 rounded bg-gray-200">
+          <div id="force-remplissage" class="h-full rounded transition-all duration-300" style="width:0%"></div>
+        </div>
+        <div id="force-libelle" class="text-xs mt-1 text-gray-400"></div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Confirmer le mot de passe <span class="text-danger-500">*</span></label>
+        <input type="password" name="admin_mot_de_passe_confirm" required
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primaire-500 outline-none">
+      </div>
+
+      <div class="bg-alerte-50 border border-alerte-200 rounded-lg p-3 text-sm text-alerte-800">
+        ⚠️ Minimum 12 caractères. Notez ce mot de passe précieusement — il ne peut pas être récupéré automatiquement.
+      </div>
+    </div>
+
+    <div class="flex justify-between">
+      <a href="{{ url_for('etape4_courriel') }}" class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">← Retour</a>
+      <button type="submit" class="px-6 py-2.5 bg-primaire-700 hover:bg-primaire-800 text-white rounded-lg font-semibold">Continuer →</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function evaluerForce(mdp) {
+  let force = 0;
+  if (mdp.length >= 12) force++;
+  if (/[A-Z]/.test(mdp)) force++;
+  if (/[a-z]/.test(mdp)) force++;
+  if (/[0-9]/.test(mdp)) force++;
+  if (/[^A-Za-z0-9]/.test(mdp)) force++;
+  const couleurs = ['', 'bg-danger-500', 'bg-alerte-500', 'bg-alerte-400', 'bg-succes-400', 'bg-succes-600'];
+  const libelles = ['', 'Très faible', 'Faible', 'Moyen', 'Fort', 'Très fort'];
+  document.getElementById('force-remplissage').style.width = (force * 20) + '%';
+  document.getElementById('force-remplissage').className = 'h-full rounded transition-all duration-300 ' + (couleurs[force] || '');
+  document.getElementById('force-libelle').textContent = libelles[force] || '';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,37 @@
+# ============================================================
+# Compose installateur — À utiliser AVANT le compose.yaml principal
+# Lance uniquement l'installateur par navigateur
+# ============================================================
+# Usage :
+#   docker compose -f compose.installateur.yaml up
+#   Puis accéder à : http://[ip-serveur]:5099
+# ============================================================
+
+name: installateur-plateforme
+
+services:
+  installateur:
+    build:
+      context: ./installateur
+      dockerfile: Dockerfile
+    container_name: installateur-plateforme
+    restart: "no"
+    ports:
+      - "0.0.0.0:5099:5099"
+    volumes:
+      # Accès au répertoire racine du projet pour générer les fichiers
+      - .:/projet:rw
+      # Accès au socket Docker pour lancer les conteneurs
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - RACINE_PROJET=/projet
+      - RACINE_PROJET_HOTE=/var/www/vhosts/lbh-economiste.com/httpdocs
+      - TZ=Europe/Paris
+    working_dir: /projet/installateur
+    command: ["python", "app.py", "--port", "5099", "--hote", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5099/sante"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
