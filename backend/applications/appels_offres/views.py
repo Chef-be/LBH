@@ -1,4 +1,4 @@
-"""Vues API pour les appels d'offres — Plateforme BEE."""
+"""Vues API pour les appels d'offres — Plateforme LBH."""
 
 from rest_framework import generics, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes

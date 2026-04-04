@@ -1,4 +1,4 @@
-"""Administration Django pour les métrés — Plateforme BEE."""
+"""Administration Django pour les métrés — Plateforme LBH."""
 
 from django.contrib import admin
 from .models import Metre, LigneMetre

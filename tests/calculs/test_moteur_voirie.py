@@ -1,5 +1,5 @@
 """
-Tests du moteur de dimensionnement voirie — Plateforme BEE.
+Tests du moteur de dimensionnement voirie — Plateforme LBH.
 Couvre : classification plateforme, trafic cumulé, choix structure, dimensionnement.
 """
 

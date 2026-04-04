@@ -1,5 +1,5 @@
 """
-Sérialiseurs pour l'application Projets — Plateforme BEE.
+Sérialiseurs pour l'application Projets — Plateforme LBH.
 """
 
 from rest_framework import serializers

@@ -1,4 +1,4 @@
-"""Sérialiseurs pour le suivi d'exécution des travaux — Plateforme BEE."""
+"""Sérialiseurs pour le suivi d'exécution des travaux — Plateforme LBH."""
 
 from rest_framework import serializers
 from .models import (

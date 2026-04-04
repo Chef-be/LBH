@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Fournisseur de configuration du site vitrine — Plateforme BEE.
+ * Fournisseur de configuration du site vitrine — Plateforme LBH.
  * Alimenté côté serveur depuis le layout racine et consommé par les composants client.
  */
 

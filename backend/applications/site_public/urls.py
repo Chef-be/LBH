@@ -1,4 +1,4 @@
-"""Routes URL pour le site vitrine public — Plateforme BEE."""
+"""Routes URL pour le site vitrine public — Plateforme LBH."""
 
 from django.urls import path
 from . import views

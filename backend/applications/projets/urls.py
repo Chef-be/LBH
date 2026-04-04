@@ -1,5 +1,5 @@
 """
-Routes URL pour les projets — Plateforme BEE.
+Routes URL pour les projets — Plateforme LBH.
 """
 
 from django.urls import path

@@ -1,4 +1,4 @@
-"""Sérialiseurs pour les appels d'offres — Plateforme BEE."""
+"""Sérialiseurs pour les appels d'offres — Plateforme LBH."""
 
 from rest_framework import serializers
 from .models import AppelOffres, OffreEntreprise

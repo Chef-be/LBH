@@ -1,6 +1,6 @@
 # ============================================================
 # Dockerfile — Services FastAPI principaux
-# Plateforme BEE
+# Plateforme LBH
 # ============================================================
 
 FROM python:3.11-slim-bookworm

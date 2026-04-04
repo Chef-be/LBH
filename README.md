@@ -1,4 +1,4 @@
-# Plateforme BEE — Bureau d'Études Économiste
+# Plateforme LBH — Bureau d'Études Économiste
 
 Plateforme web complète pour l'économie de la construction, le dimensionnement voirie, la gestion de projets BTP/VRD, les métrés, le chiffrage, la rédaction de pièces écrites et le suivi d'exécution.
 
@@ -6,7 +6,7 @@ Plateforme web complète pour l'économie de la construction, le dimensionnement
 
 ## Présentation
 
-La Plateforme BEE est une solution métier complète destinée aux :
+La Plateforme LBH est une solution métier complète destinée aux :
 - Bureaux d'études économiques
 - Maîtres d'ouvrage publics et privés
 - Maîtres d'œuvre
@@ -92,7 +92,7 @@ Puis accéder à : `http://[domaine]/installer/`
 
 ```bash
 # Cloner le dépôt
-git clone [url-depot] /var/www/vhosts/lbh-economiste.com/plateforme-bee
+git clone [url-depot] /var/www/vhosts/lbh-economiste.com/plateforme-lbh
 
 # Configurer les variables d'environnement
 cp .env.example .env
@@ -103,10 +103,10 @@ docker compose build
 docker compose up -d
 
 # Migrations de base de données
-docker compose exec bee-backend python manage.py migrate
+docker compose exec lbh-backend python manage.py migrate
 
 # Créer le compte administrateur
-docker compose exec bee-backend python manage.py creersuper
+docker compose exec lbh-backend python manage.py creersuper
 ```
 
 ---
@@ -157,4 +157,4 @@ Toute reproduction ou diffusion sans autorisation est interdite.
 
 ---
 
-*Plateforme BEE — Bureau d'Études Économiste*
+*Plateforme LBH — Bureau d'Études Économiste*

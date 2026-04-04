@@ -1,4 +1,4 @@
-"""Administration Django pour le site vitrine public — Plateforme BEE."""
+"""Administration Django pour le site vitrine public — Plateforme LBH."""
 
 from django.contrib import admin
 from .models import Prestation, Realisation, MembreEquipe, DemandeContact

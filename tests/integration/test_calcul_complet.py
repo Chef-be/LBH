@@ -1,5 +1,5 @@
 """
-Tests d'intégration — Plateforme BEE.
+Tests d'intégration — Plateforme LBH.
 Vérifie la chaîne complète : création projet → étude → lignes → calcul → totaux cohérents.
 """
 

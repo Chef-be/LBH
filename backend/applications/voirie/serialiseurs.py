@@ -1,4 +1,4 @@
-"""Sérialiseurs pour les études de voirie — Plateforme BEE."""
+"""Sérialiseurs pour les études de voirie — Plateforme LBH."""
 
 from rest_framework import serializers
 from .models import EtudeVoirie

@@ -1,5 +1,5 @@
 """
-Moteur de dimensionnement de chaussées — Plateforme BEE.
+Moteur de dimensionnement de chaussées — Plateforme LBH.
 
 Méthode : Guide Technique SETRA/LCPC (catalogue des structures types de chaussées neuves).
 Normes de référence :

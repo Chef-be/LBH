@@ -1,5 +1,5 @@
 # ============================================================
-# Plateforme BEE — Interface utilisateur Next.js
+# Plateforme LBH — Interface utilisateur Next.js
 # ============================================================
 # Stages :
 #   developpement  → next dev (hot-reload, source montée en volume)

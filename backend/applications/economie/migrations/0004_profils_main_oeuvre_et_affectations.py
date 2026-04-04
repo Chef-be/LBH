@@ -39,7 +39,7 @@ def creer_profils_defaut(apps, schema_editor):
             "ordre_affichage": 30,
         },
         {
-            "code": "ECONOMISTE_BEE",
+            "code": "ECONOMISTE_LBH",
             "libelle": "Économiste de la construction",
             "categorie": "economiste",
             "salaire_brut_mensuel_defaut": decimal.Decimal("3200.00"),

@@ -1,4 +1,4 @@
-# MATRICE DES VARIABLES EXTERNALISÉES — Plateforme BEE
+# MATRICE DES VARIABLES EXTERNALISÉES — Plateforme LBH
 
 Toute valeur métier ou technique susceptible d'évoluer doit être externalisée.
 Ces variables sont stockées dans le modèle `Parametre` de la base de données
@@ -12,7 +12,7 @@ et éditables par les administrateurs via l'interface de paramétrage.
 |---|---|---|---|---|
 | `SYS_LANGUE` | Langue de l'interface | Texte | `fr` | — |
 | `SYS_FUSEAU_HORAIRE` | Fuseau horaire | Texte | `Europe/Paris` | — |
-| `SYS_NOM_APPLICATION` | Nom affiché de l'application | Texte | `Plateforme BEE` | — |
+| `SYS_NOM_APPLICATION` | Nom affiché de l'application | Texte | `Plateforme LBH` | — |
 | `SYS_LOGO_URL` | URL du logo | Texte | — | — |
 | `SYS_COULEUR_PRINCIPALE` | Couleur principale de l'interface | Texte | `#1e3a5f` | HEX |
 | `SYS_TAILLE_MAX_IMPORT` | Taille maximale d'un fichier importé | Entier | `104857600` | octets |

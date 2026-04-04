@@ -1,12 +1,12 @@
 # ============================================================
 # Dockerfile — Cœur applicatif Django
-# Plateforme BEE — Bureau d'Études Économiste
+# Plateforme LBH — Bureau d'Études Économiste
 # ============================================================
 
 FROM python:3.11-slim-bookworm AS base
 
 # Métadonnées
-LABEL maintainer="Plateforme BEE"
+LABEL maintainer="Plateforme LBH"
 LABEL description="Cœur applicatif Django — Bureau d'Études Économiste"
 
 # Variables d'environnement Python
@@ -54,11 +54,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Création de l'utilisateur non-root pour la production
-RUN groupadd -r bee && useradd -r -g bee bee \
-    && mkdir -p /app/statiques /app/medias /var/log/bee/backend \
-    && chown -R bee:bee /app /var/log/bee
+RUN groupadd -r lbh && useradd -r -g lbh lbh \
+    && mkdir -p /app/statiques /app/medias /var/log/lbh/backend \
+    && chown -R lbh:lbh /app /var/log/lbh
 
-# Port exposé (interne uniquement — via bee-nginx)
+# Port exposé (interne uniquement — via lbh-nginx)
 EXPOSE 8000
 
 # Script de démarrage
@@ -69,7 +69,7 @@ RUN chmod +x /usr/local/bin/demarrage.sh
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=5 \
     CMD curl -f http://localhost:8000/api/sante/ || exit 1
 
-# En production, passer à l'utilisateur bee
-# USER bee
+# En production, passer à l'utilisateur lbh
+# USER lbh
 
 CMD ["/usr/local/bin/demarrage.sh"]

@@ -1,4 +1,4 @@
-"""Sérialiseurs pour les organisations — Plateforme BEE."""
+"""Sérialiseurs pour les organisations — Plateforme LBH."""
 
 from rest_framework import serializers
 from .models import Organisation, GroupeUtilisateurs

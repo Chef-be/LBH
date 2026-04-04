@@ -1,1 +1,1 @@
-"""Applications métier de la Plateforme BEE."""
+"""Applications métier de la Plateforme LBH."""

@@ -1,6 +1,6 @@
 """
 Modèles de projets / affaires / missions.
-Plateforme BEE — Bureau d'Études Économiste
+Plateforme LBH — Bureau d'Études Économiste
 
 Le projet est le cœur de la plateforme : tout s'organise autour de lui.
 """

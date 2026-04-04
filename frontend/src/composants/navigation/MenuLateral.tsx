@@ -80,7 +80,7 @@ export function MenuLateral() {
 
   useEffect(() => {
     // Restaurer l'état du menu depuis localStorage
-    const sauvegarde = localStorage.getItem("bee-menu-reduit");
+    const sauvegarde = localStorage.getItem("lbh-menu-reduit");
     if (sauvegarde === "1") setReduit(true);
   }, []);
 
@@ -97,7 +97,7 @@ export function MenuLateral() {
   const basculerMenu = () => {
     const nouvel = !reduit;
     setReduit(nouvel);
-    localStorage.setItem("bee-menu-reduit", nouvel ? "1" : "0");
+    localStorage.setItem("lbh-menu-reduit", nouvel ? "1" : "0");
   };
 
   const estActif = (c: string) => chemin === c || chemin.startsWith(c + "/");

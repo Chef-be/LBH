@@ -1,6 +1,6 @@
 # ============================================================
 # Dockerfile — Service OCR
-# Plateforme BEE — Tesseract 5 + Python + FastAPI
+# Plateforme LBH — Tesseract 5 + Python + FastAPI
 # ============================================================
 
 FROM python:3.11-slim-bookworm

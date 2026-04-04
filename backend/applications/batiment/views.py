@@ -1,4 +1,4 @@
-"""Vues API pour les programmes bâtiment — Plateforme BEE."""
+"""Vues API pour les programmes bâtiment — Plateforme LBH."""
 
 import sys
 import os

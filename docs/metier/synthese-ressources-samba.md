@@ -5,7 +5,7 @@ Date de lecture : 2026-04-01
 ## Répertoires de référence
 
 - Partage documentaire source : `/var/www/vhosts/lbh-economiste.com/smb.lbh-economiste.com/data/samba/shares/admin/ressources`
-- Répertoire de travail BEE : `/var/www/vhosts/lbh-economiste.com/ressources`
+- Répertoire de travail LBH : `/var/www/vhosts/lbh-economiste.com/ressources`
 
 ## Rôle de cette bibliothèque
 

@@ -1,4 +1,4 @@
-"""Administration Django pour le suivi d'exécution — Plateforme BEE."""
+"""Administration Django pour le suivi d'exécution — Plateforme LBH."""
 
 from django.contrib import admin
 from .models import SuiviExecution, CompteRenduChantier, SituationTravaux, OrdreService

@@ -1,4 +1,4 @@
-"""Administration Django pour les études de voirie — Plateforme BEE."""
+"""Administration Django pour les études de voirie — Plateforme LBH."""
 
 from django.contrib import admin
 from .models import EtudeVoirie

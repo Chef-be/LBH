@@ -1,4 +1,4 @@
-"""Vues API pour le site vitrine public — Plateforme BEE."""
+"""Vues API pour le site vitrine public — Plateforme LBH."""
 
 import logging
 

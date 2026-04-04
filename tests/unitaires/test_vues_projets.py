@@ -1,5 +1,5 @@
 """
-Tests des vues API des projets — Plateforme BEE.
+Tests des vues API des projets — Plateforme LBH.
 Couvre : liste, création, détail, modification, archivage, lots, intervenants.
 """
 

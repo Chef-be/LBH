@@ -1,5 +1,5 @@
 """
-Administration Django pour les comptes — Plateforme BEE.
+Administration Django pour les comptes — Plateforme LBH.
 """
 
 from django.contrib import admin

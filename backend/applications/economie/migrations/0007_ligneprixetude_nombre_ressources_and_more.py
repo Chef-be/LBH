@@ -272,7 +272,7 @@ def initialiser_taxonomie_main_oeuvre(apps, schema_editor):
             "ordre_affichage": 40,
         },
         {
-            "code": "ECONOMISTE_BEE",
+            "code": "ECONOMISTE_LBH",
             "libelle": "Économiste de la construction",
             "categorie": "economiste",
             "secteur_activite": "maitrise_oeuvre",

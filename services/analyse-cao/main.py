@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================
 # Service Analyse CAO — ezdxf + FastAPI
-# Plateforme BEE — Bureau d'Études Économiste
+# Plateforme LBH — Bureau d'Études Économiste
 # Port : 8012
 # Formats : DXF (natif), DWG (via conversion externe si disponible)
 # ============================================================
@@ -38,7 +38,7 @@ async def duree_de_vie(application: FastAPI):
 # Application
 # ------------------------------------------------------------
 app = FastAPI(
-    title="Service Analyse CAO — Plateforme BEE",
+    title="Service Analyse CAO — Plateforme LBH",
     description="Analyse de fichiers DXF/DWG pour extraction de géométries et métadonnées",
     version="0.1.0",
     lifespan=duree_de_vie,
@@ -139,7 +139,7 @@ def compter_entites(modelspace) -> StatistiquesEntites:
 async def sante():
     return ReponseEtat(
         statut="actif",
-        service="analyse-cao-bee",
+        service="analyse-cao-lbh",
         version="0.1.0",
         formats_supportes=sorted(FORMATS_ACCEPTES),
         horodatage=datetime.now().isoformat(),
@@ -199,4 +199,4 @@ async def analyser_fichier_cao(
 
 @app.get("/", tags=["Général"])
 async def racine():
-    return {"service": "Analyse CAO Plateforme BEE", "version": "0.1.0", "documentation": "/documentation"}
+    return {"service": "Analyse CAO Plateforme LBH", "version": "0.1.0", "documentation": "/documentation"}

@@ -111,7 +111,7 @@ class Migration(migrations.Migration):
             name='ConfigurationSite',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('nom_bureau', models.CharField(default='BEE', max_length=200, verbose_name="Nom du bureau d'études")),
+                ('nom_bureau', models.CharField(default='LBH', max_length=200, verbose_name="Nom du bureau d'études")),
                 ('slogan', models.CharField(blank=True, max_length=500, verbose_name='Slogan')),
                 ('description_courte', models.TextField(blank=True, verbose_name='Description courte')),
                 ('logo', models.ImageField(blank=True, null=True, upload_to='site_public/logo/', verbose_name='Logo')),

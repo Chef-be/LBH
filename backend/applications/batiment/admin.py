@@ -1,4 +1,4 @@
-"""Administration Django pour les programmes bâtiment — Plateforme BEE."""
+"""Administration Django pour les programmes bâtiment — Plateforme LBH."""
 
 from django.contrib import admin
 from .models import ProgrammeBatiment, LocalProgramme

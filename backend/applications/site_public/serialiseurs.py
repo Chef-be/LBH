@@ -1,4 +1,4 @@
-"""Sérialiseurs pour le site vitrine public — Plateforme BEE."""
+"""Sérialiseurs pour le site vitrine public — Plateforme LBH."""
 
 import json
 from django.core.files.uploadedfile import UploadedFile
@@ -62,12 +62,12 @@ class EtapeDemarcheSerialiseur(serializers.ModelSerializer):
 class ConfigurationSiteSerialiseur(serializers.ModelSerializer):
     champs_media = ("logo", "logo_pied_de_page", "favicon")
     meta_titres_legacy = {
-        "BEE — Bureau d'Études Économiste",
-        "BEE - Bureau d'Études Économiste",
-        "BEE -- Bureau d'Études Économiste",
-        "BEE — Bureau d'Etudes Economiste",
-        "BEE - Bureau d'Etudes Economiste",
-        "BEE -- Bureau d'Etudes Economiste",
+        "LBH — Bureau d'Études Économiste",
+        "LBH - Bureau d'Études Économiste",
+        "LBH -- Bureau d'Études Économiste",
+        "LBH — Bureau d'Etudes Economiste",
+        "LBH - Bureau d'Etudes Economiste",
+        "LBH -- Bureau d'Etudes Economiste",
     }
 
     @classmethod

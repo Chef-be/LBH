@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================
 # Analyseur de ressources documentaires
-# Plateforme BEE — Script d'ingestion et d'analyse
+# Plateforme LBH — Script d'ingestion et d'analyse
 # ============================================================
 # Ce script analyse les fichiers déposés dans ressources/entree/
 # Il peut aussi être utilisé pour produire un rapport synthétique
@@ -375,10 +375,10 @@ def afficher_resume():
     pdfs_sources = lister_pdfs_sources()
 
     print("=" * 60)
-    print("RÉSUMÉ DES RESSOURCES DOCUMENTAIRES — Plateforme BEE")
+    print("RÉSUMÉ DES RESSOURCES DOCUMENTAIRES — Plateforme LBH")
     print("=" * 60)
     print(f"Répertoire source métier : {SOURCES_RESSOURCES}")
-    print(f"Répertoire de travail BEE : {RACINE_RESSOURCES}")
+    print(f"Répertoire de travail LBH : {RACINE_RESSOURCES}")
     print(f"Total documents indexés : {len(catalogue)}")
     print(f"PDF détectés dans la source documentaire : {len(pdfs_sources)}")
     print()

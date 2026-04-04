@@ -1,4 +1,4 @@
-"""Routes URL pour le suivi d'exécution des travaux — Plateforme BEE."""
+"""Routes URL pour le suivi d'exécution des travaux — Plateforme LBH."""
 
 from django.urls import path
 from . import views

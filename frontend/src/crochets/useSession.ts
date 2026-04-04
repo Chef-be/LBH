@@ -169,7 +169,7 @@ export const useSessionStore = create<EtatSession>()(
       definirEtatHydratation: (estHydratee) => set({ estHydratee }),
     }),
     {
-      name: "session-bee",
+      name: "session-lbh",
       // Persister le jeton de rafraîchissement pour survivre aux rechargements.
       // Le jeton d'accès (court) sera régénéré automatiquement au chargement.
       partialize: (etat) => ({

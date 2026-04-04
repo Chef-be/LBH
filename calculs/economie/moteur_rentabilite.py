@@ -1,5 +1,5 @@
 """
-Moteur de calcul de rentabilité — Plateforme BEE
+Moteur de calcul de rentabilité — Plateforme LBH
 Bureau d'Études Économiste
 
 Version : 1.0.0

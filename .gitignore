@@ -1,5 +1,5 @@
 # ============================================================
-# PLATEFORME BEE — Fichiers exclus du versionnement
+# PLATEFORME LBH — Fichiers exclus du versionnement
 # ============================================================
 
 # Secrets et configuration locale
@@ -67,6 +67,7 @@ yarn-error.log*
 .yarn/
 .yarn-integrity
 .pnpm-debug.log*
+*.tsbuildinfo
 
 # Éditeurs
 .vscode/

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================
 # Service Analyse PDF — PyMuPDF + pdfplumber + FastAPI
-# Plateforme BEE — Bureau d'Études Économiste
+# Plateforme LBH — Bureau d'Études Économiste
 # Port : 8011
 # ============================================================
 
@@ -37,7 +37,7 @@ async def duree_de_vie(application: FastAPI):
 # Application
 # ------------------------------------------------------------
 app = FastAPI(
-    title="Service Analyse PDF — Plateforme BEE",
+    title="Service Analyse PDF — Plateforme LBH",
     description="Extraction de texte, tableaux et métadonnées depuis des PDF",
     version="0.1.0",
     lifespan=duree_de_vie,
@@ -87,7 +87,7 @@ class ReponseEtat(BaseModel):
 async def sante():
     return ReponseEtat(
         statut="actif",
-        service="analyse-pdf-bee",
+        service="analyse-pdf-lbh",
         version="0.1.0",
         horodatage=datetime.now().isoformat(),
     )
@@ -148,4 +148,4 @@ async def analyser_pdf(
 
 @app.get("/", tags=["Général"])
 async def racine():
-    return {"service": "Analyse PDF Plateforme BEE", "version": "0.1.0", "documentation": "/documentation"}
+    return {"service": "Analyse PDF Plateforme LBH", "version": "0.1.0", "documentation": "/documentation"}

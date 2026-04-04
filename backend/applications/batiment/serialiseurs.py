@@ -1,4 +1,4 @@
-"""Sérialiseurs pour les programmes bâtiment — Plateforme BEE."""
+"""Sérialiseurs pour les programmes bâtiment — Plateforme LBH."""
 
 from rest_framework import serializers
 from .models import ProgrammeBatiment, LocalProgramme

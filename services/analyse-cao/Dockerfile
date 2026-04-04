@@ -1,6 +1,6 @@
 # ============================================================
 # Dockerfile — Service Analyse CAO (DWG/DXF)
-# Plateforme BEE — ezdxf + FastAPI
+# Plateforme LBH — ezdxf + FastAPI
 # ============================================================
 # Note : Le format DWG est propriétaire (Autodesk).
 # ezdxf prend en charge nativement le format DXF (toutes versions).

@@ -1,5 +1,5 @@
 """
-Vues de rentabilité — Plateforme BEE.
+Vues de rentabilité — Plateforme LBH.
 Analyses et simulations de marges à partir des données d'économie.
 """
 

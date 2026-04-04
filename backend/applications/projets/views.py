@@ -1,5 +1,5 @@
 """
-Vues API pour les projets — Plateforme BEE.
+Vues API pour les projets — Plateforme LBH.
 """
 
 from rest_framework import generics, permissions, filters

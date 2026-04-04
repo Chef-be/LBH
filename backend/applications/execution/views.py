@@ -1,4 +1,4 @@
-"""Vues API pour le suivi d'exécution des travaux — Plateforme BEE."""
+"""Vues API pour le suivi d'exécution des travaux — Plateforme LBH."""
 
 from io import BytesIO
 

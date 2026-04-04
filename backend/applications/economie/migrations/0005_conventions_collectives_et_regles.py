@@ -77,7 +77,7 @@ def creer_convention_et_regles(apps, schema_editor):
     correspondances = {
         "TECHNICIEN_ETUDES": "TECH_NON_CADRE",
         "INGENIEUR_PROJET": "INGE_CADRE",
-        "ECONOMISTE_BEE": "INGE_CADRE",
+        "ECONOMISTE_LBH": "INGE_CADRE",
     }
 
     for code_profil, code_regle in correspondances.items():

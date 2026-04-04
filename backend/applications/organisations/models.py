@@ -1,6 +1,6 @@
 """
 Modèles des organisations — Structures juridiques et groupes d'utilisateurs.
-Plateforme BEE — Bureau d'Études Économiste
+Plateforme LBH — Bureau d'Études Économiste
 """
 
 import uuid

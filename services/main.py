@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================
 # Services FastAPI — Agrégateur principal
-# Plateforme BEE — Bureau d'Études Économiste
+# Plateforme LBH — Bureau d'Études Économiste
 # Port : 8001
 # ============================================================
 
@@ -28,11 +28,11 @@ except ImportError:
 # Configuration
 # ------------------------------------------------------------
 SECRET_API = os.environ.get("SECRET_API", "")
-OCR_HOTE = os.environ.get("OCR_HOTE", "bee-ocr")
+OCR_HOTE = os.environ.get("OCR_HOTE", "lbh-ocr")
 OCR_PORT = os.environ.get("OCR_PORT", "8010")
-ANALYSE_PDF_HOTE = os.environ.get("ANALYSE_PDF_HOTE", "bee-analyse-pdf")
+ANALYSE_PDF_HOTE = os.environ.get("ANALYSE_PDF_HOTE", "lbh-analyse-pdf")
 ANALYSE_PDF_PORT = os.environ.get("ANALYSE_PDF_PORT", "8011")
-ANALYSE_CAO_HOTE = os.environ.get("ANALYSE_CAO_HOTE", "bee-analyse-cao")
+ANALYSE_CAO_HOTE = os.environ.get("ANALYSE_CAO_HOTE", "lbh-analyse-cao")
 ANALYSE_CAO_PORT = os.environ.get("ANALYSE_CAO_PORT", "8012")
 
 URL_OCR = f"http://{OCR_HOTE}:{OCR_PORT}"
@@ -47,7 +47,7 @@ entete_cle_api = APIKeyHeader(name="X-Cle-API", auto_error=False)
 # ------------------------------------------------------------
 @asynccontextmanager
 async def duree_de_vie(application: FastAPI):
-    journal.info("Démarrage des services FastAPI — Plateforme BEE")
+    journal.info("Démarrage des services FastAPI — Plateforme LBH")
     yield
     journal.info("Arrêt des services FastAPI")
 
@@ -56,7 +56,7 @@ async def duree_de_vie(application: FastAPI):
 # Application
 # ------------------------------------------------------------
 app = FastAPI(
-    title="Services Plateforme BEE",
+    title="Services Plateforme LBH",
     description="Services spécialisés — agrégateur OCR, PDF, CAO",
     version="0.1.0",
     lifespan=duree_de_vie,
@@ -115,7 +115,7 @@ async def sante():
     return ReponseEtat(
         statut="actif",
         horodatage=datetime.now().isoformat(),
-        service="services-bee",
+        service="services-lbh",
         version="0.1.0",
         services_dependants=etats,
     )
@@ -123,4 +123,4 @@ async def sante():
 
 @app.get("/", tags=["Général"])
 async def racine():
-    return {"service": "Services Plateforme BEE", "version": "0.1.0", "documentation": "/documentation"}
+    return {"service": "Services Plateforme LBH", "version": "0.1.0", "documentation": "/documentation"}

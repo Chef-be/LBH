@@ -1,5 +1,5 @@
 """
-Gestionnaire d'erreurs API personnalisé — Plateforme BEE.
+Gestionnaire d'erreurs API personnalisé — Plateforme LBH.
 Retourne des messages d'erreur en français avec un format homogène.
 """
 

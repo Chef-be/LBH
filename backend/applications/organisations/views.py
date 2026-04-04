@@ -1,4 +1,4 @@
-"""Vues API pour les organisations — Plateforme BEE."""
+"""Vues API pour les organisations — Plateforme LBH."""
 
 from rest_framework import generics, permissions, filters
 from .models import Organisation, GroupeUtilisateurs

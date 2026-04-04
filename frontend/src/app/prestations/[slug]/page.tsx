@@ -65,7 +65,7 @@ const CLASSES: Record<string, { texte: string; fond: string; bord: string; bg: s
   orange:   { texte: "text-orange-700",   fond: "bg-orange-50",    bord: "border-orange-200",   bg: "bg-orange-500",  texte_bg: "text-white" },
 };
 
-const URL_BACKEND = process.env.URL_BACKEND || "http://bee-backend:8000";
+const URL_BACKEND = process.env.URL_BACKEND || "http://lbh-backend:8000";
 const URL_BASE_PUBLIQUE = process.env.URL_BASE || process.env.NEXTAUTH_URL || "";
 
 async function chargerPrestation(slug: string): Promise<{

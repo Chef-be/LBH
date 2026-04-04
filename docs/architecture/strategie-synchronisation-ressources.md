@@ -26,7 +26,7 @@ Ce partage Samba `admin/ressources` contient la bibliothèque PDF métier réell
 - la qualité chantier ;
 - la gestion contractuelle.
 
-### Répertoire de travail BEE
+### Répertoire de travail LBH
 
 ```
 /var/www/vhosts/lbh-economiste.com/ressources/
@@ -115,7 +115,7 @@ if ($LASTEXITCODE -eq 0) {
 
 ### Méthode D — Dépôt via l'interface web (après Phase 2)
 
-Une interface de dépôt sera disponible dans la Plateforme BEE permettant :
+Une interface de dépôt sera disponible dans la Plateforme LBH permettant :
 - L'upload direct de fichiers depuis le navigateur.
 - L'upload groupé (archive ZIP décompressée automatiquement).
 - La progression de l'envoi en temps réel.
@@ -128,7 +128,7 @@ Après transfert des fichiers dans `/ressources/entree/`, lancer l'ingestion :
 
 ```bash
 # Déclencher l'ingestion manuellement
-docker compose exec bee-backend python manage.py ingerer_ressources
+docker compose exec lbh-backend python manage.py ingerer_ressources
 
 # Ou via l'interface de supervision (après Phase 5)
 ```
@@ -198,12 +198,12 @@ ls -la /var/www/vhosts/lbh-economiste.com/ressources/entree/
 
 # Lancer l'ingestion manuellement
 docker compose -f /var/www/vhosts/lbh-economiste.com/httpdocs/compose.yaml \
-  exec bee-backend python manage.py ingerer_ressources
+  exec lbh-backend python manage.py ingerer_ressources
 
 # Voir le catalogue après ingestion
 cat /var/www/vhosts/lbh-economiste.com/ressources/indexation/catalogue.csv | column -t -s ","
 
 # Vérifier les journaux d'ingestion
 docker compose -f /var/www/vhosts/lbh-economiste.com/httpdocs/compose.yaml \
-  logs bee-backend | grep ingestion
+  logs lbh-backend | grep ingestion
 ```

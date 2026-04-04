@@ -1,4 +1,4 @@
-"""Vues API pour les études de voirie — Plateforme BEE."""
+"""Vues API pour les études de voirie — Plateforme LBH."""
 
 import sys
 import os

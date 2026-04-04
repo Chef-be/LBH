@@ -1,6 +1,6 @@
 # ============================================================
 # Dockerfile — Service Analyse PDF
-# Plateforme BEE — PyMuPDF + pdfplumber + FastAPI
+# Plateforme LBH — PyMuPDF + pdfplumber + FastAPI
 # ============================================================
 
 FROM python:3.11-slim-bookworm

@@ -1,5 +1,5 @@
 """
-Fixtures globales pytest pour la Plateforme BEE.
+Fixtures globales pytest pour la Plateforme LBH.
 Disponibles dans tous les sous-répertoires de tests.
 """
 

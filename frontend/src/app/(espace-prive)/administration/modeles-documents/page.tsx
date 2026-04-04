@@ -78,7 +78,7 @@ const VALEURS_APERCU_PAR_DEFAUT: Record<string, string> = {
   statut_projet: "En cours",
   maitre_ouvrage: "Ville de Mamoudzou",
   maitre_oeuvre: "Cabinet ABC Architecture",
-  organisation: "BEE",
+  organisation: "LBH",
   responsable_projet: "Anne Rédactrice",
   date_generation: "02/04/2026",
   lot_intitule: "Gros œuvre",

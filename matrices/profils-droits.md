@@ -1,4 +1,4 @@
-# MATRICE DES PROFILS ET DROITS — Plateforme BEE
+# MATRICE DES PROFILS ET DROITS — Plateforme LBH
 
 ---
 

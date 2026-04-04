@@ -101,7 +101,7 @@ function cl(couleur: string) {
 
 // ─── Fetch serveur ───────────────────────────────────────────────────────────
 
-const URL_BACKEND = process.env.URL_BACKEND || "http://bee-backend:8000";
+const URL_BACKEND = process.env.URL_BACKEND || "http://lbh-backend:8000";
 const URL_BASE_PUBLIQUE = process.env.URL_BASE || process.env.NEXTAUTH_URL || "";
 
 async function chargerAccueil(): Promise<DonneesAccueil | null> {

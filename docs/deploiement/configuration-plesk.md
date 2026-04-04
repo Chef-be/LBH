@@ -1,4 +1,4 @@
-# CONFIGURATION PLESK — Plateforme BEE
+# CONFIGURATION PLESK — Plateforme LBH
 
 ---
 
@@ -11,11 +11,11 @@ Internet (80/443)
       │
       │ Proxy reverse vers 127.0.0.1:3082
       │
-   [bee-nginx]   ←── Conteneur Docker interne
+   [lbh-nginx]   ←── Conteneur Docker interne
       │
-      ├── /api/  →  [bee-backend:8000]   (Django)
-      ├── /services/ → [bee-services:8001] (FastAPI)
-      └── /      →  [bee-frontend:3000]  (Next.js)
+      ├── /api/  →  [lbh-backend:8000]   (Django)
+      ├── /services/ → [lbh-services:8001] (FastAPI)
+      └── /      →  [lbh-frontend:3000]  (Next.js)
 ```
 
 ---
@@ -25,7 +25,7 @@ Internet (80/443)
 ### Étape 1 — Créer ou utiliser un domaine / sous-domaine
 
 Option A : Sous-domaine dédié (recommandé)
-- Créer `bee.lbh-economiste.com` dans Plesk
+- Créer `lbh-economiste.com` dans Plesk
 - Ou utiliser le domaine principal `lbh-economiste.com`
 
 ### Étape 2 — Configurer le proxy inverse dans Plesk
@@ -35,7 +35,7 @@ Dans Plesk :
 2. Dans la section "Configuration de proxy Nginx supplémentaire", ajouter :
 
 ```nginx
-# Proxy vers la Plateforme BEE
+# Proxy vers la Plateforme LBH
 location / {
     proxy_pass http://127.0.0.1:3082;
     proxy_http_version 1.1;
@@ -57,7 +57,7 @@ location / {
 ### Étape 3 — Activer le certificat SSL
 
 Dans Plesk :
-1. Domaines → bee.lbh-economiste.com → SSL/TLS
+1. Domaines → lbh-economiste.com → SSL/TLS
 2. Sélectionner "Let's Encrypt"
 3. Activer "Redirection HTTP → HTTPS"
 
@@ -93,9 +93,9 @@ curl -s http://127.0.0.1:3082/sante-proxy
 curl -s http://127.0.0.1:3082/api/sante/
 
 # Vérifier les journaux
-docker compose logs --tail=20 bee-nginx
-docker compose logs --tail=20 bee-backend
-docker compose logs --tail=20 bee-frontend
+docker compose logs --tail=20 lbh-nginx
+docker compose logs --tail=20 lbh-backend
+docker compose logs --tail=20 lbh-frontend
 ```
 
 ---
@@ -127,11 +127,11 @@ systemctl is-enabled docker
 | 8084 | Collabora |
 | 8085 | Ariang |
 
-**Ports réservés Plateforme BEE :**
-- 3082 : proxy Nginx BEE
-- 5434 : PostgreSQL BEE (accès local uniquement)
-- 9100 : MinIO API BEE
-- 9101 : MinIO Console BEE
+**Ports réservés Plateforme LBH :**
+- 3082 : proxy Nginx LBH
+- 5434 : PostgreSQL LBH (accès local uniquement)
+- 9100 : MinIO API LBH
+- 9101 : MinIO Console LBH
 
 ---
 
@@ -139,14 +139,14 @@ systemctl is-enabled docker
 
 ```bash
 # Sauvegarder la base de données
-docker compose exec bee-postgresql pg_dump \
+docker compose exec lbh-postgresql pg_dump \
     -U ${BDD_UTILISATEUR} ${BDD_NOM} \
-    > /tmp/bee-sauvegarde-$(date +%Y%m%d-%H%M%S).sql
+    > /tmp/lbh-sauvegarde-$(date +%Y%m%d-%H%M%S).sql
 
 # Compresser
-gzip /tmp/bee-sauvegarde-*.sql
+gzip /tmp/lbh-sauvegarde-*.sql
 
 # Déplacer vers un répertoire sécurisé
-mv /tmp/bee-sauvegarde-*.sql.gz \
+mv /tmp/lbh-sauvegarde-*.sql.gz \
    /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/sauvegardes/
 ```

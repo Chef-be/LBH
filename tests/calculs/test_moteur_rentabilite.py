@@ -1,5 +1,5 @@
 """
-Tests du moteur de rentabilité — Plateforme BEE.
+Tests du moteur de rentabilité — Plateforme LBH.
 Couvre : déboursé sec, coûts, prix de vente, marges, états de rentabilité, seuils.
 """
 

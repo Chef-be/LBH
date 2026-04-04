@@ -2,7 +2,7 @@
 
 ## Objet
 
-Ce document sert de point de reprise opérationnel pour la plateforme BEE.
+Ce document sert de point de reprise opérationnel pour la plateforme LBH.
 
 ## État global
 
@@ -98,12 +98,12 @@ La plateforme a fortement évolué sur les volets suivants :
 Contrôles confirmés sur l'état actuel :
 
 - `python3 -m py_compile` sur les fichiers backend récemment touchés : OK
-- `docker exec bee-backend python manage.py migrate` : OK
-- `docker exec bee-backend python manage.py check` : OK
-- `docker exec bee-backend python manage.py test --keepdb applications.execution.tests applications.economie.tests` : OK
+- `docker exec lbh-backend python manage.py migrate` : OK
+- `docker exec lbh-backend python manage.py check` : OK
+- `docker exec lbh-backend python manage.py test --keepdb applications.execution.tests applications.economie.tests` : OK
 - `curl -I http://127.0.0.1:3082/api/sante/` : `200`
 - `curl -I http://127.0.0.1:3082/projets` : `200`
-- conteneurs `bee-backend`, `bee-frontend`, `bee-nginx` : sains
+- conteneurs `lbh-backend`, `lbh-frontend`, `lbh-nginx` : sains
 
 ## Point technique important
 
@@ -155,6 +155,6 @@ L'export PDF du planning utilise WeasyPrint quand la pile native est disponible.
 Pour reprendre efficacement :
 
 1. lire ce rapport ;
-2. lire `/root/.claude/projects/-var-www-vhosts-lbh-economiste-com/memory/project_bee.md` ;
+2. relire les dernières décisions d'architecture et de déploiement déjà consignées dans le dépôt ;
 3. lire `docs/metier/synthese-ressources-samba.md` ;
 4. relire les fichiers centraux du module visé avant nouvelle implémentation.

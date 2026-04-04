@@ -1,4 +1,4 @@
-"""Administration Django pour les appels d'offres — Plateforme BEE."""
+"""Administration Django pour les appels d'offres — Plateforme LBH."""
 
 from django.contrib import admin
 from .models import AppelOffres, OffreEntreprise

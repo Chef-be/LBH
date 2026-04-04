@@ -1,4 +1,4 @@
-# PLAN DE TRAVAIL PAR PHASES — Plateforme BEE
+# PLAN DE TRAVAIL PAR PHASES — Plateforme LBH
 
 ---
 

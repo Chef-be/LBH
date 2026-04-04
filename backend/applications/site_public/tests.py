@@ -77,7 +77,7 @@ class SitePublicConfigurationTests(TestCase):
 
     def test_configuration_masque_le_meta_titre_legacy(self):
         self.configuration.nom_bureau = "LBH Economiste"
-        self.configuration.meta_titre = "BEE — Bureau d'Études Économiste"
+        self.configuration.meta_titre = "LBH — Bureau d'Études Économiste"
         self.configuration.save(update_fields=["nom_bureau", "meta_titre"])
 
         self.client.force_authenticate(user=None)

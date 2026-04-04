@@ -1,6 +1,6 @@
 """
 Modèles des métrés — Quantitatifs et métrés de travaux.
-Plateforme BEE — Bureau d'Études Économiste
+Plateforme LBH — Bureau d'Études Économiste
 """
 
 import uuid

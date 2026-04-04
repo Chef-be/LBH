@@ -1,6 +1,6 @@
 """
 Modèles voirie — Études de dimensionnement de chaussées.
-Plateforme BEE — Bureau d'Études Économiste
+Plateforme LBH — Bureau d'Études Économiste
 """
 
 import uuid

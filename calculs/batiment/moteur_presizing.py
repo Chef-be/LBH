@@ -1,5 +1,5 @@
 """
-Moteur de pré-dimensionnement bâtiment — Plateforme BEE.
+Moteur de pré-dimensionnement bâtiment — Plateforme LBH.
 Estimation rapide du coût de construction à partir des surfaces de locaux.
 
 Méthode : coût/m² × surfaces par type de local, avec facteurs correctifs

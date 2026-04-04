@@ -1,5 +1,5 @@
 """
-Modèles de suivi d'exécution des travaux — Plateforme BEE.
+Modèles de suivi d'exécution des travaux — Plateforme LBH.
 Direction de l'exécution des travaux (DET), situations de travaux, OPR/AOR.
 """
 

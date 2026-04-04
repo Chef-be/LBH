@@ -1,4 +1,4 @@
-"""Routes URL pour les métrés — Plateforme BEE."""
+"""Routes URL pour les métrés — Plateforme LBH."""
 
 from django.urls import path
 from . import views

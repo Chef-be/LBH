@@ -1,5 +1,5 @@
 """
-Modèles de pré-dimensionnement bâtiment — Plateforme BEE.
+Modèles de pré-dimensionnement bâtiment — Plateforme LBH.
 Estimation rapide de surfaces, volumes et coûts d'un programme immobilier.
 """
 

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * FournisseurTheme — Plateforme BEE
+ * FournisseurTheme — Plateforme LBH
  * Gère le mode clair/sombre/auto et applique le thème couleur admin
  * via des classes CSS sur <html>.
  */
@@ -93,7 +93,7 @@ export function FournisseurTheme({
 
   // Initialisation : lire la préférence sauvegardée
   useEffect(() => {
-    const sauvegarde = localStorage.getItem("bee-mode-theme") as ModeTheme | null;
+    const sauvegarde = localStorage.getItem("lbh-mode-theme") as ModeTheme | null;
     const pref = sauvegarde ?? modeDefaut;
     setModePreference(pref);
     setMode(calculerModeEffectif(pref));
@@ -142,7 +142,7 @@ export function FournisseurTheme({
     setModePreference(m);
     const effectif = calculerModeEffectif(m);
     setMode(effectif);
-    localStorage.setItem("bee-mode-theme", m);
+    localStorage.setItem("lbh-mode-theme", m);
   }, [calculerModeEffectif]);
 
   const basculerMode = useCallback(() => {

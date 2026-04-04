@@ -1,5 +1,5 @@
 """
-Fixtures pytest pour les tests Django de la Plateforme BEE.
+Fixtures pytest pour les tests Django de la Plateforme LBH.
 Fournit des objets de base : utilisateur authentifié, organisation, projet.
 """
 

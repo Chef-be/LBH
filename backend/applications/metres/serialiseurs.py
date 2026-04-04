@@ -1,4 +1,4 @@
-"""Sérialiseurs pour les métrés — Plateforme BEE."""
+"""Sérialiseurs pour les métrés — Plateforme LBH."""
 
 from decimal import Decimal
 

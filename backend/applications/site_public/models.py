@@ -1,5 +1,5 @@
 """
-Modèles du site vitrine public — Plateforme BEE.
+Modèles du site vitrine public — Plateforme LBH.
 Contenu éditorial du site public : configuration, prestations, réalisations,
 équipe, statistiques, démarche, RGPD, pages statiques.
 """

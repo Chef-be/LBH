@@ -2,81 +2,81 @@
 # compose.yaml — LBH ECONOMISTE
 # Généré automatiquement par l'installateur
 # Date : 2026-03-28T12:02:46.346996
-# Préfixe conteneurs : bee
+# Préfixe conteneurs : lbh
 # ============================================================
 # NE PAS MODIFIER MANUELLEMENT — Regénérer via l'installateur
 # ou modifier le gabarit : installateur/gabarits/compose/compose.yaml.j2
 # ============================================================
 
-name: bee
+name: lbh
 
 # ------------------------------------------------------------
 # VOLUMES PERSISTANTS
 # ------------------------------------------------------------
 volumes:
-  bee-donnees-postgresql:
+  lbh-donnees-postgresql:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/postgresql
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/postgresql
 
-  bee-donnees-redis:
+  lbh-donnees-redis:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/redis
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/redis
 
-  bee-donnees-minio:
+  lbh-donnees-minio:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/minio
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/minio
 
-  bee-journaux:
+  lbh-journaux:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/journaux
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/journaux
 
-  bee-medias:
+  lbh-medias:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/medias
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/medias
 
-  bee-statiques:
+  lbh-statiques:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/statiques
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/statiques
 
-  bee-donnees-roundcube:
+  lbh-donnees-roundcube:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/roundcube/db
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/roundcube/db
 
-  bee-temp-roundcube:
+  lbh-temp-roundcube:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/bee/roundcube/temp
+      device: /var/www/vhosts/lbh-economiste.com/httpdocs/volumes/lbh/roundcube/temp
 
 # ------------------------------------------------------------
 # RÉSEAU DÉDIÉ
 # ------------------------------------------------------------
 networks:
-  bee-reseau:
+  lbh-reseau:
     driver: bridge
-    name: bee-reseau
+    name: lbh-reseau
 
 # ============================================================
 # SERVICES
@@ -86,27 +86,27 @@ services:
   # ----------------------------------------------------------
   # PROXY — Point d'entrée Plesk (port 3082)
   # ----------------------------------------------------------
-  bee-nginx:
+  lbh-nginx:
     image: nginx:1.27-alpine
-    container_name: bee-nginx
+    container_name: lbh-nginx
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PORT_ENTREE_PLESK}:80"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/html:/usr/share/nginx/html:ro
-      - bee-statiques:/var/www/statiques:ro
-      - bee-medias:/var/www/medias:ro
-      - bee-journaux:/var/log/app/nginx:rw
+      - lbh-statiques:/var/www/statiques:ro
+      - lbh-medias:/var/www/medias:ro
+      - lbh-journaux:/var/log/app/nginx:rw
     depends_on:
-      bee-frontend:
+      lbh-frontend:
         condition: service_healthy
-      bee-backend:
+      lbh-backend:
         condition: service_healthy
-      bee-roundcube:
+      lbh-roundcube:
         condition: service_started
     networks:
-      - bee-reseau
+      - lbh-reseau
     environment:
       - TZ=${FUSEAU_HORAIRE}
     healthcheck:
@@ -123,29 +123,31 @@ services:
   # ----------------------------------------------------------
   # INTERFACE — Next.js
   # ----------------------------------------------------------
-  bee-frontend:
+  lbh-frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       target: ${ENVIRONNEMENT}
-    container_name: bee-frontend
+    container_name: lbh-frontend
     restart: unless-stopped
     expose:
       - "3000"
     environment:
       - NODE_ENV=${ENVIRONNEMENT}
       - TZ=${FUSEAU_HORAIRE}
+      - PREFIXE_CONTENEURS=${PREFIXE_CONTENEURS}
       - NEXTAUTH_SECRET=${SECRET_NEXTAUTH}
       - NEXTAUTH_URL=${URL_BASE}
       - NEXT_PUBLIC_API_URL=/api
       - NEXT_PUBLIC_NOM_PLATEFORME=${NOM_PLATEFORME}
       - NEXT_PUBLIC_PREFIXE=${PREFIXE_CONTENEURS}
+      - URL_BACKEND=${URL_BACKEND}
       - HOSTNAME=0.0.0.0
     depends_on:
-      bee-backend:
+      lbh-backend:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/sante"]
       interval: 30s
@@ -161,16 +163,16 @@ services:
   # ----------------------------------------------------------
   # WEBMAIL — Roundcube
   # ----------------------------------------------------------
-  bee-roundcube:
+  lbh-roundcube:
     image: roundcube/roundcubemail:latest
-    container_name: bee-roundcube
+    container_name: lbh-roundcube
     restart: unless-stopped
     expose:
       - "80"
     volumes:
       - ./roundcube/config:/var/roundcube/config:ro
-      - bee-donnees-roundcube:/var/roundcube/db:rw
-      - bee-temp-roundcube:/tmp/roundcube-temp:rw
+      - lbh-donnees-roundcube:/var/roundcube/db:rw
+      - lbh-temp-roundcube:/tmp/roundcube-temp:rw
     environment:
       - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://${COURRIEL_HOTE_IMAP:-mail.lbh-economiste.com}
       - ROUNDCUBEMAIL_DEFAULT_PORT=${COURRIEL_PORT_IMAP:-993}
@@ -189,7 +191,7 @@ services:
       - ROUNDCUBE_JUNK_MBOX=${COURRIEL_DOSSIER_INDESIRABLES:-INBOX.Spam}
       - ROUNDCUBE_TRASH_MBOX=${COURRIEL_DOSSIER_CORBEILLE:-INBOX.Trash}
     networks:
-      - bee-reseau
+      - lbh-reseau
     logging:
       driver: json-file
       options:
@@ -199,20 +201,20 @@ services:
   # ----------------------------------------------------------
   # CŒUR APPLICATIF — Django
   # ----------------------------------------------------------
-  bee-backend:
+  lbh-backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bee-backend
+    container_name: lbh-backend
     restart: unless-stopped
     expose:
       - "8000"
     volumes:
       - ./backend:/app:rw
       - ./calculs:/app/calculs:ro
-      - bee-medias:/app/medias:rw
-      - bee-statiques:/app/statiques:rw
-      - bee-journaux:/var/log/app/backend:rw
+      - lbh-medias:/app/medias:rw
+      - lbh-statiques:/app/statiques:rw
+      - lbh-journaux:/var/log/app/backend:rw
       - ${CHEMIN_RESSOURCES_DOCUMENTAIRES}:/ressources:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host_proc:ro
@@ -249,12 +251,12 @@ services:
       - SUPERVISION_HOST_PROC_PATH=/host_proc
       - SUPERVISION_HOST_FS_PATH=/hostfs
     depends_on:
-      bee-postgresql:
+      lbh-postgresql:
         condition: service_healthy
-      bee-redis:
+      lbh-redis:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/sante/"]
       interval: 30s
@@ -270,18 +272,18 @@ services:
   # ----------------------------------------------------------
   # SERVICES FASTAPI
   # ----------------------------------------------------------
-  bee-services:
+  lbh-services:
     build:
       context: ./services
       dockerfile: Dockerfile
-    container_name: bee-services
+    container_name: lbh-services
     restart: unless-stopped
     expose:
       - "8001"
     volumes:
       - ./services:/app:rw
-      - bee-medias:/app/medias:rw
-      - bee-journaux:/var/log/app/services:rw
+      - lbh-medias:/app/medias:rw
+      - lbh-journaux:/var/log/app/services:rw
     environment:
       - TZ=${FUSEAU_HORAIRE}
       - BDD_URL=${DATABASE_URL}
@@ -291,12 +293,12 @@ services:
       - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
       - SECRET_API=${SECRET_DJANGO}
     depends_on:
-      bee-postgresql:
+      lbh-postgresql:
         condition: service_healthy
-      bee-redis:
+      lbh-redis:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/sante"]
       interval: 30s
@@ -312,16 +314,16 @@ services:
   # ----------------------------------------------------------
   # BASE DE DONNÉES — PostgreSQL + PostGIS
   # ----------------------------------------------------------
-  bee-postgresql:
+  lbh-postgresql:
     image: postgis/postgis:16-3.4
-    container_name: bee-postgresql
+    container_name: lbh-postgresql
     restart: unless-stopped
     expose:
       - "5432"
     ports:
       - "127.0.0.1:${PORT_POSTGRESQL_LOCAL}:5432"
     volumes:
-      - bee-donnees-postgresql:/var/lib/postgresql/data:rw
+      - lbh-donnees-postgresql:/var/lib/postgresql/data:rw
       - ./scripts/installation/init-postgresql.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     environment:
       - POSTGRES_DB=${BDD_NOM}
@@ -330,7 +332,7 @@ services:
       - PGDATA=/var/lib/postgresql/data/pgdata
       - TZ=${FUSEAU_HORAIRE}
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${BDD_UTILISATEUR} -d ${BDD_NOM}"]
       interval: 15s
@@ -346,14 +348,14 @@ services:
   # ----------------------------------------------------------
   # CACHE ET FILE D'ATTENTE — Redis
   # ----------------------------------------------------------
-  bee-redis:
+  lbh-redis:
     image: redis:7-alpine
-    container_name: bee-redis
+    container_name: lbh-redis
     restart: unless-stopped
     expose:
       - "6379"
     volumes:
-      - bee-donnees-redis:/data:rw
+      - lbh-donnees-redis:/data:rw
     command: >
       redis-server
       --maxmemory 512mb
@@ -363,7 +365,7 @@ services:
     environment:
       - TZ=${FUSEAU_HORAIRE}
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 15s
@@ -378,22 +380,22 @@ services:
   # ----------------------------------------------------------
   # STOCKAGE OBJET — MinIO
   # ----------------------------------------------------------
-  bee-minio:
+  lbh-minio:
     image: minio/minio:latest
-    container_name: bee-minio
+    container_name: lbh-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     ports:
       - "127.0.0.1:${PORT_MINIO_API}:9000"
       - "127.0.0.1:${PORT_MINIO_CONSOLE}:9001"
     volumes:
-      - bee-donnees-minio:/data:rw
+      - lbh-donnees-minio:/data:rw
     environment:
       - MINIO_ROOT_USER=${MINIO_ACCES_CLE}
       - MINIO_ROOT_PASSWORD=${MINIO_SECRET_CLE}
       - TZ=${FUSEAU_HORAIRE}
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -409,17 +411,17 @@ services:
   # ----------------------------------------------------------
   # TRAITEMENT ASYNCHRONE — Celery Worker
   # ----------------------------------------------------------
-  bee-celery:
+  lbh-celery:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bee-celery
+    container_name: lbh-celery
     restart: unless-stopped
     command: celery -A configuration worker --loglevel=info --concurrency=4 -Q principale,documents,calculs,courriels
     volumes:
       - ./backend:/app:rw
-      - bee-medias:/app/medias:rw
-      - bee-journaux:/var/log/app/celery:rw
+      - lbh-medias:/app/medias:rw
+      - lbh-journaux:/var/log/app/celery:rw
       - ${CHEMIN_RESSOURCES_DOCUMENTAIRES}:/ressources:ro
     environment:
       - DJANGO_SETTINGS_MODULE=configuration.parametres.${ENVIRONNEMENT}
@@ -439,12 +441,12 @@ services:
       - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
       - TZ=${FUSEAU_HORAIRE}
     depends_on:
-      bee-redis:
+      lbh-redis:
         condition: service_healthy
-      bee-postgresql:
+      lbh-postgresql:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "celery", "-A", "configuration", "inspect", "ping", "--timeout=10"]
       interval: 60s
@@ -460,16 +462,16 @@ services:
   # ----------------------------------------------------------
   # ORDONNANCEUR — Celery Beat
   # ----------------------------------------------------------
-  bee-celery-beat:
+  lbh-celery-beat:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bee-celery-beat
+    container_name: lbh-celery-beat
     restart: unless-stopped
     command: celery -A configuration beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     volumes:
       - ./backend:/app:rw
-      - bee-journaux:/var/log/app/celery-beat:rw
+      - lbh-journaux:/var/log/app/celery-beat:rw
     environment:
       - DJANGO_SETTINGS_MODULE=configuration.parametres.${ENVIRONNEMENT}
       - SECRET_DJANGO=${SECRET_DJANGO}
@@ -484,12 +486,12 @@ services:
       - BDD_MOT_DE_PASSE=${BDD_MOT_DE_PASSE}
       - TZ=${FUSEAU_HORAIRE}
     depends_on:
-      bee-redis:
+      lbh-redis:
         condition: service_healthy
-      bee-postgresql:
+      lbh-postgresql:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "python", "-c", "import celery; print('ok')"]
       interval: 60s
@@ -505,17 +507,17 @@ services:
   # ----------------------------------------------------------
   # OCR — Tesseract 5 + Python
   # ----------------------------------------------------------
-  bee-ocr:
+  lbh-ocr:
     build:
       context: ./services/ocr
       dockerfile: Dockerfile
-    container_name: bee-ocr
+    container_name: lbh-ocr
     restart: unless-stopped
     expose:
       - "8010"
     volumes:
       - ./services/ocr:/app:rw
-      - bee-journaux:/var/log/app/ocr:rw
+      - lbh-journaux:/var/log/app/ocr:rw
     environment:
       - TZ=${FUSEAU_HORAIRE}
       - OCR_LANGUES=${OCR_LANGUES}
@@ -523,10 +525,10 @@ services:
       - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
       - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
     depends_on:
-      bee-minio:
+      lbh-minio:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8010/sante"]
       interval: 30s
@@ -542,27 +544,27 @@ services:
   # ----------------------------------------------------------
   # ANALYSE PDF
   # ----------------------------------------------------------
-  bee-analyse-pdf:
+  lbh-analyse-pdf:
     build:
       context: ./services/analyse-pdf
       dockerfile: Dockerfile
-    container_name: bee-analyse-pdf
+    container_name: lbh-analyse-pdf
     restart: unless-stopped
     expose:
       - "8011"
     volumes:
       - ./services/analyse-pdf:/app:rw
-      - bee-journaux:/var/log/app/analyse-pdf:rw
+      - lbh-journaux:/var/log/app/analyse-pdf:rw
     environment:
       - TZ=${FUSEAU_HORAIRE}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
       - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
     depends_on:
-      bee-minio:
+      lbh-minio:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8011/sante"]
       interval: 30s
@@ -578,27 +580,27 @@ services:
   # ----------------------------------------------------------
   # ANALYSE CAO — DXF/DWG
   # ----------------------------------------------------------
-  bee-analyse-cao:
+  lbh-analyse-cao:
     build:
       context: ./services/analyse-cao
       dockerfile: Dockerfile
-    container_name: bee-analyse-cao
+    container_name: lbh-analyse-cao
     restart: unless-stopped
     expose:
       - "8012"
     volumes:
       - ./services/analyse-cao:/app:rw
-      - bee-journaux:/var/log/app/analyse-cao:rw
+      - lbh-journaux:/var/log/app/analyse-cao:rw
     environment:
       - TZ=${FUSEAU_HORAIRE}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT}
       - MINIO_ACCES_CLE=${MINIO_ACCES_CLE}
       - MINIO_SECRET_CLE=${MINIO_SECRET_CLE}
     depends_on:
-      bee-minio:
+      lbh-minio:
         condition: service_healthy
     networks:
-      - bee-reseau
+      - lbh-reseau
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8012/sante"]
       interval: 30s

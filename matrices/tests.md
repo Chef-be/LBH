@@ -1,4 +1,4 @@
-# MATRICE DES TESTS — Plateforme BEE
+# MATRICE DES TESTS — Plateforme LBH
 
 ---
 
@@ -367,20 +367,20 @@ Les résultats de référence sont stockés dans `tests/calculs/jeux-de-referenc
 
 ```bash
 # Tests unitaires Python
-docker compose exec bee-backend pytest tests/unitaires/ -v
+docker compose exec lbh-backend pytest tests/unitaires/ -v
 
 # Tests d'intégration Python
-docker compose exec bee-backend pytest tests/integration/ -v
+docker compose exec lbh-backend pytest tests/integration/ -v
 
 # Tests de calcul
-docker compose exec bee-backend pytest tests/calculs/ -v
+docker compose exec lbh-backend pytest tests/calculs/ -v
 
 # Tests d'interface (Playwright)
 cd tests/interface && npx playwright test
 
 # Tous les tests
-docker compose exec bee-backend pytest -v && npx playwright test
+docker compose exec lbh-backend pytest -v && npx playwright test
 
 # Rapport de couverture
-docker compose exec bee-backend pytest --cov=applications --cov-report=html
+docker compose exec lbh-backend pytest --cov=applications --cov-report=html
 ```

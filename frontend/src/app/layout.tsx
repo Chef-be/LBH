@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 const inter = Inter({ subsets: ["latin"] });
 
-const URL_BACKEND_INTERNE = process.env.URL_BACKEND || "http://bee-backend:8000";
+const URL_BACKEND_INTERNE = process.env.URL_BACKEND || "http://lbh-backend:8000";
 const URL_BASE_PUBLIQUE = process.env.URL_BASE || process.env.NEXTAUTH_URL || "";
 
 async function chargerConfiguration(): Promise<ConfigurationSite | null> {
@@ -72,7 +72,7 @@ export default async function MiseEnPageRacine({
   const scriptInitialisationTheme = `
     (() => {
       const html = document.documentElement;
-      const prefSauvegardee = localStorage.getItem("bee-mode-theme");
+      const prefSauvegardee = localStorage.getItem("lbh-mode-theme");
       const pref = prefSauvegardee || ${JSON.stringify(configuration.mode_theme_defaut ?? "automatique")};
       const estSombre = pref === "sombre" || (
         pref === "automatique" &&

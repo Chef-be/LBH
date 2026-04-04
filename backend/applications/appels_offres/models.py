@@ -1,5 +1,5 @@
 """
-Modèles des appels d'offres — Plateforme BEE.
+Modèles des appels d'offres — Plateforme LBH.
 Gestion des consultations, DCE, réponses des entreprises et analyse des offres.
 """
 

@@ -1,5 +1,5 @@
 """
-Tests des vues API économie — Plateforme BEE.
+Tests des vues API économie — Plateforme LBH.
 Couvre : création d'étude, liste, lignes de prix, déclenchement du calcul.
 """
 

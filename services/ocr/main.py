@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================
 # Service OCR — Tesseract 5 + FastAPI
-# Plateforme BEE — Bureau d'Études Économiste
+# Plateforme LBH — Bureau d'Études Économiste
 # Port : 8010
 # ============================================================
 
@@ -49,7 +49,7 @@ async def duree_de_vie(application: FastAPI):
 # Application
 # ------------------------------------------------------------
 app = FastAPI(
-    title="Service OCR — Plateforme BEE",
+    title="Service OCR — Plateforme LBH",
     description="Extraction de texte par OCR (Tesseract 5) depuis images et PDF",
     version="0.1.0",
     lifespan=duree_de_vie,
@@ -125,7 +125,7 @@ def ocr_pdf(contenu: bytes) -> tuple[str, float, int]:
 async def sante():
     return ReponseEtat(
         statut="actif",
-        service="ocr-bee",
+        service="ocr-lbh",
         version="0.1.0",
         langues=LANGUES_OCR,
         horodatage=datetime.now().isoformat(),
@@ -178,4 +178,4 @@ async def extraire_texte(
 
 @app.get("/", tags=["Général"])
 async def racine():
-    return {"service": "OCR Plateforme BEE", "version": "0.1.0", "documentation": "/documentation"}
+    return {"service": "OCR Plateforme LBH", "version": "0.1.0", "documentation": "/documentation"}

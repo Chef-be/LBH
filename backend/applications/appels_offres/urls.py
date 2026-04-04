@@ -1,4 +1,4 @@
-"""Routes URL pour les appels d'offres — Plateforme BEE."""
+"""Routes URL pour les appels d'offres — Plateforme LBH."""
 
 from django.urls import path
 from . import views
