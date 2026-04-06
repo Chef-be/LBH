@@ -69,6 +69,23 @@ MOTS_CLES_TYPES: dict[str, tuple[str, ...]] = {
     "PHOTO": ("photo", "photographie", "image chantier"),
 }
 
+TYPES_DOCUMENTS_PAR_DEFAUT: dict[str, tuple[str, int]] = {
+    "PLAN": ("Plan technique", 5),
+    "RAPPORT": ("Rapport technique", 15),
+    "CCTP": ("Cahier des clauses techniques particulières", 20),
+    "CCAP": ("Cahier des clauses administratives particulières", 21),
+    "RC": ("Règlement de consultation", 22),
+    "BPU": ("Bordereau des prix unitaires", 10),
+    "DPGF": ("Décomposition du prix global et forfaitaire", 11),
+    "DQE": ("Détail quantitatif estimatif", 12),
+    "AE": ("Acte d'engagement", 13),
+    "NOTE_CALCUL": ("Note de calcul", 2),
+    "PV_RECEPTION": ("Procès-verbal de réception", 30),
+    "CR_CHANTIER": ("Compte rendu de chantier", 31),
+    "PHOTO": ("Photographie", 40),
+    "AUTRE": ("Autre document", 99),
+}
+
 REGLES_TYPES: dict[str, tuple[str, ...]] = {
     "CCTP": (r"\bcctp\b", r"clauses techniques"),
     "DPGF": (r"\bdpgf\b", r"prix global"),
@@ -233,11 +250,42 @@ def nettoyer_nom_document(nom_fichier: str, *, longueur_max: int = 180) -> str:
     stem = Path(nom_fichier).stem
     stem = unicodedata.normalize("NFKC", stem)
     stem = re.sub(r"[_\-]+", " ", stem)
-    stem = re.sub(r"\b(?:v(?:ersion)?|rev(?:ision)?)\s*[a-z0-9]{1,3}\b", " ", stem, flags=re.IGNORECASE)
+    stem = re.sub(
+        r"\b(?:rev(?:ision)?|indice)\s*[-_. ]*(?:v(?:ersion)?\s*)?([0-9]{1,3}|[a-c])\b",
+        " ",
+        stem,
+        flags=re.IGNORECASE,
+    )
+    stem = re.sub(
+        r"\bv(?:ersion)?\s*[-_. ]*([0-9]{1,3}|[a-c])\b",
+        " ",
+        stem,
+        flags=re.IGNORECASE,
+    )
     stem = re.sub(r"\b(?:finale?|definitif|definitive|copie|scan(?:ne)?|signed)\b", " ", stem, flags=re.IGNORECASE)
-    stem = re.sub(r"\b20\d{2}[\s._-]?\d{2}[\s._-]?\d{2}\b", " ", stem)
+    stem = re.sub(r"\b20\d{2}[-_. ](?:0[1-9]|1[0-2])[-_. ](?:0[1-9]|[12]\d|3[01])\b", " ", stem)
     stem = re.sub(r"\s+", " ", stem).strip(" ._-")
     return (stem[:longueur_max].strip() or "document importe")
+
+
+def _obtenir_ou_creer_type_document_standard(code: str) -> TypeDocument | None:
+    type_document = TypeDocument.objects.filter(code=code).first()
+    if type_document:
+        return type_document
+
+    definition = TYPES_DOCUMENTS_PAR_DEFAUT.get(code)
+    if not definition:
+        return None
+
+    libelle, ordre_affichage = definition
+    type_document, _ = TypeDocument.objects.get_or_create(
+        code=code,
+        defaults={
+            "libelle": libelle,
+            "ordre_affichage": ordre_affichage,
+        },
+    )
+    return type_document
 
 
 def intitule_document_depuis_nom_fichier(nom_fichier: str) -> str:
@@ -324,7 +372,7 @@ def suggerer_type_document(nom_fichier: str, texte: str, type_mime: str) -> dict
     if not meilleur:
         return None
 
-    type_document = TypeDocument.objects.filter(code=meilleur["code"]).first()
+    type_document = _obtenir_ou_creer_type_document_standard(meilleur["code"])
     if not type_document:
         return None
 
