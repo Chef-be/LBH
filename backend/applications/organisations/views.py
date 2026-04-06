@@ -1,6 +1,14 @@
 """Vues API pour les organisations — Plateforme LBH."""
 
+import json
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
+
 from rest_framework import generics, permissions, filters
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
+
 from .models import Organisation, GroupeUtilisateurs
 from .serialiseurs import OrganisationSerialiseur, GroupeUtilisateursSerialiseur
 
@@ -46,3 +54,63 @@ class VueGroupesOrganisation(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(organisation_id=self.kwargs["org_id"])
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_recherche_entreprises_publiques(request):
+    requete = (request.query_params.get("q") or "").strip()
+    if len(requete) < 3:
+        return Response({"results": []})
+
+    try:
+        limite = max(1, min(int(request.query_params.get("limit", "6")), 10))
+    except ValueError as exc:
+        raise ValidationError({"limit": "La limite doit être un entier."}) from exc
+
+    url = "https://recherche-entreprises.api.gouv.fr/search?" + urllib_parse.urlencode(
+        {"q": requete, "page": 1, "per_page": limite}
+    )
+    with urllib_request.urlopen(url, timeout=20) as reponse:
+        donnees = json.loads(reponse.read().decode("utf-8"))
+
+    resultats = []
+    for entree in donnees.get("results", []):
+        siege = entree.get("siege") or {}
+        adresse_complete = " ".join(
+            filtre
+            for filtre in [
+                siege.get("numero_voie"),
+                siege.get("type_voie"),
+                siege.get("libelle_voie"),
+                siege.get("code_postal"),
+                siege.get("libelle_commune"),
+            ]
+            if filtre
+        ).strip()
+        nature_juridique = entree.get("nature_juridique") or ""
+        resultats.append(
+            {
+                "siren": entree.get("siren") or "",
+                "siret": siege.get("siret") or "",
+                "nom": entree.get("nom_complet") or entree.get("nom_raison_sociale") or "",
+                "nom_raison_sociale": entree.get("nom_raison_sociale") or entree.get("nom_complet") or "",
+                "sigle": entree.get("sigle") or "",
+                "adresse": adresse_complete,
+                "code_postal": siege.get("code_postal") or "",
+                "ville": siege.get("libelle_commune") or "",
+                "pays": "France",
+                "etat_administratif": entree.get("etat_administratif") or "",
+                "categorie_entreprise": entree.get("categorie_entreprise"),
+                "nature_juridique": nature_juridique,
+                "activite_principale": entree.get("activite_principale") or "",
+                "tranche_effectif_salarie": entree.get("tranche_effectif_salarie"),
+                "date_creation": entree.get("date_creation"),
+                "est_service_public": "publique" in nature_juridique.lower() or "commune" in nature_juridique.lower(),
+                "est_association": "association" in nature_juridique.lower(),
+                "collectivite_territoriale": "Collectivité territoriale" if "commune" in nature_juridique.lower() or "departement" in nature_juridique.lower() else "",
+                "siege_est_actif": siege.get("etat_administratif") == "A",
+            }
+        )
+
+    return Response({"results": resultats})

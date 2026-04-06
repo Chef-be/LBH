@@ -2,18 +2,26 @@
 Vues API pour les projets — Plateforme LBH.
 """
 
+import uuid
+from pathlib import Path
+
+from django.conf import settings
 from rest_framework import generics, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Projet, Lot, Intervenant
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet
 from .serialiseurs import (
     ProjetListeSerialiseur,
     ProjetDetailSerialiseur,
     LotSerialiseur,
     IntervenantSerialiseur,
+    PreanalyseSourcesProjetSerialiseur,
 )
 from .services import construire_bilan_documentaire_projet, construire_processus_recommande
+from .referentiels import construire_parcours_projet, lister_references_indices_prix
+from .taches import executer_preanalyse_sources_projet, importer_sources_preanalyse_dans_projet
 from applications.documents.services import synchroniser_dossiers_projet
 
 
@@ -61,6 +69,18 @@ class VueListeProjets(generics.ListCreateAPIView):
             cree_par=self.request.user,
         )
         synchroniser_dossiers_projet(projet)
+        preanalyse_id = self.request.data.get("preanalyse_sources_id")
+        if preanalyse_id:
+            queryset = PreanalyseSourcesProjet.objects.filter(pk=preanalyse_id)
+            if not self.request.user.est_super_admin:
+                queryset = queryset.filter(utilisateur=self.request.user)
+            preanalyse = queryset.first()
+            if preanalyse:
+                importer_sources_preanalyse_dans_projet.apply_async(
+                    args=[str(preanalyse.id), str(projet.id), str(self.request.user.id)],
+                    queue="documents",
+                    routing_key="documents",
+                )
 
 
 class VueDetailProjet(generics.RetrieveUpdateDestroyAPIView):
@@ -162,6 +182,91 @@ def vue_orientation_projet(requete):
             phase=donnees.get("phase_actuelle"),
         )
     )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_parcours_projet(requete):
+    missions = requete.query_params.getlist("missions_principales")
+    mission_principale = requete.query_params.get("mission_principale")
+    if mission_principale and mission_principale not in missions:
+        missions.insert(0, mission_principale)
+    return Response(
+        construire_parcours_projet(
+            famille_client=requete.query_params.get("famille_client", ""),
+            sous_type_client=requete.query_params.get("sous_type_client", ""),
+            contexte_contractuel=requete.query_params.get("contexte_contractuel", ""),
+            missions_principales=missions,
+            phase_intervention=requete.query_params.get("phase_intervention", ""),
+            nature_ouvrage=requete.query_params.get("nature_ouvrage", "batiment"),
+            nature_marche=requete.query_params.get("nature_marche", "public"),
+        )
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_references_indices_prix(requete):
+    limite = requete.query_params.get("limite")
+    try:
+        limite_int = int(limite) if limite else None
+    except ValueError:
+        raise ValidationError({"limite": "La limite doit être un entier."})
+    return Response(lister_references_indices_prix(limite_int))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_creer_preanalyse_sources_projet(requete):
+    fichiers = requete.FILES.getlist("fichiers")
+    if not fichiers:
+        raise ValidationError({"fichiers": "Ajoutez au moins un fichier à analyser."})
+
+    contexte = {
+        "famille_client": requete.data.get("famille_client", ""),
+        "contexte_contractuel": requete.data.get("contexte_contractuel", ""),
+        "nature_ouvrage": requete.data.get("nature_ouvrage", "batiment"),
+        "nature_marche": requete.data.get("nature_marche", "public"),
+    }
+    identifiant = uuid.uuid4()
+    repertoire = Path(settings.MEDIA_ROOT) / "preanalyses-sources" / str(identifiant)
+    repertoire.mkdir(parents=True, exist_ok=True)
+
+    for fichier in fichiers:
+        destination = repertoire / Path(fichier.name).name
+        with destination.open("wb") as sortie:
+            for bloc in fichier.chunks():
+                sortie.write(bloc)
+
+    preanalyse = PreanalyseSourcesProjet.objects.create(
+        id=identifiant,
+        utilisateur=requete.user,
+        statut="en_attente",
+        progression=0,
+        message="Analyse en file d'attente",
+        nombre_fichiers=len(fichiers),
+        contexte=contexte,
+        repertoire_temp=str(repertoire),
+    )
+    resultat_tache = executer_preanalyse_sources_projet.apply_async(
+        args=[str(preanalyse.id)],
+        queue="principale",
+        routing_key="principale",
+    )
+    if resultat_tache and getattr(resultat_tache, "id", ""):
+        preanalyse.tache_celery_id = resultat_tache.id
+        preanalyse.save(update_fields=["tache_celery_id", "date_modification"])
+    return Response(PreanalyseSourcesProjetSerialiseur(preanalyse).data, status=201)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_detail_preanalyse_sources_projet(requete, pk):
+    queryset = PreanalyseSourcesProjet.objects.all()
+    if not requete.user.est_super_admin:
+        queryset = queryset.filter(utilisateur=requete.user)
+    preanalyse = generics.get_object_or_404(queryset, pk=pk)
+    return Response(PreanalyseSourcesProjetSerialiseur(preanalyse).data)
 
 
 @api_view(["GET"])

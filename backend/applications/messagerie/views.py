@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import mimetypes
+from hashlib import md5
 from urllib.parse import urljoin
 
 from rest_framework import generics, permissions
@@ -109,12 +110,23 @@ def _reponse_sans_cache(reponse):
     return reponse
 
 
+def _version_branding_roundcube() -> str:
+    configuration_site = ConfigurationSite.obtenir()
+    morceaux = [
+        str(configuration_site.date_modification.timestamp() if configuration_site.date_modification else ""),
+        configuration_site.logo.name if configuration_site.logo else "",
+        configuration_site.logo_pied_de_page.name if configuration_site.logo_pied_de_page else "",
+        (configuration_site.nom_bureau or "").strip(),
+    ]
+    return md5("|".join(morceaux).encode("utf-8")).hexdigest()[:12]
+
+
 def _url_logo_roundcube() -> str:
-    return _absolutiser_url_publique(reverse("roundcube-logo"))
+    return _absolutiser_url_publique(f"{reverse('roundcube-logo')}?v={_version_branding_roundcube()}")
 
 
 def _url_watermark_roundcube() -> str:
-    return _absolutiser_url_publique(reverse("roundcube-watermark"))
+    return _absolutiser_url_publique(f"{reverse('roundcube-watermark')}?v={_version_branding_roundcube()}")
 
 
 def _url_logo_roundcube_secours() -> str:

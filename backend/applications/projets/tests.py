@@ -1,11 +1,13 @@
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from applications.documents.models import DossierDocumentProjet, Document, TypeDocument
 from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
-from applications.projets.models import Projet
+from applications.projets.models import Projet, PreanalyseSourcesProjet
 
 
 class ApiProjetsTests(TestCase):
@@ -96,6 +98,130 @@ class ApiProjetsTests(TestCase):
                 projet=projet,
                 code="cctp-lot",
             ).exists()
+        )
+
+    def test_parcours_projet_retourne_les_referentiels_front(self):
+        reponse = self.client.get(
+            "/api/projets/parcours/",
+            {
+                "famille_client": "entreprise",
+                "nature_ouvrage": "batiment",
+                "nature_marche": "public",
+            },
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertIn("referentiels", reponse.data)
+        self.assertTrue(reponse.data["referentiels"]["familles_client"])
+        self.assertTrue(reponse.data["referentiels"]["missions_principales"])
+        self.assertTrue(reponse.data["champs_dynamiques"])
+        self.assertTrue(reponse.data["dossiers_ged"])
+
+    def test_creation_projet_avance_accepte_contexte_front_sans_bureau_etudes(self):
+        reponse = self.client.post(
+            "/api/projets/",
+            {
+                "reference": "2026-0450",
+                "intitule": "Réponse AO marché école",
+                "type_projet": "etude",
+                "statut": "en_cours",
+                "organisation": None,
+                "contexte_projet_saisie": {
+                    "famille_client": "entreprise",
+                    "sous_type_client": "groupement",
+                    "contexte_contractuel": "appel_offres",
+                    "mission_principale": "reponse_appel_offres",
+                    "missions_associees": ["reponse_appel_offres", "memoire_technique"],
+                    "phase_intervention": "",
+                    "nature_ouvrage": "batiment",
+                    "nature_marche": "public",
+                    "partie_contractante": "Ville de Mamoudzou",
+                    "role_lbh": "Co-traitant économiste",
+                    "methode_estimation": "analytique",
+                    "donnees_entree": {"reference_consultation": "RC-2026-015"},
+                    "sous_missions": ["bordereaux_finalises"],
+                    "trace_preremplissage": {"source": "test"},
+                },
+                "mode_variation_prix_saisie": {
+                    "type_evolution": "revision",
+                    "cadre_juridique": "public",
+                    "indice_reference": "BT01",
+                    "periodicite_revision": "mensuelle",
+                },
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        projet = Projet.objects.get(pk=reponse.data["id"])
+        self.assertIsNone(projet.organisation)
+        self.assertEqual(projet.clientele_cible, "entreprise_travaux")
+        self.assertEqual(projet.objectif_mission, "reponse_ao_entreprise")
+        self.assertEqual(projet.qualification_wizard["contexte_projet"]["famille_client"], "entreprise")
+        self.assertEqual(projet.qualification_wizard["mode_variation_prix"]["indice_reference"], "BT01")
+
+        detail = self.client.get(f"/api/projets/{projet.id}/")
+        self.assertEqual(detail.status_code, status.HTTP_200_OK, detail.data)
+        self.assertEqual(detail.data["contexte_projet"]["famille_client"]["code"], "entreprise")
+        self.assertEqual(detail.data["mode_variation_prix"]["indice_reference"], "BT01")
+
+    @patch("applications.projets.views.importer_sources_preanalyse_dans_projet.apply_async")
+    def test_creation_projet_planifie_import_des_sources_preanalyse(self, mock_apply_async):
+        preanalyse = PreanalyseSourcesProjet.objects.create(
+            utilisateur=self.admin,
+            statut="terminee",
+            progression=100,
+            message="Préanalyse terminée",
+            nombre_fichiers=2,
+            repertoire_temp="/tmp/preanalyse-tests",
+            resultat={"resume": {"fichiers_analyses": 2}},
+        )
+
+        reponse = self.client.post(
+            "/api/projets/",
+            {
+                "reference": "2026-0451",
+                "intitule": "Projet avec import différé",
+                "type_projet": "etude",
+                "statut": "en_cours",
+                "organisation": str(self.organisation.id),
+                "preanalyse_sources_id": str(preanalyse.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        mock_apply_async.assert_called_once_with(
+            args=[str(preanalyse.id), reponse.data["id"], str(self.admin.id)],
+            queue="documents",
+            routing_key="documents",
+        )
+
+    @patch("applications.projets.views.executer_preanalyse_sources_projet.apply_async")
+    def test_creation_preanalyse_sources_projet_cree_une_tache(self, mock_apply_async):
+        mock_apply_async.return_value.id = "tache-test-123"
+        fichier = SimpleUploadedFile("programme-contexte.docx", b"contenu", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+        reponse = self.client.post(
+            "/api/projets/preanalyse-sources/taches/",
+            {
+                "fichiers": [fichier],
+                "famille_client": "maitrise_oeuvre",
+                "nature_ouvrage": "batiment",
+                "nature_marche": "public",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        preanalyse = PreanalyseSourcesProjet.objects.get(pk=reponse.data["id"])
+        self.assertEqual(preanalyse.nombre_fichiers, 1)
+        self.assertEqual(preanalyse.contexte["famille_client"], "maitrise_oeuvre")
+        self.assertEqual(preanalyse.tache_celery_id, "tache-test-123")
+        mock_apply_async.assert_called_once_with(
+            args=[str(preanalyse.id)],
+            queue="principale",
+            routing_key="principale",
         )
 
     def test_qualification_documentaire_projet_detecte_presence_et_absence_des_pieces(self):

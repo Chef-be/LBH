@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
-import { decrireReponseQuestion, type QuestionWizardProjet } from "@/composants/projets/WizardQualificationProjet";
 import {
   ArrowLeft, Calendar, MapPin, Building2, User,
   Euro, FolderOpen, Users, Pencil, Trash2,
@@ -47,7 +46,7 @@ interface ProjetDetail {
   objectif_mission_libelle: string;
   phase_actuelle: string;
   phase_libelle: string;
-  organisation_nom: string;
+  organisation_nom: string | null;
   maitre_ouvrage_nom: string | null;
   maitre_oeuvre_nom: string | null;
   responsable_nom: string;
@@ -61,7 +60,21 @@ interface ProjetDetail {
   montant_marche: number | null;
   honoraires_prevus: number | null;
   description: string;
-  qualification_wizard: Record<string, string | string[]>;
+  contexte_projet: {
+    famille_client: { code: string; libelle: string };
+    sous_type_client: { code: string; libelle: string };
+    contexte_contractuel: { code: string; libelle: string };
+    mission_principale: { code: string; libelle: string };
+    missions_associees: Array<{ code: string; libelle: string }>;
+    phase_intervention: { code: string; libelle: string } | null;
+    nature_ouvrage: string;
+    nature_marche: string;
+    partie_contractante: string;
+    role_lbh: string;
+    methode_estimation: string;
+    donnees_entree: Record<string, string | string[] | boolean>;
+    sous_missions: Array<{ code: string; libelle: string; types_livrables?: string[] }>;
+  } | null;
   processus_recommande: {
     clientele: { code: string; libelle: string };
     objectif: { code: string; libelle: string };
@@ -73,22 +86,33 @@ interface ProjetDetail {
     documents_a_generer: string[];
     automatismes: string[];
     sources_methodologiques: string[];
-    wizard: {
-      titre: string;
-      description: string;
-      etapes: Array<{
-        code: string;
-        titre: string;
-        description: string;
-        questions: QuestionWizardProjet[];
-      }>;
-    };
   };
   dossiers_ged: Array<{ code: string; intitule: string; description: string }>;
   lots: Lot[];
   intervenants: Intervenant[];
   date_creation: string;
   date_modification: string;
+  mode_variation_prix?: {
+    type_evolution: string;
+    cadre_juridique: string;
+    indice_reference: string;
+    formule_personnalisee?: string;
+    date_prix_initial?: string | null;
+    date_remise_offre?: string | null;
+    date_demarrage?: string | null;
+    periodicite_revision?: string;
+    clause_applicable?: string;
+    part_fixe?: string | null;
+    reference_officielle?: {
+      code: string;
+      libelle: string;
+      territoire: string;
+      date_valeur: string;
+      valeur: number;
+      source_publication_url: string;
+      source_donnees_url: string;
+    } | null;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +138,18 @@ function formaterDate(iso: string | null) {
 function formaterMontant(val: number | null) {
   if (val == null) return "—";
   return `${Number(val).toLocaleString("fr-FR", { minimumFractionDigits: 0 })} €`;
+}
+
+function formaterValeurContexte(valeur: string | string[] | boolean) {
+  if (Array.isArray(valeur)) return valeur.join(", ") || "—";
+  if (typeof valeur === "boolean") return valeur ? "Oui" : "Non";
+  return valeur || "—";
+}
+
+interface ActionProjet {
+  href: string;
+  libelle: string;
+  variante?: "primaire" | "secondaire";
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +206,52 @@ export function DetailProjet({ id }: { id: string }) {
     );
   }
 
+  const contexte = projet.contexte_projet;
+  const familleClient = contexte?.famille_client.code || "";
+  const objectifMission = projet.objectif_mission || "";
+  const natureOuvrage = contexte?.nature_ouvrage || "";
+  const codesMission = new Set([
+    contexte?.mission_principale.code,
+    ...(contexte?.missions_associees ?? []).map((mission) => mission.code),
+    contexte?.phase_intervention?.code,
+  ].filter(Boolean));
+
+  const estEntreprise = familleClient === "entreprise";
+  const estMaitriseOeuvre = familleClient === "maitrise_oeuvre";
+  const estMaitriseOuvrage = familleClient === "maitrise_ouvrage";
+  const contexteExecution =
+    objectifMission === "suivi_execution" ||
+    ["exe", "visa", "det", "opc", "aor", "execution", "planning_execution"].some((code) => codesMission.has(code));
+  const contexteAppelsOffres =
+    ["reponse_ao_entreprise", "prospection_ao", "redaction_dce_cctp"].includes(objectifMission) ||
+    ["act", "act_infrastructure", "rapport_analyse_offres", "analyse_offres_infrastructure", "reponse_appel_offres"].some((code) => codesMission.has(code));
+  const contextePiecesEcrites =
+    ["redaction_dce_cctp", "estimation_moe"].includes(objectifMission) ||
+    ["redaction_cctp", "redaction_bpu", "redaction_dpgf", "redaction_ccap", "redaction_rc", "redaction_pieces_marche_infrastructure"].some((code) => codesMission.has(code));
+  const contexteRentabilite =
+    estEntreprise ||
+    ["reponse_ao_entreprise", "devis_entreprise", "suivi_execution"].includes(objectifMission) ||
+    codesMission.has("suivi_rentabilite");
+  const contexteMetres =
+    !estEntreprise ||
+    ["verifier_enveloppe", "estimation_moe", "redaction_dce_cctp"].includes(objectifMission) ||
+    ["estimation_par_lot", "estimation_infrastructure"].some((code) => codesMission.has(code));
+  const afficherVoirie = natureOuvrage === "infrastructure" || natureOuvrage === "mixte";
+  const afficherBatiment = natureOuvrage === "batiment" || natureOuvrage === "mixte" || (!natureOuvrage && (estMaitriseOeuvre || estMaitriseOuvrage));
+
+  const actionsProjet: ActionProjet[] = [
+    { href: `/projets/${id}/economie`, libelle: "Économie" },
+    ...(contexteRentabilite ? [{ href: `/projets/${id}/rentabilite`, libelle: "Rentabilité" }] : []),
+    ...(contexteExecution ? [{ href: `/projets/${id}/execution`, libelle: "Exécution" }] : []),
+    ...(contexteMetres ? [{ href: `/projets/${id}/metres`, libelle: "Métrés" }] : []),
+    ...(contexteAppelsOffres ? [{ href: `/projets/${id}/appels-offres`, libelle: "Appels d'offres" }] : []),
+    { href: `/projets/${id}/documents`, libelle: "Documents" },
+    ...(contextePiecesEcrites ? [{ href: `/projets/${id}/pieces-ecrites`, libelle: "Pièces écrites" }] : []),
+    ...(afficherVoirie ? [{ href: `/projets/${id}/voirie`, libelle: "Voirie" }] : []),
+    ...(afficherBatiment ? [{ href: `/projets/${id}/batiment`, libelle: "Bâtiment" }] : []),
+    { href: `/projets/${id}/modifier`, libelle: "Modifier", variante: "primaire" },
+  ];
+
   return (
     <div className="space-y-6">
       {erreurSuppression && (
@@ -179,7 +261,7 @@ export function DetailProjet({ id }: { id: string }) {
       )}
 
       {/* En-tête */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
         <div>
           <Link href="/projets" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-2">
             <ArrowLeft size={14} /> Projets
@@ -196,19 +278,19 @@ export function DetailProjet({ id }: { id: string }) {
           <p className="text-slate-600 mt-1 text-lg">{projet.intitule}</p>
         </div>
 
-        <div className="flex gap-2 shrink-0 flex-wrap">
-          <Link href={`/projets/${id}/economie`} className="btn-secondaire text-xs">Économie</Link>
-          <Link href={`/projets/${id}/rentabilite`} className="btn-secondaire text-xs">Rentabilité</Link>
-          <Link href={`/projets/${id}/execution`} className="btn-secondaire text-xs">Exécution</Link>
-          <Link href={`/projets/${id}/metres`} className="btn-secondaire text-xs">Métrés</Link>
-          <Link href={`/projets/${id}/appels-offres`} className="btn-secondaire text-xs">Appels d&apos;offres</Link>
-          <Link href={`/projets/${id}/documents`} className="btn-secondaire text-xs">Documents</Link>
-          <Link href={`/projets/${id}/pieces-ecrites`} className="btn-secondaire text-xs">Pièces écrites</Link>
-          <Link href={`/projets/${id}/voirie`} className="btn-secondaire text-xs">Voirie</Link>
-          <Link href={`/projets/${id}/batiment`} className="btn-secondaire text-xs">Bâtiment</Link>
-          <Link href={`/projets/${id}/modifier`} className="btn-primaire text-xs flex items-center gap-1">
-            <Pencil size={12} /> Modifier
-          </Link>
+        <div className="flex max-w-full flex-wrap gap-2">
+          {actionsProjet.map((action) => (
+            <Link
+              key={action.href}
+              href={action.href}
+              className={clsx(
+                action.variante === "primaire" ? "btn-primaire" : "btn-secondaire",
+                "text-xs"
+              )}
+            >
+              {action.libelle === "Modifier" ? <span className="inline-flex items-center gap-1"><Pencil size={12} /> Modifier</span> : action.libelle}
+            </Link>
+          ))}
           {estSuperAdmin && (
             <button
               type="button"
@@ -235,7 +317,7 @@ export function DetailProjet({ id }: { id: string }) {
                 <dt className="text-slate-500 flex items-center gap-1">
                   <Building2 size={12} /> Bureau d&apos;études
                 </dt>
-                <dd className="font-medium mt-0.5">{projet.organisation_nom}</dd>
+                <dd className="font-medium mt-0.5">{projet.organisation_nom || "—"}</dd>
               </div>
               {projet.maitre_ouvrage_nom && (
                 <div>
@@ -339,10 +421,7 @@ export function DetailProjet({ id }: { id: string }) {
           )}
 
           <div className="carte">
-            <h2 className="mb-4">Wizard métier et GED projet</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              {projet.processus_recommande.wizard.description}
-            </p>
+            <h2 className="mb-4">Contexte métier et GED projet</h2>
             <div className="grid gap-4 lg:grid-cols-3">
               <div className="rounded-xl bg-slate-50 p-4">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Documents attendus</h3>
@@ -369,6 +448,71 @@ export function DetailProjet({ id }: { id: string }) {
                 </ul>
               </div>
             </div>
+            {projet.contexte_projet && (
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-700">Client et mission</h3>
+                  <dl className="space-y-2 text-sm text-slate-700">
+                    <div>
+                      <dt className="text-slate-500">Famille client</dt>
+                      <dd className="font-medium">{projet.contexte_projet.famille_client.libelle}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Sous-type</dt>
+                      <dd className="font-medium">{projet.contexte_projet.sous_type_client.libelle}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Contexte contractuel</dt>
+                      <dd className="font-medium">{projet.contexte_projet.contexte_contractuel.libelle}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Mission principale</dt>
+                      <dd className="font-medium">{projet.contexte_projet.mission_principale.libelle}</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-700">Paramètres de mission</h3>
+                  <dl className="space-y-2 text-sm text-slate-700">
+                    <div>
+                      <dt className="text-slate-500">Nature du marché</dt>
+                      <dd className="font-medium">{projet.contexte_projet.nature_marche}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Partie contractante</dt>
+                      <dd className="font-medium">{projet.contexte_projet.partie_contractante || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Rôle LBH</dt>
+                      <dd className="font-medium">{projet.contexte_projet.role_lbh || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Méthode d&apos;estimation</dt>
+                      <dd className="font-medium">{projet.contexte_projet.methode_estimation || "—"}</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-700">Sous-missions activées</h3>
+                  <ul className="space-y-2 text-sm text-slate-700">
+                    {projet.contexte_projet.sous_missions.length ? projet.contexte_projet.sous_missions.map((ligne) => (
+                      <li key={ligne.code}>
+                        <p>• {ligne.libelle}</p>
+                        {ligne.types_livrables?.length ? (
+                          <div className="mt-1 flex flex-wrap gap-1.5 pl-4">
+                            {ligne.types_livrables.map((type) => (
+                              <span key={type} className="rounded-full border border-primaire-200 bg-primaire-50 px-2 py-0.5 text-[11px] font-medium text-primaire-800">
+                                {type.replace(/_/g, " ")}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </li>
+                    )) : <li>Aucune sous-mission activée.</li>}
+                  </ul>
+                </div>
+              </div>
+            )}
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
               <div className="rounded-xl bg-white p-4 border border-slate-200">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Méthodes ordonnées</h3>
@@ -398,22 +542,41 @@ export function DetailProjet({ id }: { id: string }) {
                 </ul>
               </div>
             </div>
-            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Réponses du wizard</h3>
-              <div className="grid gap-3 lg:grid-cols-2">
-                {projet.processus_recommande.wizard.etapes.flatMap((etape) =>
-                  etape.questions.map((question) => (
-                    <div key={question.id} className="rounded-lg bg-slate-50 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{etape.titre}</p>
-                      <p className="mt-1 text-sm font-medium text-slate-800">{question.question}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {decrireReponseQuestion(question, projet.qualification_wizard || {})}
-                      </p>
-                    </div>
-                  ))
-                )}
+            {projet.mode_variation_prix && projet.mode_variation_prix.type_evolution !== "aucune" ? (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Variation de prix</h3>
+                <dl className="grid gap-3 lg:grid-cols-3 text-sm">
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Type</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.type_evolution}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Cadre</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.cadre_juridique}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Indice / index</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.indice_reference || "—"}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Prix initial</dt><dd className="mt-1 font-medium text-slate-900">{formaterDate(projet.mode_variation_prix.date_prix_initial || null)}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Remise d&apos;offre</dt><dd className="mt-1 font-medium text-slate-900">{formaterDate(projet.mode_variation_prix.date_remise_offre || null)}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Démarrage</dt><dd className="mt-1 font-medium text-slate-900">{formaterDate(projet.mode_variation_prix.date_demarrage || null)}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Périodicité</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.periodicite_revision || "—"}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Part fixe</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.part_fixe || "—"}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Dernière valeur officielle</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.reference_officielle ? `${projet.mode_variation_prix.reference_officielle.valeur} · ${formaterDate(projet.mode_variation_prix.reference_officielle.date_valeur)}` : "—"}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Territoire</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.reference_officielle?.territoire || "—"}</dd></div>
+                </dl>
+                {projet.mode_variation_prix.clause_applicable ? (
+                  <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                    {projet.mode_variation_prix.clause_applicable}
+                  </div>
+                ) : null}
               </div>
-            </div>
+            ) : null}
+            {projet.contexte_projet && Object.keys(projet.contexte_projet.donnees_entree || {}).length > 0 && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Données d&apos;entrée métier</h3>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {Object.entries(projet.contexte_projet.donnees_entree).map(([cle, valeur]) => (
+                    <div key={cle} className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{cle.replace(/_/g, " ")}</p>
+                      <p className="mt-1 text-sm font-medium text-slate-800">{formaterValeurContexte(valeur)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Dossiers GED du projet</h3>
               <div className="grid gap-3 lg:grid-cols-2">

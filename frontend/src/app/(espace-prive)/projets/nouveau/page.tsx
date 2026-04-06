@@ -7,10 +7,10 @@ export const metadata: Metadata = {
 
 export default function PageNouveauProjet() {
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6 max-w-none">
       <div>
         <h1>Nouveau projet</h1>
-        <p className="text-slate-500 mt-1">Créer un nouveau projet ou une nouvelle mission</p>
+        <p className="mt-1 text-slate-500">Créer un projet métier, qualifier le contexte et structurer les informations utiles avant validation.</p>
       </div>
       <FormulaireNouveauProjet />
     </div>

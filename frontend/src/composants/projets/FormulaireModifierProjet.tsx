@@ -5,7 +5,65 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
 import { ChampOrganisationRapide, type OrganisationOption } from "@/composants/projets/ChampOrganisationRapide";
-import { WizardQualificationProjet, type OrientationProjetWizard } from "@/composants/projets/WizardQualificationProjet";
+
+interface ReferentielOption {
+  id: string;
+  code: string;
+  libelle: string;
+  description: string;
+}
+
+interface ModeVariationPrix {
+  type_evolution: string;
+  cadre_juridique: string;
+  indice_reference: string;
+  formule_personnalisee: string;
+  date_prix_initial?: string;
+  date_remise_offre?: string;
+  date_demarrage?: string;
+  periodicite_revision?: string;
+  clause_applicable?: string;
+  part_fixe?: string;
+}
+
+interface ReferenceIndexPrix {
+  code: string;
+  libelle: string;
+  type_index: string;
+  territoire: string;
+  periodicite: string;
+  base_reference: string;
+  derniere_valeur: {
+    date_valeur: string;
+    valeur: number;
+    source_publication_url: string;
+    source_donnees_url: string;
+  } | null;
+}
+
+interface ParcoursProjet {
+  referentiels: {
+    familles_client: ReferentielOption[];
+    sous_types_client: ReferentielOption[];
+    contextes_contractuels: ReferentielOption[];
+    missions_principales: ReferentielOption[];
+    sous_missions: ReferentielOption[];
+    phases_intervention: ReferentielOption[];
+  };
+  champs_dynamiques: Array<{
+    groupe: string;
+    champs: Array<{
+      code: string;
+      libelle: string;
+      type_champ: "texte" | "texte_long" | "selection" | "multi_selection" | "nombre" | "montant" | "date" | "booleen";
+      options: Array<{ value: string; label: string }>;
+      obligatoire: boolean;
+      placeholder: string;
+      aide_courte: string;
+      section: string;
+    }>;
+  }>;
+}
 
 interface ProjetDetail {
   id: string;
@@ -13,40 +71,80 @@ interface ProjetDetail {
   intitule: string;
   type_projet: string;
   type_projet_autre: string;
-  clientele_cible: string;
-  objectif_mission: string;
   statut: string;
-  phase_actuelle: string;
-  organisation: string;
+  organisation: string | null;
   maitre_ouvrage: string | null;
   maitre_oeuvre: string | null;
-  commune: string;
-  departement: string;
-  date_debut_prevue: string | null;
-  date_fin_prevue: string | null;
-  date_debut_reelle: string | null;
-  date_fin_reelle: string | null;
-  montant_estime: string | null;
-  montant_marche: string | null;
-  honoraires_prevus: string | null;
-  description: string;
-  observations: string;
-  qualification_wizard: Record<string, string | string[]>;
+  contexte_projet: {
+    famille_client: ReferentielOption;
+    sous_type_client: ReferentielOption;
+    contexte_contractuel: ReferentielOption;
+    mission_principale: ReferentielOption;
+    phase_intervention: ReferentielOption | null;
+    nature_marche: string;
+    partie_contractante: string;
+    role_lbh: string;
+    methode_estimation: string;
+    donnees_entree: Record<string, string | string[] | boolean>;
+    sous_missions: ReferentielOption[];
+  } | null;
+  mode_variation_prix: {
+    type_evolution: string;
+    cadre_juridique: string;
+    indice_reference: string;
+    formule_personnalisee: string;
+    date_prix_initial?: string | null;
+    date_remise_offre?: string | null;
+    date_demarrage?: string | null;
+    periodicite_revision?: string;
+    clause_applicable?: string;
+    part_fixe?: string | null;
+    reference_officielle?: {
+      code: string;
+      libelle: string;
+      territoire: string;
+      date_valeur: string;
+      valeur: number;
+      source_publication_url: string;
+      source_donnees_url: string;
+    } | null;
+  } | null;
 }
 
 export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [erreurs, setErreurs] = useState<Record<string, string>>({});
+  const [intitule, setIntitule] = useState("");
   const [typeProjet, setTypeProjet] = useState("etude");
   const [typeProjetAutre, setTypeProjetAutre] = useState("");
-  const [clienteleCible, setClienteleCible] = useState("moa_publique");
-  const [objectifMission, setObjectifMission] = useState("verifier_enveloppe");
+  const [statut, setStatut] = useState("en_cours");
   const [organisationId, setOrganisationId] = useState("");
   const [maitreOuvrageId, setMaitreOuvrageId] = useState("");
   const [maitreOeuvreId, setMaitreOeuvreId] = useState("");
-  const [phaseActuelle, setPhaseActuelle] = useState("");
-  const [reponsesWizard, setReponsesWizard] = useState<Record<string, string | string[]>>({});
+  const [familleClientId, setFamilleClientId] = useState("");
+  const [sousTypeClientId, setSousTypeClientId] = useState("");
+  const [contexteContractuelId, setContexteContractuelId] = useState("");
+  const [missionPrincipaleId, setMissionPrincipaleId] = useState("");
+  const [phaseInterventionId, setPhaseInterventionId] = useState("");
+  const [natureMarche, setNatureMarche] = useState("public");
+  const [partieContractante, setPartieContractante] = useState("");
+  const [roleLbh, setRoleLbh] = useState("");
+  const [methodeEstimation, setMethodeEstimation] = useState("");
+  const [sousMissionsSelectionnees, setSousMissionsSelectionnees] = useState<string[]>([]);
+  const [donneesEntree, setDonneesEntree] = useState<Record<string, string | string[] | boolean>>({});
+  const [variationPrix, setVariationPrix] = useState<ModeVariationPrix>({
+    type_evolution: "aucune",
+    cadre_juridique: "public",
+    indice_reference: "",
+    formule_personnalisee: "",
+    date_prix_initial: "",
+    date_remise_offre: "",
+    date_demarrage: "",
+    periodicite_revision: "",
+    clause_applicable: "",
+    part_fixe: "",
+  });
 
   const { data: projet, isLoading } = useQuery<ProjetDetail>({
     queryKey: ["projet", projetId],
@@ -59,36 +157,68 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
     select: (data) => extraireListeResultats(data),
   });
 
+  const { data: referencesIndicesPrix = [] } = useQuery<ReferenceIndexPrix[]>({
+    queryKey: ["projets-indices-prix-references"],
+    queryFn: () => api.get<ReferenceIndexPrix[]>("/api/projets/indices-prix/references/?limite=140"),
+  });
+
   const organisationsTriees = useMemo(
     () => [...organisations].sort((a, b) => a.nom.localeCompare(b.nom, "fr")),
     [organisations]
   );
 
-  const { data: orientation } = useQuery<OrientationProjetWizard>({
-    queryKey: ["projets-orientation", "edition", clienteleCible, objectifMission, typeProjet, phaseActuelle],
-    enabled: Boolean(projet),
+  const referenceIndexSelectionnee = useMemo(
+    () => referencesIndicesPrix.find((item) => item.code === variationPrix.indice_reference.trim().toUpperCase()) || null,
+    [referencesIndicesPrix, variationPrix.indice_reference]
+  );
+
+  const { data: parcours } = useQuery<ParcoursProjet>({
+    queryKey: ["projets-parcours-edition", familleClientId, sousTypeClientId, contexteContractuelId, missionPrincipaleId, phaseInterventionId],
     queryFn: () =>
-      api.get<OrientationProjetWizard>(
-        `/api/projets/orientation/?clientele_cible=${encodeURIComponent(clienteleCible)}&objectif_mission=${encodeURIComponent(objectifMission)}&type_projet=${encodeURIComponent(typeProjet)}&phase_actuelle=${encodeURIComponent(phaseActuelle)}`
+      api.get<ParcoursProjet>(
+        `/api/projets/parcours/?famille_client=${encodeURIComponent(familleClientId)}&sous_type_client=${encodeURIComponent(sousTypeClientId)}&contexte_contractuel=${encodeURIComponent(contexteContractuelId)}&mission_principale=${encodeURIComponent(missionPrincipaleId)}&phase_intervention=${encodeURIComponent(phaseInterventionId)}`
       ),
+    enabled: Boolean(projet),
   });
 
   useEffect(() => {
     if (!projet) return;
-    setTypeProjet(projet.type_projet || "etude");
+    setIntitule(projet.intitule);
+    setTypeProjet(projet.type_projet);
     setTypeProjetAutre(projet.type_projet_autre || "");
-    setClienteleCible(projet.clientele_cible || "moa_publique");
-    setObjectifMission(projet.objectif_mission || "verifier_enveloppe");
-    setPhaseActuelle(projet.phase_actuelle || "");
+    setStatut(projet.statut);
     setOrganisationId(projet.organisation || "");
     setMaitreOuvrageId(projet.maitre_ouvrage || "");
     setMaitreOeuvreId(projet.maitre_oeuvre || "");
-    setReponsesWizard(projet.qualification_wizard || {});
+    setFamilleClientId(projet.contexte_projet?.famille_client.id || "");
+    setSousTypeClientId(projet.contexte_projet?.sous_type_client.id || "");
+    setContexteContractuelId(projet.contexte_projet?.contexte_contractuel.id || "");
+    setMissionPrincipaleId(projet.contexte_projet?.mission_principale.id || "");
+    setPhaseInterventionId(projet.contexte_projet?.phase_intervention?.id || "");
+    setNatureMarche(projet.contexte_projet?.nature_marche || "public");
+    setPartieContractante(projet.contexte_projet?.partie_contractante || "");
+    setRoleLbh(projet.contexte_projet?.role_lbh || "");
+    setMethodeEstimation(projet.contexte_projet?.methode_estimation || "");
+    setSousMissionsSelectionnees((projet.contexte_projet?.sous_missions || []).map((item) => item.id));
+    setDonneesEntree(projet.contexte_projet?.donnees_entree || {});
+    if (projet.mode_variation_prix) {
+      setVariationPrix({
+        type_evolution: projet.mode_variation_prix.type_evolution,
+        cadre_juridique: projet.mode_variation_prix.cadre_juridique,
+        indice_reference: projet.mode_variation_prix.indice_reference,
+        formule_personnalisee: projet.mode_variation_prix.formule_personnalisee,
+        date_prix_initial: projet.mode_variation_prix.date_prix_initial || "",
+        date_remise_offre: projet.mode_variation_prix.date_remise_offre || "",
+        date_demarrage: projet.mode_variation_prix.date_demarrage || "",
+        periodicite_revision: projet.mode_variation_prix.periodicite_revision || "",
+        clause_applicable: projet.mode_variation_prix.clause_applicable || "",
+        part_fixe: projet.mode_variation_prix.part_fixe || "",
+      });
+    }
   }, [projet]);
 
-  const { mutate, isPending } = useMutation({
-    mutationFn: (donnees: Partial<ProjetDetail>) =>
-      api.patch(`/api/projets/${projetId}/`, donnees),
+  const mutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => api.patch(`/api/projets/${projetId}/`, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projet", projetId] });
       router.push(`/projets/${projetId}`);
@@ -105,75 +235,62 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
   });
 
   if (isLoading || !projet) {
-    return <div className="py-12 text-center text-slate-400 text-sm">Chargement…</div>;
-  }
-
-  function soumettre(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setErreurs({});
-    const f = new FormData(e.currentTarget);
-
-    const donnees: Partial<ProjetDetail> = {
-      intitule: f.get("intitule") as string,
-      type_projet: typeProjet,
-      type_projet_autre: typeProjet === "autre" ? typeProjetAutre : "",
-      clientele_cible: clienteleCible,
-      objectif_mission: objectifMission,
-      qualification_wizard: reponsesWizard,
-      statut: f.get("statut") as string,
-      phase_actuelle: phaseActuelle,
-      organisation: organisationId,
-      maitre_ouvrage: maitreOuvrageId || null,
-      maitre_oeuvre: maitreOeuvreId || null,
-    };
-
-    const optionnels: Array<keyof ProjetDetail> = [
-      "commune", "departement",
-      "date_debut_prevue", "date_fin_prevue",
-      "date_debut_reelle", "date_fin_reelle",
-      "montant_estime", "montant_marche", "honoraires_prevus",
-      "description", "observations",
-    ];
-    optionnels.forEach((cle) => {
-      const val = f.get(cle as string) as string;
-      (donnees as Record<string, string | null>)[cle] = val || null;
-    });
-
-    mutate(donnees);
+    return <div className="py-12 text-center text-sm text-slate-400">Chargement…</div>;
   }
 
   return (
-    <form onSubmit={soumettre} className="space-y-6">
-      {/* Identification */}
+    <form
+      className="space-y-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setErreurs({});
+        mutation.mutate({
+          intitule,
+          type_projet: typeProjet,
+          type_projet_autre: typeProjet === "autre" ? typeProjetAutre : "",
+          statut,
+          organisation: organisationId || null,
+          maitre_ouvrage: maitreOuvrageId || null,
+          maitre_oeuvre: maitreOeuvreId || null,
+          contexte_projet_saisie: {
+            famille_client: familleClientId,
+            sous_type_client: sousTypeClientId,
+            contexte_contractuel: contexteContractuelId,
+            mission_principale: missionPrincipaleId,
+            phase_intervention: phaseInterventionId || null,
+            sous_missions: sousMissionsSelectionnees,
+            nature_marche: natureMarche,
+            partie_contractante: partieContractante,
+            role_lbh: roleLbh,
+            methode_estimation: methodeEstimation,
+            donnees_entree: donneesEntree,
+            trace_preremplissage: {},
+          },
+          mode_variation_prix_saisie: variationPrix,
+        });
+      }}
+    >
       <div className="carte space-y-4">
-        <h2>Identification</h2>
         <div className="flex items-center gap-3">
-          <span className="font-mono text-sm text-slate-400 bg-slate-100 px-3 py-2 rounded">{projet.reference}</span>
-          <p className="text-xs text-slate-400">La référence n&apos;est pas modifiable</p>
+          <span className="rounded bg-slate-100 px-3 py-2 font-mono text-sm text-slate-500">{projet.reference}</span>
+          <p className="text-xs text-slate-400">La référence reste figée.</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 md:grid-cols-3">
           <div>
-            <label className="libelle-champ" htmlFor="type_projet">Type de projet *</label>
-            <select
-              id="type_projet"
-              name="type_projet"
-              className="champ-saisie"
-              required
-              value={typeProjet}
-              onChange={(e) => setTypeProjet(e.target.value)}
-            >
+            <label className="libelle-champ" htmlFor="type-projet">Type de projet</label>
+            <select id="type-projet" className="champ-saisie" value={typeProjet} onChange={(e) => setTypeProjet(e.target.value)}>
               <option value="etude">Étude</option>
               <option value="travaux">Travaux</option>
-              <option value="mission_moe">Mission MOE</option>
-              <option value="assistance">Assistance à MOA</option>
+              <option value="mission_moe">Mission maîtrise d&apos;œuvre</option>
+              <option value="assistance">Assistance</option>
               <option value="expertise">Expertise</option>
               <option value="autre">Autre</option>
             </select>
           </div>
           <div>
-            <label className="libelle-champ" htmlFor="statut">Statut *</label>
-            <select id="statut" name="statut" className="champ-saisie" required defaultValue={projet.statut}>
+            <label className="libelle-champ" htmlFor="statut">Statut</label>
+            <select id="statut" className="champ-saisie" value={statut} onChange={(e) => setStatut(e.target.value)}>
               <option value="prospection">Prospection</option>
               <option value="en_cours">En cours</option>
               <option value="suspendu">Suspendu</option>
@@ -182,235 +299,232 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
               <option value="archive">Archivé</option>
             </select>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="libelle-champ" htmlFor="clientele_cible">Clientèle cible *</label>
-            <select
-              id="clientele_cible"
-              name="clientele_cible"
-              className="champ-saisie"
-              value={clienteleCible}
-              onChange={(e) => setClienteleCible(e.target.value)}
-            >
-              <option value="moa_publique">Maîtrise d&apos;ouvrage publique</option>
-              <option value="moe_conception">Équipe de maîtrise d&apos;œuvre</option>
-              <option value="entreprise_travaux">Entreprise de travaux</option>
-              <option value="cotraitrance">Co-traitance</option>
-              <option value="sous_traitance">Sous-traitance</option>
-              <option value="autre">Autre contexte</option>
-            </select>
-          </div>
-          <div>
-            <label className="libelle-champ" htmlFor="objectif_mission">Objectif principal *</label>
-            <select
-              id="objectif_mission"
-              name="objectif_mission"
-              className="champ-saisie"
-              value={objectifMission}
-              onChange={(e) => setObjectifMission(e.target.value)}
-            >
-              <option value="verifier_enveloppe">Vérifier l&apos;enveloppe budgétaire</option>
-              <option value="estimation_moe">Estimation analytique de maîtrise d&apos;œuvre</option>
-              <option value="redaction_dce_cctp">Rédaction DCE / CCTP</option>
-              <option value="reponse_ao_entreprise">Réponse à appel d&apos;offres entreprise</option>
-              <option value="devis_entreprise">Chiffrage de devis / BPU / DPGF</option>
-              <option value="prospection_ao">Prospection d&apos;appels d&apos;offres</option>
-              <option value="suivi_execution">Suivi d&apos;exécution et bilan</option>
-              <option value="autre">Autre objectif</option>
+            <label className="libelle-champ" htmlFor="nature-marche">Nature public / privé</label>
+            <select id="nature-marche" className="champ-saisie" value={natureMarche} onChange={(e) => setNatureMarche(e.target.value)}>
+              <option value="public">Marché public</option>
+              <option value="prive">Marché privé</option>
+              <option value="mixte">Contexte mixte</option>
+              <option value="autre">Autre</option>
             </select>
           </div>
         </div>
 
         <div>
-          <label className="libelle-champ" htmlFor="intitule">Intitulé *</label>
-          <input id="intitule" name="intitule" type="text" required className="champ-saisie"
-            defaultValue={projet.intitule} />
-          {erreurs.intitule && <p className="text-xs text-red-500 mt-1">{erreurs.intitule}</p>}
+          <label className="libelle-champ" htmlFor="intitule">Intitulé</label>
+          <input id="intitule" className="champ-saisie" value={intitule} onChange={(e) => setIntitule(e.target.value)} />
+          {erreurs.intitule && <p className="mt-1 text-xs text-red-500">{erreurs.intitule}</p>}
         </div>
 
-        {typeProjet === "autre" && (
-          <div>
-            <label className="libelle-champ" htmlFor="type_projet_autre">Préciser le type de projet *</label>
-            <input
-              id="type_projet_autre"
-              name="type_projet_autre"
-              type="text"
-              className="champ-saisie"
-              value={typeProjetAutre}
-              onChange={(e) => setTypeProjetAutre(e.target.value)}
-              required
-            />
-            {erreurs.type_projet_autre && <p className="text-xs text-red-500 mt-1">{erreurs.type_projet_autre}</p>}
-          </div>
-        )}
-
-        <div>
-          <label className="libelle-champ" htmlFor="phase_actuelle">Phase actuelle</label>
-          <select
-            id="phase_actuelle"
-            name="phase_actuelle"
-            className="champ-saisie"
-            value={phaseActuelle}
-            onChange={(e) => setPhaseActuelle(e.target.value)}
-          >
-            <option value="">— Aucune phase —</option>
-            <option value="faisabilite">Faisabilité</option>
-            <option value="programmation">Programmation</option>
-            <option value="esquisse">Esquisse / ESQ</option>
-            <option value="avp">APS</option>
-            <option value="pro">APD / PRO</option>
-            <option value="dce">DCE</option>
-            <option value="ao">Appel d&apos;offres</option>
-            <option value="exe">Exécution / DET</option>
-            <option value="reception">Réception / AOR</option>
-            <option value="clos">Clos</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="libelle-champ" htmlFor="description">Description</label>
-          <textarea id="description" name="description" rows={3} className="champ-saisie"
-            defaultValue={projet.description || ""} />
-        </div>
-
-        {orientation && (
-          <WizardQualificationProjet
-            orientation={orientation}
-            reponses={reponsesWizard}
-            onChange={(identifiant, valeur) =>
-              setReponsesWizard((courant) => ({ ...courant, [identifiant]: valeur }))
-            }
+        <div className="grid gap-4 md:grid-cols-2">
+          <ChampOrganisationRapide
+            label="Bureau d'études"
+            name="organisation"
+            placeholder="Sélectionner le bureau d'études"
+            typeOrganisation="bureau_etudes"
+            organisations={organisationsTriees}
+            value={organisationId}
+            onChange={setOrganisationId}
           />
-        )}
-      </div>
-
-      {/* Parties prenantes */}
-      <div className="carte space-y-4">
-        <h2>Parties prenantes</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <ChampOrganisationRapide
-              label="Bureau d'études"
-              name="organisation"
-              placeholder="— Sélectionner —"
-              typeOrganisation="bureau_etudes"
-              organisations={organisationsTriees}
-              value={organisationId}
-              onChange={setOrganisationId}
-            />
+            <label className="libelle-champ" htmlFor="famille-client">Famille de client</label>
+            <select id="famille-client" className="champ-saisie" value={familleClientId} onChange={(e) => setFamilleClientId(e.target.value)}>
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.familles_client.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
+              ))}
+            </select>
           </div>
           <div>
-            <ChampOrganisationRapide
-              label="Maître d'ouvrage"
-              name="maitre_ouvrage"
-              placeholder="— Optionnel —"
-              typeOrganisation="maitre_ouvrage"
-              organisations={organisationsTriees}
-              value={maitreOuvrageId}
-              onChange={setMaitreOuvrageId}
-            />
+            <label className="libelle-champ" htmlFor="sous-type-client">Sous-type de client</label>
+            <select id="sous-type-client" className="champ-saisie" value={sousTypeClientId} onChange={(e) => setSousTypeClientId(e.target.value)}>
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.sous_types_client.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
+              ))}
+            </select>
           </div>
           <div>
-            <label className="libelle-champ" htmlFor="maitre_oeuvre">Maître d&apos;œuvre</label>
-            <select
-              id="maitre_oeuvre"
-              name="maitre_oeuvre"
-              className="champ-saisie"
-              value={maitreOeuvreId}
-              onChange={(e) => setMaitreOeuvreId(e.target.value)}
-            >
-              <option value="">— Optionnel —</option>
-              {organisationsTriees
-                .filter((org) => ["bureau_etudes", "partenaire"].includes(org.type_organisation))
-                .map((org) => (
-                <option key={org.id} value={org.id}>{org.nom}</option>
+            <label className="libelle-champ" htmlFor="contexte-contractuel">Contexte contractuel</label>
+            <select id="contexte-contractuel" className="champ-saisie" value={contexteContractuelId} onChange={(e) => setContexteContractuelId(e.target.value)}>
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.contextes_contractuels.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="libelle-champ" htmlFor="mission-principale">Mission principale</label>
+            <select id="mission-principale" className="champ-saisie" value={missionPrincipaleId} onChange={(e) => setMissionPrincipaleId(e.target.value)}>
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.missions_principales.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
               ))}
             </select>
           </div>
         </div>
-      </div>
 
-      {/* Localisation et calendrier */}
-      <div className="carte space-y-4">
-        <h2>Localisation</h2>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2">
-            <label className="libelle-champ" htmlFor="commune">Commune</label>
-            <input id="commune" name="commune" type="text" className="champ-saisie"
-              defaultValue={projet.commune || ""} />
-          </div>
-          <div>
-            <label className="libelle-champ" htmlFor="departement">Département</label>
-            <input id="departement" name="departement" type="text" maxLength={3} className="champ-saisie"
-              defaultValue={projet.departement || ""} />
-          </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <ChampOrganisationRapide
+            label="Maître d'ouvrage"
+            name="maitre_ouvrage"
+            placeholder="Sélectionner le maître d'ouvrage"
+            typeOrganisation="maitre_ouvrage"
+            organisations={organisationsTriees}
+            value={maitreOuvrageId}
+            onChange={setMaitreOuvrageId}
+          />
+          <ChampOrganisationRapide
+            label="Maître d'œuvre / partenaire"
+            name="maitre_oeuvre"
+            placeholder="Sélectionner le maître d'œuvre"
+            typeOrganisation="partenaire"
+            organisations={organisationsTriees}
+            value={maitreOeuvreId}
+            onChange={setMaitreOeuvreId}
+          />
         </div>
       </div>
 
+      {parcours?.champs_dynamiques.map((groupe) => (
+        <div key={groupe.groupe} className="carte space-y-4">
+          <h2>{groupe.champs[0]?.section || groupe.groupe}</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {groupe.champs.map((champ) => (
+              <div key={champ.code}>
+                <label className="libelle-champ" htmlFor={champ.code}>{champ.libelle}</label>
+                {champ.type_champ === "texte_long" ? (
+                  <textarea
+                    id={champ.code}
+                    className="champ-saisie min-h-28"
+                    value={typeof donneesEntree[champ.code] === "string" ? String(donneesEntree[champ.code]) : ""}
+                    onChange={(e) => setDonneesEntree((courant) => ({ ...courant, [champ.code]: e.target.value }))}
+                  />
+                ) : champ.type_champ === "selection" ? (
+                  <select
+                    id={champ.code}
+                    className="champ-saisie"
+                    value={typeof donneesEntree[champ.code] === "string" ? String(donneesEntree[champ.code]) : ""}
+                    onChange={(e) => setDonneesEntree((courant) => ({ ...courant, [champ.code]: e.target.value }))}
+                  >
+                    <option value="">Sélectionner</option>
+                    {champ.options.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={champ.code}
+                    type={champ.type_champ === "date" ? "date" : "text"}
+                    className="champ-saisie"
+                    placeholder={champ.placeholder}
+                    value={typeof donneesEntree[champ.code] === "string" ? String(donneesEntree[champ.code]) : ""}
+                    onChange={(e) => setDonneesEntree((courant) => ({ ...courant, [champ.code]: e.target.value }))}
+                  />
+                )}
+                {champ.aide_courte && <p className="mt-1 text-xs text-slate-500">{champ.aide_courte}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
       <div className="carte space-y-4">
-        <h2>Calendrier</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <h2>Variation de prix</h2>
+        <div className="grid gap-4 md:grid-cols-3">
           <div>
-            <label className="libelle-champ" htmlFor="date_debut_prevue">Début prévu</label>
-            <input id="date_debut_prevue" name="date_debut_prevue" type="date" className="champ-saisie"
-              defaultValue={projet.date_debut_prevue || ""} />
+            <label className="libelle-champ" htmlFor="type-evolution">Type d&apos;évolution</label>
+            <select id="type-evolution" className="champ-saisie" value={variationPrix.type_evolution} onChange={(e) => setVariationPrix((courant) => ({ ...courant, type_evolution: e.target.value }))}>
+              <option value="aucune">Aucune</option>
+              <option value="actualisation">Actualisation</option>
+              <option value="revision">Révision</option>
+            </select>
           </div>
-          <div>
-            <label className="libelle-champ" htmlFor="date_fin_prevue">Fin prévue</label>
-            <input id="date_fin_prevue" name="date_fin_prevue" type="date" className="champ-saisie"
-              defaultValue={projet.date_fin_prevue || ""} />
-          </div>
-          <div>
-            <label className="libelle-champ" htmlFor="date_debut_reelle">Début réel</label>
-            <input id="date_debut_reelle" name="date_debut_reelle" type="date" className="champ-saisie"
-              defaultValue={projet.date_debut_reelle || ""} />
-          </div>
-          <div>
-            <label className="libelle-champ" htmlFor="date_fin_reelle">Fin réelle</label>
-            <input id="date_fin_reelle" name="date_fin_reelle" type="date" className="champ-saisie"
-              defaultValue={projet.date_fin_reelle || ""} />
-          </div>
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="cadre-juridique">Cadre juridique</label>
+              <select id="cadre-juridique" className="champ-saisie" value={variationPrix.cadre_juridique} onChange={(e) => setVariationPrix((courant) => ({ ...courant, cadre_juridique: e.target.value }))}>
+                <option value="public">Marché public</option>
+                <option value="prive">Marché privé</option>
+              </select>
+            </div>
+          ) : null}
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="indice-reference">Indice / index</label>
+              <input id="indice-reference" list="indices-prix-options" className="champ-saisie" value={variationPrix.indice_reference} onChange={(e) => setVariationPrix((courant) => ({ ...courant, indice_reference: e.target.value.toUpperCase() }))} placeholder="BT01, BT45, TP02, BTM01, TPM01…" />
+              <datalist id="indices-prix-options">
+                {referencesIndicesPrix.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {`${item.code} — ${item.libelle} (${item.territoire})`}
+                  </option>
+                ))}
+              </datalist>
+              {referenceIndexSelectionnee?.derniere_valeur ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  {referenceIndexSelectionnee.libelle} · {referenceIndexSelectionnee.territoire} · dernière valeur officielle {referenceIndexSelectionnee.derniere_valeur.valeur} au {new Date(referenceIndexSelectionnee.derniere_valeur.date_valeur).toLocaleDateString("fr-FR")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="date-prix-initial">Date du prix initial</label>
+              <input id="date-prix-initial" type="date" className="champ-saisie" value={variationPrix.date_prix_initial || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, date_prix_initial: e.target.value }))} />
+            </div>
+          ) : null}
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="date-remise-offre">Date de remise d&apos;offre</label>
+              <input id="date-remise-offre" type="date" className="champ-saisie" value={variationPrix.date_remise_offre || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, date_remise_offre: e.target.value }))} />
+            </div>
+          ) : null}
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="date-demarrage">Date de démarrage</label>
+              <input id="date-demarrage" type="date" className="champ-saisie" value={variationPrix.date_demarrage || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, date_demarrage: e.target.value }))} />
+            </div>
+          ) : null}
+          {variationPrix.type_evolution === "revision" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="periodicite-revision">Périodicité</label>
+              <select id="periodicite-revision" className="champ-saisie" value={variationPrix.periodicite_revision || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, periodicite_revision: e.target.value }))}>
+                <option value="">Sélectionner</option>
+                <option value="mensuelle">Mensuelle</option>
+                <option value="trimestrielle">Trimestrielle</option>
+                <option value="semestrielle">Semestrielle</option>
+                <option value="annuelle">Annuelle</option>
+                <option value="ponctuelle">Ponctuelle</option>
+              </select>
+            </div>
+          ) : null}
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div>
+              <label className="libelle-champ" htmlFor="part-fixe">Part fixe (%)</label>
+              <input id="part-fixe" className="champ-saisie" value={variationPrix.part_fixe || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, part_fixe: e.target.value }))} />
+            </div>
+          ) : null}
+          {variationPrix.type_evolution !== "aucune" ? (
+            <div className="md:col-span-3">
+              <label className="libelle-champ" htmlFor="clause-applicable">Clause applicable</label>
+              <textarea id="clause-applicable" className="champ-saisie min-h-24" value={variationPrix.clause_applicable || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, clause_applicable: e.target.value }))} />
+            </div>
+          ) : null}
+          {variationPrix.type_evolution === "revision" ? (
+            <div className="md:col-span-3">
+              <label className="libelle-champ" htmlFor="formule-personnalisee">Formule personnalisée</label>
+              <input id="formule-personnalisee" className="champ-saisie" value={variationPrix.formule_personnalisee || ""} onChange={(e) => setVariationPrix((courant) => ({ ...courant, formule_personnalisee: e.target.value }))} placeholder="Exemple: 0.15 + 0.85 * (index_actuel / index_initial)" />
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Financier */}
-      <div className="carte space-y-4">
-        <h2>Données financières</h2>
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="libelle-champ" htmlFor="montant_estime">Montant estimé HT (€)</label>
-            <input id="montant_estime" name="montant_estime" type="number" min="0" step="0.01"
-              className="champ-saisie font-mono" defaultValue={projet.montant_estime || ""} />
-          </div>
-          <div>
-            <label className="libelle-champ" htmlFor="montant_marche">Montant du marché HT (€)</label>
-            <input id="montant_marche" name="montant_marche" type="number" min="0" step="0.01"
-              className="champ-saisie font-mono" defaultValue={projet.montant_marche || ""} />
-          </div>
-          <div>
-            <label className="libelle-champ" htmlFor="honoraires_prevus">Honoraires prévus HT (€)</label>
-            <input id="honoraires_prevus" name="honoraires_prevus" type="number" min="0" step="0.01"
-              className="champ-saisie font-mono" defaultValue={projet.honoraires_prevus || ""} />
-          </div>
-        </div>
-      </div>
-
-      {/* Observations */}
-      <div className="carte">
-        <label className="libelle-champ" htmlFor="observations">Observations internes</label>
-        <textarea id="observations" name="observations" rows={3} className="champ-saisie"
-          defaultValue={projet.observations || ""} />
-      </div>
-
-      {/* Actions */}
-      <div className="flex justify-end gap-3 pb-6">
-        <button type="button" className="btn-secondaire" onClick={() => router.back()}>
+      <div className="flex justify-end gap-3">
+        <button type="button" className="btn-secondaire" onClick={() => router.push(`/projets/${projetId}`)}>
           Annuler
         </button>
-        <button type="submit" className="btn-primaire" disabled={isPending}>
-          {isPending ? "Enregistrement…" : "Enregistrer les modifications"}
+        <button type="submit" className="btn-primaire" disabled={mutation.isPending}>
+          {mutation.isPending ? "Enregistrement…" : "Enregistrer"}
         </button>
       </div>
     </form>

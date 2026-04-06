@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import io
 import hashlib
+import mimetypes
 import os
 import re
 import unicodedata
@@ -18,6 +19,7 @@ from urllib import request as urllib_request
 
 from django.core.files.base import ContentFile
 from django.utils import timezone
+from django.utils.text import slugify
 
 from applications.projets.models import Projet
 
@@ -25,9 +27,38 @@ from .models import DossierDocumentProjet, Document, TypeDocument
 
 
 MOTS_CLES_TYPES: dict[str, tuple[str, ...]] = {
-    "PLAN": ("plan", "plan masse", "plan niveau", "coupe", "facade", "elevation", "dxf", "dwg"),
+    "PLAN": (
+        "plan masse",
+        "plan niveau",
+        "plan de situation",
+        "plan d execution",
+        "plan de recollement",
+        "schema de principe",
+        "schema unifilaire",
+        "synoptique",
+        "coupe",
+        "facade",
+        "elevation",
+        "cartouche",
+        "calque",
+        "dxf",
+        "dwg",
+    ),
     "NOTE_CALCUL": ("note de calcul", "dimensionnement", "descente de charges", "justification", "calcul", "note technique"),
-    "RAPPORT": ("rapport", "diagnostic", "expertise", "etude technique", "synthese"),
+    "RAPPORT": (
+        "rapport",
+        "diagnostic",
+        "expertise",
+        "etude technique",
+        "synthese",
+        "programme",
+        "notice",
+        "memoire",
+        "contexte",
+        "presentation",
+        "planning",
+        "planification",
+    ),
     "CCTP": ("cctp", "cahier des clauses techniques particulieres"),
     "DPGF": ("dpgf", "decomposition du prix global et forfaitaire"),
     "BPU": ("bpu", "bordereau des prix unitaires"),
@@ -46,7 +77,57 @@ REGLES_TYPES: dict[str, tuple[str, ...]] = {
     "AE": (r"\bae\b", r"acte d.?engagement"),
     "PV_RECEPTION": (r"\bpv\b", r"reception"),
     "CR_CHANTIER": (r"\bcr\b", r"chantier"),
-    "PLAN": (r"\bplan\b", r"\bcoupe\b", r"\bfacade\b"),
+    "PLAN": (
+        r"\bplan(?: de| d[' ])?(?:masse|niveau|situation|recollement|execution|implantation|rep[eé]rage)\b",
+        r"\bcoupe\b",
+        r"\bfacade\b",
+        r"\belevation\b",
+        r"\bschema(?: de principe)?\b",
+        r"\bsynoptique\b",
+    ),
+}
+
+REGLES_NEGATIVES_TYPES: dict[str, tuple[str, ...]] = {
+    "PLAN": (
+        r"\bplanning\b",
+        r"\bplanification\b",
+        r"\bplan d[' ]action\b",
+        r"\bplan de financement\b",
+        r"\bprogramme\b",
+        r"\bnotice\b",
+        r"\bmemoire\b",
+        r"\bcontexte\b",
+        r"\brapport\b",
+        r"\bdiagnostic\b",
+    ),
+}
+
+EXTENSIONS_IMAGES = {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}
+EXTENSIONS_CAO = {"dwg", "dxf"}
+EXTENSIONS_BUREAUTIQUE_TEXTE = {"doc", "docx", "odt", "rtf", "txt", "md"}
+EXTENSIONS_TABLEUR = {"xls", "xlsx", "xlsm", "ods", "csv"}
+EXTENSIONS_BUREAUTIQUE = EXTENSIONS_BUREAUTIQUE_TEXTE | EXTENSIONS_TABLEUR
+EXTENSIONS_BUREAUTIQUE_EDITABLES = {"doc", "docx", "xls", "xlsx", "xlsm", "odt", "ods"}
+TOKENS_NOM_IGNORE_REFERENCE = {
+    "copie",
+    "copy",
+    "version",
+    "ver",
+    "rev",
+    "revision",
+    "final",
+    "finale",
+    "def",
+    "definitif",
+    "definitive",
+    "signed",
+    "scan",
+    "scanne",
+    "scanned",
+    "document",
+    "doc",
+    "fichier",
+    "piece",
 }
 
 
@@ -134,6 +215,55 @@ def extension_depuis_nom_fichier(nom_fichier: str) -> str:
     return nom_fichier.rsplit(".", 1)[-1].lower() if "." in nom_fichier else ""
 
 
+def est_document_bureautique_editable(nom_fichier: str | None = None, type_mime: str | None = None) -> bool:
+    extension = extension_depuis_nom_fichier(nom_fichier or "")
+    if extension in EXTENSIONS_BUREAUTIQUE_EDITABLES:
+        return True
+    return (type_mime or "") in {
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.oasis.opendocument.text",
+        "application/vnd.oasis.opendocument.spreadsheet",
+    }
+
+
+def nettoyer_nom_document(nom_fichier: str, *, longueur_max: int = 180) -> str:
+    stem = Path(nom_fichier).stem
+    stem = unicodedata.normalize("NFKC", stem)
+    stem = re.sub(r"[_\-]+", " ", stem)
+    stem = re.sub(r"\b(?:v(?:ersion)?|rev(?:ision)?)\s*[a-z0-9]{1,3}\b", " ", stem, flags=re.IGNORECASE)
+    stem = re.sub(r"\b(?:finale?|definitif|definitive|copie|scan(?:ne)?|signed)\b", " ", stem, flags=re.IGNORECASE)
+    stem = re.sub(r"\b20\d{2}[\s._-]?\d{2}[\s._-]?\d{2}\b", " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" ._-")
+    return (stem[:longueur_max].strip() or "document importe")
+
+
+def intitule_document_depuis_nom_fichier(nom_fichier: str) -> str:
+    intitule = nettoyer_nom_document(nom_fichier, longueur_max=220)
+    return intitule[:1].upper() + intitule[1:] if intitule else "Document importé"
+
+
+def reference_document_depuis_nom_fichier(nom_fichier: str) -> str:
+    base = nettoyer_nom_document(nom_fichier, longueur_max=160)
+    ascii_value = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
+    tokens = [
+        token.upper()
+        for token in re.split(r"[^A-Za-z0-9]+", ascii_value)
+        if token and token.lower() not in TOKENS_NOM_IGNORE_REFERENCE
+    ]
+    if not tokens:
+        return "DOC"
+    return "-".join(tokens[:6])[:100]
+
+
+def nom_stockage_document(nom_fichier: str) -> str:
+    extension = Path(nom_fichier).suffix.lower()
+    base = slugify(nettoyer_nom_document(nom_fichier, longueur_max=120)) or "document"
+    return f"{base[:120]}{extension}"
+
+
 def suggerer_type_document(nom_fichier: str, texte: str, type_mime: str) -> dict[str, Any] | None:
     corpus_nom = normaliser_texte(nom_fichier)
     corpus_texte = normaliser_texte(texte[:30000])
@@ -152,23 +282,39 @@ def suggerer_type_document(nom_fichier: str, texte: str, type_mime: str) -> dict
             if expr and expr in corpus_texte:
                 score += 3
                 raisons.append(f"texte:{expression}")
-        if code == "PLAN" and (
-            type_mime in {"image/png", "image/jpeg", "image/tiff", "image/webp"}
-            or corpus_nom.endswith(".dxf")
-            or corpus_nom.endswith(".dwg")
-        ):
-            score += 4
-            raisons.append("format-technique")
+        if code == "PLAN":
+            if extension in EXTENSIONS_CAO:
+                score += 10
+                raisons.append("extension-cao")
+            elif extension in EXTENSIONS_IMAGES:
+                score += 4
+                raisons.append("extension-image")
+            elif extension == "pdf":
+                score += 3
+                raisons.append("extension-pdf")
+            if type_mime in {"image/png", "image/jpeg", "image/tiff", "image/webp"}:
+                score += 4
+                raisons.append("format-technique")
+            if extension in EXTENSIONS_BUREAUTIQUE:
+                score -= 8
+                raisons.append("format-bureautique")
         if code == "PHOTO" and type_mime.startswith("image/"):
             score += 5
             raisons.append("format-image")
         if code == "PLAN" and extension in {"pdf", "dxf", "dwg"}:
             score += 2
             raisons.append("extension-technique")
+        if code == "RAPPORT" and extension in EXTENSIONS_BUREAUTIQUE_TEXTE | {"pdf"}:
+            score += 3
+            raisons.append("format-redactionnel")
         for motif in REGLES_TYPES.get(code, ()):
             if re.search(motif, corpus_total):
                 score += 4
                 raisons.append(f"regle:{motif}")
+        for motif in REGLES_NEGATIVES_TYPES.get(code, ()):
+            if re.search(motif, corpus_total):
+                score -= 5
+                raisons.append(f"contre-indice:{motif}")
 
         if score <= 0:
             continue
@@ -549,20 +695,11 @@ def _version_depuis_nom_fichier(nom_fichier: str) -> str | None:
 
 
 def _reference_depuis_nom_fichier(nom_fichier: str) -> str:
-    stem = Path(nom_fichier).stem
-    tokens = re.split(r"[^A-Za-z0-9]+", stem)
-    tokens = [token for token in tokens if token]
-    if not tokens:
-        return "DOC"
-    sequence = "-".join(token.upper() for token in tokens[:4])
-    return sequence[:100]
+    return reference_document_depuis_nom_fichier(nom_fichier)
 
 
 def _intitule_depuis_nom_fichier(nom_fichier: str) -> str:
-    stem = Path(nom_fichier).stem
-    intitule = re.sub(r"[_-]+", " ", stem)
-    intitule = re.sub(r"\s+", " ", intitule).strip()
-    return intitule[:500] or "Document importé"
+    return intitule_document_depuis_nom_fichier(nom_fichier)
 
 
 def _prochaine_version_pour_reference(projet: Projet, reference: str) -> tuple[str, Document | None]:
@@ -679,9 +816,10 @@ def importer_archive_documents(
                     taille_octets=len(contenu),
                     type_mime=mime,
                 )
+                nom_stockage = nom_stockage_document(nom_membre)
                 document.fichier.save(
-                    nom_membre,
-                    ContentFile(contenu, name=nom_membre),
+                    nom_stockage,
+                    ContentFile(contenu, name=nom_stockage),
                     save=False,
                 )
                 document.save(update_fields=[
@@ -713,6 +851,81 @@ def importer_archive_documents(
         "erreurs": erreurs,
         "documents": details,
     }
+
+
+def importer_fichier_source_dans_projet(
+    *,
+    projet: Projet,
+    utilisateur,
+    nom_fichier: str,
+    contenu: bytes,
+    type_mime: str = "",
+) -> Document:
+    intitule = _intitule_depuis_nom_fichier(nom_fichier)
+    reference = _reference_depuis_nom_fichier(nom_fichier)
+    version = _version_depuis_nom_fichier(nom_fichier)
+
+    if not version:
+        version, parent = _prochaine_version_pour_reference(projet, reference)
+    else:
+        parent = Document.objects.filter(
+            projet=projet,
+            reference=reference,
+            est_version_courante=True,
+        ).first()
+
+    if parent:
+        Document.objects.filter(projet=projet, reference=reference).update(est_version_courante=False)
+
+    type_document = TypeDocument.objects.filter(code="AUTRE").first() or TypeDocument.objects.order_by("ordre_affichage").first()
+    if not type_document:
+        raise ErreurServiceAnalyse("Aucun type de document n'est configuré.")
+
+    dossier_cible = determiner_dossier_cible_document(
+        projet,
+        type_document_code=type_document.code,
+        contexte_generation="document-importe",
+    )
+    dossier = obtenir_ou_creer_dossier_document(
+        projet,
+        dossier_cible["code"],
+        parent_code=dossier_cible.get("parent_code"),
+        intitule=dossier_cible["intitule"],
+        parent_intitule=dossier_cible.get("parent_intitule"),
+    )
+
+    type_mime_effectif = type_mime or mimetypes.guess_type(nom_fichier)[0] or "application/octet-stream"
+    document = Document.objects.create(
+        reference=reference,
+        intitule=intitule,
+        type_document=type_document,
+        projet=projet,
+        dossier=dossier,
+        version=version,
+        est_version_courante=True,
+        document_parent=parent,
+        statut="brouillon",
+        origine="recu",
+        auteur=utilisateur,
+        nom_fichier_origine=nom_fichier,
+        taille_octets=len(contenu),
+        type_mime=type_mime_effectif,
+    )
+    nom_stockage = nom_stockage_document(nom_fichier)
+    document.fichier.save(
+        nom_stockage,
+        ContentFile(contenu, name=nom_stockage),
+        save=False,
+    )
+    document.save(update_fields=[
+        "fichier",
+        "nom_fichier_origine",
+        "taille_octets",
+        "type_mime",
+    ])
+    analyser_document_automatiquement(document)
+    reclasser_document_dans_ged(document, contexte_generation="document-importe", forcer=True)
+    return document
 
 
 def synchroniser_dossiers_projet(projet: Projet) -> list[DossierDocumentProjet]:

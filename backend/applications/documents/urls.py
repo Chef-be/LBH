@@ -11,10 +11,14 @@ urlpatterns = [
 
     # Documents
     path("", views.VueListeDocuments.as_view(), name="documents-liste"),
+    path("creer-bureautique/", views.vue_creer_document_bureautique, name="documents-creer-bureautique"),
     path("importer-archive/", views.vue_importer_archive_documents, name="documents-importer-archive"),
     path("appliquer-suggestions/", views.vue_appliquer_suggestions_documents, name="documents-appliquer-suggestions"),
     path("previsualiser-suggestions/", views.vue_previsualiser_suggestions_documents, name="documents-previsualiser-suggestions"),
     path("<uuid:pk>/", views.VueDetailDocument.as_view(), name="document-detail"),
+    path("<uuid:pk>/session-bureautique/", views.vue_document_session_bureautique, name="document-session-bureautique"),
+    path("<uuid:pk>/wopi/", views.vue_document_wopi_fichier, name="document-wopi-fichier"),
+    path("<uuid:pk>/wopi/contents", views.vue_document_wopi_contenu, name="document-wopi-contenu"),
     path("<uuid:pk>/valider/", views.vue_valider_document, name="document-valider"),
     path("<uuid:pk>/nouvelle-version/", views.vue_nouvelle_version, name="document-nouvelle-version"),
     path("<uuid:pk>/ocr/", views.vue_lancer_ocr, name="document-ocr"),

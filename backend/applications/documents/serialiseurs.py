@@ -8,7 +8,7 @@ from .models import (
     AnnotationDocument,
     DiffusionDocument,
 )
-from .services import extraire_suggestions_document
+from .services import est_document_bureautique_editable, extraire_suggestions_document
 
 
 class TypeDocumentSerialiseur(serializers.ModelSerializer):
@@ -95,6 +95,7 @@ class DocumentListeSerialiseur(serializers.ModelSerializer):
     dossier_libelle = serializers.CharField(source="dossier.intitule", read_only=True)
     dossier_chemin = serializers.SerializerMethodField()
     suggestions_classement = serializers.SerializerMethodField()
+    bureautique_editable = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -106,7 +107,7 @@ class DocumentListeSerialiseur(serializers.ModelSerializer):
             "statut", "statut_libelle", "origine",
             "fichier", "nom_fichier_origine", "taille_octets", "type_mime",
             "analyse_automatique_effectuee", "date_analyse_automatique",
-            "suggestions_classement",
+            "suggestions_classement", "bureautique_editable",
             "auteur", "auteur_nom",
             "date_creation", "date_modification",
         ]
@@ -129,6 +130,9 @@ class DocumentListeSerialiseur(serializers.ModelSerializer):
     def get_suggestions_classement(self, obj):
         return extraire_suggestions_document(obj)
 
+    def get_bureautique_editable(self, obj):
+        return est_document_bureautique_editable(obj.nom_fichier_origine, obj.type_mime)
+
 
 class DocumentDetailSerialiseur(serializers.ModelSerializer):
     type_libelle = serializers.CharField(source="type_document.libelle", read_only=True)
@@ -141,6 +145,7 @@ class DocumentDetailSerialiseur(serializers.ModelSerializer):
     annotations = AnnotationDocumentSerialiseur(many=True, read_only=True)
     diffusions = DiffusionDocumentSerialiseur(many=True, read_only=True)
     suggestions_classement = serializers.SerializerMethodField()
+    bureautique_editable = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -153,7 +158,7 @@ class DocumentDetailSerialiseur(serializers.ModelSerializer):
             "statut", "statut_libelle", "origine",
             "ocr_effectue", "contenu_texte", "mots_cles",
             "analyse_automatique_effectuee", "date_analyse_automatique", "analyse_automatique",
-            "suggestions_classement",
+            "suggestions_classement", "bureautique_editable",
             "auteur", "auteur_nom",
             "date_creation", "date_modification", "date_validation",
             "valide_par", "valide_par_nom",
@@ -198,3 +203,6 @@ class DocumentDetailSerialiseur(serializers.ModelSerializer):
 
     def get_suggestions_classement(self, obj):
         return extraire_suggestions_document(obj)
+
+    def get_bureautique_editable(self, obj):
+        return est_document_bureautique_editable(obj.nom_fichier_origine, obj.type_mime)

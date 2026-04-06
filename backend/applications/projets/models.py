@@ -94,6 +94,7 @@ class Projet(models.Model):
     # Parties prenantes
     organisation = models.ForeignKey(
         "organisations.Organisation", on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="projets", verbose_name="Bureau d'études",
     )
     maitre_ouvrage = models.ForeignKey(
@@ -232,3 +233,42 @@ class Intervenant(models.Model):
 
     def __str__(self):
         return f"{self.utilisateur.nom_complet} ({self.get_role_display()}) — {self.projet.reference}"
+
+
+class PreanalyseSourcesProjet(models.Model):
+    """Tâche asynchrone de préanalyse des pièces sources avant création d'un projet."""
+
+    STATUTS = [
+        ("en_attente", "En attente"),
+        ("en_cours", "En cours"),
+        ("terminee", "Terminée"),
+        ("echec", "Échec"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.CASCADE,
+        related_name="preanalyses_sources_projets",
+    )
+    statut = models.CharField(max_length=20, choices=STATUTS, default="en_attente")
+    progression = models.PositiveSmallIntegerField(default=0)
+    message = models.CharField(max_length=255, blank=True, default="")
+    nombre_fichiers = models.PositiveIntegerField(default=0)
+    resultat = models.JSONField(default=dict, blank=True)
+    erreur = models.TextField(blank=True, default="")
+    contexte = models.JSONField(default=dict, blank=True, db_column="parametres")
+    repertoire_temp = models.CharField(max_length=500, blank=True, default="", db_column="chemin_stockage")
+    tache_celery_id = models.CharField(max_length=255, blank=True, default="")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+    date_fin = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "projets_preanalyse_sources"
+        verbose_name = "Préanalyse des sources projet"
+        verbose_name_plural = "Préanalyses des sources projet"
+        ordering = ["-date_creation"]
+
+    def __str__(self):
+        return f"Préanalyse {self.pk} ({self.get_statut_display()})"

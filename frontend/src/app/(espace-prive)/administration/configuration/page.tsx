@@ -6,11 +6,13 @@ import { api, requeteApiAvecProgression, type ProgressionTeleversement, ErreurAp
 import { ArrowRight, Save, Plus, Trash2, GripVertical, Upload } from "lucide-react";
 import Link from "next/link";
 import { EtatTeleversement } from "@/composants/ui/EtatTeleversement";
+import { ChampAdresseRecherche } from "@/composants/organisations/ChampAdresseRecherche";
 import {
   AlerteAdmin,
   CarteSectionAdmin,
   EntetePageAdmin,
 } from "@/composants/administration/Presentation";
+import type { SuggestionAdressePublique } from "@/lib/organisations";
 
 interface DiapositiveCarrousel {
   titre: string;
@@ -525,10 +527,17 @@ export default function PageConfiguration() {
             </div>
             <div>
               <Libelle>Adresse (rue)</Libelle>
-              <input
-                type="text" className={CHAMP_TEXTE}
+              <ChampAdresseRecherche
+                id="configuration-adresse"
+                className={CHAMP_TEXTE}
                 value={config.adresse}
-                onChange={(e) => maj("adresse", e.target.value)}
+                onChange={(valeur) => maj("adresse", valeur)}
+                onSelection={(suggestion: SuggestionAdressePublique) => {
+                  maj("adresse", suggestion.adresse || suggestion.label);
+                  maj("code_postal", suggestion.code_postal || "");
+                  maj("ville", suggestion.ville || "");
+                  maj("pays", "France");
+                }}
                 placeholder="1 rue de l'Économiste"
               />
             </div>

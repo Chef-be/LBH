@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, FileUp, FolderTree, Sparkles } from "lucide-react";
+import { AlertCircle, FileUp } from "lucide-react";
 import { ListeDocuments } from "@/composants/documents/ListeDocuments";
 import { EtatTeleversement } from "@/composants/ui/EtatTeleversement";
 import {
@@ -28,22 +27,10 @@ interface TypeDocument {
   libelle: string;
 }
 
-interface AssistantGeneration {
-  code: string;
-  intitule: string;
-  description: string;
-  type_document: string;
-  dossier_code: string;
-  action: string;
-}
-
 interface ProjetDocumentsDetail {
   id: string;
   reference: string;
   intitule: string;
-  processus_recommande: {
-    assistants_generation_documentaire: AssistantGeneration[];
-  };
 }
 
 function slugifierNomFichier(nom: string): string {
@@ -87,8 +74,6 @@ export function GestionDocumentsProjet({ projetId }: { projetId: string }) {
     queryFn: () => api.get<TypeDocument[]>("/api/documents/types/"),
     select: (data) => extraireListeResultats<TypeDocument>(data as never),
   });
-
-  const assistants = projet?.processus_recommande.assistants_generation_documentaire ?? [];
 
   const typesTries = useMemo(
     () => [...typesDocuments].sort((a, b) => a.libelle.localeCompare(b.libelle, "fr")),
@@ -146,7 +131,7 @@ export function GestionDocumentsProjet({ projetId }: { projetId: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div>
         <form onSubmit={televerserDocument} className="carte space-y-4">
           <div className="flex items-start gap-3">
             <div className="rounded-xl bg-primaire-50 p-3 text-primaire-700">
@@ -265,44 +250,6 @@ export function GestionDocumentsProjet({ projetId }: { projetId: string }) {
             </button>
           </div>
         </form>
-
-        <div className="carte space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-amber-50 p-3 text-amber-700">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-slate-800">Assistants de génération</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Crée des livrables cohérents avec le type de client et l’objectif du projet.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {assistants.map((assistant) => (
-              <Link
-                key={assistant.code}
-                href={`/projets/${projetId}/pieces-ecrites/nouvelle?type_document=${encodeURIComponent(assistant.type_document)}&assistant=${encodeURIComponent(assistant.code)}&intitule=${encodeURIComponent(assistant.intitule)}`}
-                className="block rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-primaire-200 hover:bg-white"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{assistant.intitule}</p>
-                    <p className="mt-1 text-sm text-slate-500">{assistant.description}</p>
-                  </div>
-                  <FolderTree className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
-                </div>
-                <p className="mt-3 text-xs text-slate-400">Type `{assistant.type_document}` · dossier cible `{assistant.dossier_code}`</p>
-              </Link>
-            ))}
-            {assistants.length === 0 && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Aucun assistant de génération n’est encore disponible pour ce contexte projet.
-              </div>
-            )}
-          </div>
-        </div>
       </div>
 
       <ListeDocuments projetId={projetId} baseLienDocument={`/projets/${projetId}/documents`} />

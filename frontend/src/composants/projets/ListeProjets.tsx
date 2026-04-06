@@ -20,7 +20,7 @@ interface Projet {
   statut: string;
   type_projet: string;
   type_libelle?: string;
-  organisation_nom: string;
+  organisation_nom: string | null;
   responsable_nom: string;
   commune: string;
   montant_estime: number | null;

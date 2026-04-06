@@ -2,13 +2,20 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
-import { Plus, Pencil, Search, Building2, Phone, Mail, MapPin, Save, X, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Plus, Pencil, Search, Building2, Phone, Mail, MapPin, Save, X, AlertCircle, Eye, EyeOff, Trash2 } from "lucide-react";
 import { ActionsRapidesAdaptatives } from "@/composants/ui/ActionsRapides";
+import { ChampAdresseRecherche } from "@/composants/organisations/ChampAdresseRecherche";
+import { ChampNomOrganisationAnnuaire } from "@/composants/organisations/ChampNomOrganisationAnnuaire";
 import {
   AlerteAdmin,
   CarteSectionAdmin,
   EntetePageAdmin,
 } from "@/composants/administration/Presentation";
+import {
+  normaliserCodeOrganisation,
+  type SuggestionAdressePublique,
+  type SuggestionEntreprisePublique,
+} from "@/lib/organisations";
 
 interface Organisation {
   id: string;
@@ -62,7 +69,7 @@ function Modal({ initial, onSave, onClose }: { initial: Organisation | null; onS
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-visible">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <h2 className="font-semibold text-slate-800">{initial ? "Modifier l'organisation" : "Nouvelle organisation"}</h2>
           <button onClick={onClose}><X className="w-5 h-5 text-slate-400" /></button>
@@ -88,8 +95,26 @@ function Modal({ initial, onSave, onClose }: { initial: Organisation | null; onS
 
           <div>
             <label className="libelle-champ">Nom <span className="text-red-500">*</span></label>
-            <input type="text" className="champ-saisie w-full" value={form.nom}
-              onChange={e => maj("nom", e.target.value)} placeholder="Mairie de…" />
+            <ChampNomOrganisationAnnuaire
+              id="organisation-nom"
+              className="champ-saisie w-full"
+              typeOrganisation={form.type_organisation}
+              value={form.nom}
+              onChange={(valeur) => maj("nom", valeur)}
+              onSelection={(suggestion: SuggestionEntreprisePublique) => {
+                setForm((prev) => ({
+                  ...prev,
+                  nom: suggestion.nom,
+                  code: prev.code || normaliserCodeOrganisation(suggestion.nom, prev.type_organisation),
+                  siret: suggestion.siret || prev.siret,
+                  adresse: suggestion.adresse || prev.adresse,
+                  code_postal: suggestion.code_postal || prev.code_postal,
+                  ville: suggestion.ville || prev.ville,
+                  pays: suggestion.pays || prev.pays || "France",
+                }));
+              }}
+              placeholder="Mairie de…"
+            />
           </div>
 
           <div>
@@ -100,8 +125,22 @@ function Modal({ initial, onSave, onClose }: { initial: Organisation | null; onS
 
           <div>
             <label className="libelle-champ">Adresse</label>
-            <input type="text" className="champ-saisie w-full" value={form.adresse}
-              onChange={e => maj("adresse", e.target.value)} placeholder="1 place de la Mairie" />
+            <ChampAdresseRecherche
+              id="organisation-adresse"
+              className="champ-saisie w-full"
+              value={form.adresse}
+              onChange={(valeur) => maj("adresse", valeur)}
+              onSelection={(suggestion: SuggestionAdressePublique) => {
+                setForm((prev) => ({
+                  ...prev,
+                  adresse: suggestion.adresse || suggestion.label,
+                  code_postal: suggestion.code_postal || prev.code_postal,
+                  ville: suggestion.ville || prev.ville,
+                  pays: "France",
+                }));
+              }}
+              placeholder="1 place de la Mairie"
+            />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -162,6 +201,7 @@ export default function PageOrganisations() {
   const [erreur, setErreur] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
   const [edition, setEdition] = useState<Organisation | null>(null);
+  const [suppressionEnCoursId, setSuppressionEnCoursId] = useState<string | null>(null);
 
   const charger = useCallback(async () => {
     try {
@@ -188,6 +228,29 @@ export default function PageOrganisations() {
       await charger();
     } catch {
       setErreur("Impossible de modifier le statut de l'organisation.");
+    }
+  };
+
+  const supprimer = async (organisation: Organisation) => {
+    const confirmation = window.confirm(
+      `Supprimer l'organisation "${organisation.nom}" ?`
+    );
+    if (!confirmation) return;
+
+    setErreur(null);
+    setSuppressionEnCoursId(organisation.id);
+    try {
+      await api.supprimer(`/api/organisations/${organisation.id}/`);
+      flash("Organisation supprimée.");
+      await charger();
+    } catch (e) {
+      setErreur(
+        e instanceof ErreurApi
+          ? e.detail
+          : "Impossible de supprimer l'organisation."
+      );
+    } finally {
+      setSuppressionEnCoursId(null);
     }
   };
 
@@ -265,6 +328,14 @@ export default function PageOrganisations() {
                   titre: org.est_active ? "Désactiver" : "Réactiver",
                   icone: org.est_active ? EyeOff : Eye,
                   onClick: () => basculerActivation(org),
+                  disabled: suppressionEnCoursId === org.id,
+                },
+                {
+                  titre: "Supprimer",
+                  icone: Trash2,
+                  variante: "danger",
+                  onClick: () => supprimer(org),
+                  disabled: suppressionEnCoursId === org.id,
                 },
               ]}
             />

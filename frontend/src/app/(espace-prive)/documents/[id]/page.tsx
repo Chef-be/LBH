@@ -70,6 +70,7 @@ interface DocumentDetail {
   analyse_automatique_effectuee: boolean;
   date_analyse_automatique: string | null;
   analyse_automatique: Record<string, unknown>;
+  bureautique_editable?: boolean;
   acces_client: boolean;
   acces_partenaire: boolean;
   confidentiel: boolean;
@@ -334,7 +335,6 @@ export default function PageDetailDocument({
   const erreursAnalyse = Array.isArray(analyse.erreurs) ? analyse.erreurs as Array<Record<string, unknown>> : [];
   const typeDetecte = classification.type_document as Record<string, unknown> | undefined;
   const projetSuggere = suggestions.projet as Record<string, unknown> | undefined;
-
   return (
     <div className="space-y-6">
       {/* Navigation */}

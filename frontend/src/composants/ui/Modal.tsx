@@ -13,6 +13,7 @@ interface Props {
   taille?: "sm" | "md" | "lg" | "xl";
   /** Empêche la fermeture au clic sur le fond */
   immovable?: boolean;
+  debordementVisible?: boolean;
 }
 
 const LARGEURS = {
@@ -24,7 +25,7 @@ const LARGEURS = {
 
 export function Modal({
   ouvert, onFermer, titre, children, pied,
-  taille = "md", immovable = false,
+  taille = "md", immovable = false, debordementVisible = false,
 }: Props) {
   const boiteRef = useRef<HTMLDivElement>(null);
 
@@ -80,7 +81,7 @@ export function Modal({
     >
       <div
         ref={boiteRef}
-        className={clsx("modal-boite w-full", LARGEURS[taille])}
+        className={clsx("modal-boite w-full", LARGEURS[taille], debordementVisible && "overflow-visible")}
         onClick={(e) => e.stopPropagation()}
       >
         {/* En-tête */}

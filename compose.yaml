@@ -171,6 +171,7 @@ services:
       - "80"
     volumes:
       - ./roundcube/config:/var/roundcube/config:ro
+      - ./roundcube/skins/elastic/templates/about.html:/var/www/html/skins/elastic/templates/about.html:ro
       - lbh-donnees-roundcube:/var/roundcube/db:rw
       - lbh-temp-roundcube:/tmp/roundcube-temp:rw
     environment:

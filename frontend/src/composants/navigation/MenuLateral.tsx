@@ -8,9 +8,8 @@ import { clsx } from "clsx";
 import { useConfiguration } from "@/contextes/FournisseurConfiguration";
 import { api, extraireListeResultats } from "@/crochets/useApi";
 import {
-  LayoutDashboard, FolderKanban, FileText, Calculator,
-  BookOpen, TrendingUp, Hammer, Building2, FileEdit,
-  Megaphone, HardHat, Settings, Activity, Globe, Users, Mail,
+  LayoutDashboard, FolderKanban, BookOpen, FileEdit, Settings,
+  Activity, Globe, Users, Mail,
   ChevronLeft, Menu,
 } from "lucide-react";
 import { obtenirMarqueAffichee, obtenirNomPlateforme } from "@/lib/site-public";
@@ -37,17 +36,9 @@ const GROUPES_MENU: GroupeMenu[] = [
     ],
   },
   {
-    titre: "Études",
+    titre: "Bibliothèques",
     entrees: [
-      { libelle: "Documents", chemin: "/documents", icone: FileText, codeModule: "GESTION_DOCUMENTAIRE" },
-      { libelle: "Métrés", chemin: "/metres", icone: Calculator, codeModule: "METRES_QUANTITATIFS" },
-      { libelle: "Économie", chemin: "/economie", icone: TrendingUp, codeModule: "ECONOMIE_CONSTRUCTION" },
       { libelle: "Bibliothèque de prix", chemin: "/bibliotheque", icone: BookOpen, codeModule: "BIBLIOTHEQUE_PRIX" },
-      { libelle: "Voirie", chemin: "/voirie", icone: Hammer, codeModule: "DIMENSIONNEMENT_VOIRIE" },
-      { libelle: "Bâtiment", chemin: "/batiment", icone: Building2, codeModule: "PRESIZING_BATIMENT" },
-      { libelle: "Pièces écrites", chemin: "/pieces-ecrites", icone: FileEdit, codeModule: "PIECES_ECRITES" },
-      { libelle: "Appels d'offres", chemin: "/appels-offres", icone: Megaphone, codeModule: "APPELS_OFFRES" },
-      { libelle: "Exécution", chemin: "/execution", icone: HardHat, codeModule: "SUIVI_EXECUTION" },
     ],
   },
   {

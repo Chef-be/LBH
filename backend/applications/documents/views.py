@@ -8,21 +8,42 @@ import uuid
 from datetime import datetime, timezone
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+from django.http import HttpResponse
+from django.urls import reverse
 from rest_framework import generics, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import TypeDocument, DossierDocumentProjet, Document, AnnotationDocument, DiffusionDocument
+from .office import (
+    assurer_fichier_bureautique_document,
+    construire_url_editeur_collabora_document,
+    creer_jeton_wopi_document,
+    definir_verrou_document,
+    extension_bureautique_document,
+    lire_contenu_document,
+    lire_verrou_document,
+    nom_affichage_document,
+    supprimer_verrou_document,
+    type_bureautique_document,
+    type_mime_bureautique_document,
+    verifier_jeton_wopi_document,
+    enregistrer_contenu_document,
+)
 from .services import (
     ErreurServiceAnalyse,
     appliquer_suggestions_document,
     analyser_document_automatiquement,
     determiner_dossier_cible_document,
+    est_document_bureautique_editable,
     inferer_projet_initial,
+    intitule_document_depuis_nom_fichier,
     importer_archive_documents,
+    nom_stockage_document,
     obtenir_projet_unique,
     obtenir_ou_creer_dossier_document,
+    reference_document_depuis_nom_fichier,
     reclasser_document_dans_ged,
     synchroniser_dossiers_projet,
     previsualiser_suggestions_document,
@@ -58,6 +79,23 @@ def _construire_corps_multipart(nom_champ, nom_fichier, contenu, type_mime):
     ).encode("utf-8")
     pied = f"\r\n--{delimiteur}--\r\n".encode("utf-8")
     return delimiteur, en_tete + contenu + pied
+
+
+def _obtenir_jeton_wopi(request) -> str:
+    jeton = request.GET.get("access_token", "")
+    if jeton:
+        return jeton
+    autorisation = request.headers.get("Authorization", "")
+    if autorisation.lower().startswith("bearer "):
+        return autorisation[7:].strip()
+    return ""
+
+
+def _verifier_acces_wopi_document(request, document: Document):
+    try:
+        return verifier_jeton_wopi_document(document, _obtenir_jeton_wopi(request))
+    except PermissionError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 class VueListeTypesDocuments(generics.ListAPIView):
@@ -162,6 +200,14 @@ class VueListeDocuments(generics.ListCreateAPIView):
             raise ValidationError({"type_document": "Aucun type de document n'est configuré."})
 
         if fichier:
+            serializer.validated_data["reference"] = (
+                serializer.validated_data.get("reference")
+                or reference_document_depuis_nom_fichier(fichier.name)
+            )[:100]
+            serializer.validated_data["intitule"] = (
+                serializer.validated_data.get("intitule")
+                or intitule_document_depuis_nom_fichier(fichier.name)
+            )[:500]
             extras["nom_fichier_origine"] = fichier.name
             extras["taille_octets"] = fichier.size
             extras["type_mime"] = fichier.content_type or ""
@@ -170,6 +216,7 @@ class VueListeDocuments(generics.ListCreateAPIView):
             for bloc in fichier.chunks():
                 h.update(bloc)
             extras["empreinte_sha256"] = h.hexdigest()
+            fichier.name = nom_stockage_document(fichier.name)
             fichier.seek(0)
         dossier_id = self.request.data.get("dossier")
         if dossier_id:
@@ -204,6 +251,184 @@ class VueListeDocuments(generics.ListCreateAPIView):
                     reclasser_document_dans_ged(document, contexte_generation="document-importe", forcer=True)
             except ErreurServiceAnalyse as exc:
                 journal.warning("Analyse automatique non disponible pour %s : %s", document.reference, str(exc))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_creer_document_bureautique(request):
+    projet_id = request.data.get("projet")
+    if not projet_id:
+        raise ValidationError({"projet": "Le projet est obligatoire."})
+
+    from applications.projets.models import Projet
+
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    format_document = (request.data.get("format") or "docx").lower()
+    if format_document not in {"docx", "xlsx"}:
+        raise ValidationError({"format": "Formats autorisés : docx ou xlsx."})
+
+    reference = (request.data.get("reference") or "").strip() or f"{projet.reference}-DOC"
+    intitule = (request.data.get("intitule") or "").strip() or ("Nouveau tableau" if format_document == "xlsx" else "Nouveau document")
+
+    type_document = None
+    type_document_id = request.data.get("type_document")
+    if type_document_id:
+        type_document = TypeDocument.objects.filter(pk=type_document_id).first()
+    if not type_document:
+        code_defaut = "DPGF" if format_document == "xlsx" else "RAPPORT"
+        type_document = TypeDocument.objects.filter(code=code_defaut).first()
+    if not type_document:
+        type_document = TypeDocument.objects.filter(code="AUTRE").first() or TypeDocument.objects.order_by("ordre_affichage").first()
+    if not type_document:
+        raise ValidationError({"type_document": "Aucun type de document n'est configuré."})
+
+    dossier = None
+    dossier_id = request.data.get("dossier")
+    if dossier_id:
+        dossier = DossierDocumentProjet.objects.filter(pk=dossier_id, projet=projet).first()
+        if not dossier:
+            raise ValidationError({"dossier": "Le dossier sélectionné n'appartient pas au projet."})
+    else:
+        cible = determiner_dossier_cible_document(projet, type_document_code=type_document.code, contexte_generation="document-bureautique")
+        dossier = obtenir_ou_creer_dossier_document(
+            projet,
+            cible["code"],
+            parent_code=cible.get("parent_code"),
+            intitule=cible["intitule"],
+            parent_intitule=cible.get("parent_intitule"),
+        )
+
+    nom_fichier = f"{nom_stockage_document(f'{intitule}.{format_document}')}"
+    document = Document.objects.create(
+        reference=reference[:100],
+        intitule=intitule[:500],
+        type_document=type_document,
+        projet=projet,
+        dossier=dossier,
+        statut="brouillon",
+        origine="interne",
+        auteur=request.user,
+        nom_fichier_origine=nom_fichier,
+        type_mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format_document == "xlsx" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    assurer_fichier_bureautique_document(document)
+    return Response(DocumentDetailSerialiseur(document, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_document_session_bureautique(request, pk):
+    document = generics.get_object_or_404(Document.objects.select_related("projet"), pk=pk)
+    if not est_document_bureautique_editable(document.nom_fichier_origine, document.type_mime):
+        raise ValidationError("Ce document n'est pas éditable dans Collabora.")
+
+    assurer_fichier_bureautique_document(document)
+    jeton = creer_jeton_wopi_document(document, request.user)
+    wopi_src = request.build_absolute_uri(reverse("document-wopi-fichier", kwargs={"pk": document.pk}))
+    extension = extension_bureautique_document(document)
+    url_editeur = construire_url_editeur_collabora_document(wopi_src, jeton, extension)
+
+    return Response(
+        {
+            "url_editeur": url_editeur,
+            "nom_fichier": nom_affichage_document(document),
+            "type_bureautique": type_bureautique_document(document),
+            "extension": extension,
+            "access_token": jeton,
+            "access_token_ttl": 8 * 60 * 60 * 1000,
+            "fichier": request.build_absolute_uri(document.fichier.url) if document.fichier else None,
+        }
+    )
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.AllowAny])
+def vue_document_wopi_fichier(request, pk):
+    document = generics.get_object_or_404(Document, pk=pk)
+    contexte = _verifier_acces_wopi_document(request, document)
+
+    if request.method == "GET":
+        contenu = lire_contenu_document(document)
+        return Response(
+            {
+                "BaseFileName": nom_affichage_document(document),
+                "OwnerId": str(document.pk),
+                "Size": len(contenu),
+                "Version": str(int(document.date_modification.timestamp())) if document.date_modification else "1",
+                "UserId": contexte["utilisateur_id"],
+                "UserFriendlyName": getattr(request.user, "get_full_name", lambda: "Utilisateur LBH")() if hasattr(request, "user") else "Utilisateur LBH",
+                "UserCanWrite": True,
+                "SupportsUpdate": True,
+                "SupportsLocks": True,
+                "SupportsGetLock": True,
+                "UserCanNotWriteRelative": True,
+                "DisablePrint": False,
+                "DisableExport": False,
+            }
+        )
+
+    override = (request.headers.get("X-WOPI-Override") or "").upper()
+    verrou_existant = lire_verrou_document(document)
+    verrou_demande = request.headers.get("X-WOPI-Lock", "")
+
+    if override == "LOCK":
+        if verrou_existant and verrou_existant != verrou_demande:
+            reponse = HttpResponse(status=409)
+            reponse["X-WOPI-Lock"] = verrou_existant
+            return reponse
+        definir_verrou_document(document, verrou_demande)
+        return HttpResponse(status=200)
+
+    if override == "GET_LOCK":
+        reponse = HttpResponse(status=200)
+        if verrou_existant:
+            reponse["X-WOPI-Lock"] = verrou_existant
+        return reponse
+
+    if override == "REFRESH_LOCK":
+        if verrou_existant and verrou_existant != verrou_demande:
+            reponse = HttpResponse(status=409)
+            reponse["X-WOPI-Lock"] = verrou_existant
+            return reponse
+        definir_verrou_document(document, verrou_demande)
+        return HttpResponse(status=200)
+
+    if override == "UNLOCK":
+        if verrou_existant and verrou_existant != verrou_demande:
+            reponse = HttpResponse(status=409)
+            reponse["X-WOPI-Lock"] = verrou_existant
+            return reponse
+        supprimer_verrou_document(document)
+        return HttpResponse(status=200)
+
+    return HttpResponse(status=501)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.AllowAny])
+def vue_document_wopi_contenu(request, pk):
+    document = generics.get_object_or_404(Document, pk=pk)
+    _verifier_acces_wopi_document(request, document)
+
+    if request.method == "GET":
+        contenu = lire_contenu_document(document)
+        reponse = HttpResponse(contenu, content_type=type_mime_bureautique_document(document))
+        reponse["Content-Length"] = str(len(contenu))
+        return reponse
+
+    override = (request.headers.get("X-WOPI-Override") or "").upper()
+    if override != "PUT":
+        return HttpResponse(status=501)
+
+    verrou_existant = lire_verrou_document(document)
+    verrou_demande = request.headers.get("X-WOPI-Lock", "")
+    if verrou_existant and verrou_existant != verrou_demande:
+        reponse = HttpResponse(status=409)
+        reponse["X-WOPI-Lock"] = verrou_existant
+        return reponse
+
+    enregistrer_contenu_document(document, request.body)
+    return HttpResponse(status=200)
 
 
 class VueDetailDocument(generics.RetrieveUpdateDestroyAPIView):
