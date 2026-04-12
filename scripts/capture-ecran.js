@@ -40,6 +40,22 @@ function nomFichierDernier(phase, nom, suffixe = '') {
   return path.join(REPERTOIRE_CAPTURES, `${phase}_${base}${suffixe ? '_' + suffixe : ''}_dernier.png`);
 }
 
+// Obtenir un token JWT via l'API Django
+async function obtenirToken(baseUrl) {
+  try {
+    const rep = await fetch(`${baseUrl}/api/auth/connexion/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ courriel: process.env.LBH_COURRIEL, mot_de_passe: process.env.LBH_MOT_DE_PASSE }),
+    });
+    if (!rep.ok) return null;
+    const data = await rep.json();
+    return data.access || null;
+  } catch {
+    return null;
+  }
+}
+
 async function capturer(phase, nom, url, options = {}) {
   console.log(`\n📸 Capture [${phase.toUpperCase()}] — ${nom}`);
   console.log(`   URL : ${url}`);
@@ -62,6 +78,23 @@ async function capturer(phase, nom, url, options = {}) {
     // Authentification si cookie fourni
     if (options.cookie) {
       await contexte.addCookies([options.cookie]);
+    }
+
+    // Injection du token JWT dans localStorage (zustand persist "session-lbh")
+    if (options.token) {
+      const baseUrl = new URL(url).origin;
+      await page.goto(baseUrl, { waitUntil: 'commit' });
+      await page.evaluate((tokenData) => {
+        const sessionStore = {
+          state: {
+            utilisateur: tokenData.utilisateur,
+            estConnecte: true,
+            jetonRafraichissement: tokenData.refresh,
+          },
+          version: 0,
+        };
+        localStorage.setItem('session-lbh', JSON.stringify(sessionStore));
+      }, options.token);
     }
 
     await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
