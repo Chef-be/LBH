@@ -8,7 +8,7 @@ import { useSessionStore } from "@/crochets/useSession";
 import { EditeurTexteRiche } from "@/composants/ui/EditeurTexteRiche";
 import {
   ChevronRight, CheckCircle, AlertCircle, X, Plus,
-  Pencil, Trash2, Save, FileText, GripVertical, RefreshCw, Download, Sparkles, Clock3, ListTree,
+  Pencil, Trash2, Save, FileText, GripVertical, RefreshCw, Download, Sparkles, Clock3, ListTree, Monitor,
 } from "lucide-react";
 
 interface ArticleCCTP {
@@ -75,6 +75,14 @@ const VIDE_ARTICLE = {
 function versTexteListe(valeur: string | string[] | null | undefined): string {
   if (Array.isArray(valeur)) return valeur.join(", ");
   return valeur || "";
+}
+
+interface SessionBureautiquePiece {
+  url_editeur: string;
+  access_token: string;
+  access_token_ttl: number;
+  nom_fichier?: string;
+  type_bureautique?: "texte" | "tableur";
 }
 
 interface PlanDocumentItem {
@@ -393,7 +401,9 @@ export default function PageDetailPieceEcrite({
   const [modal, setModal] = useState(false);
   const [articleEdit, setArticleEdit] = useState<ArticleCCTP | null>(null);
   const [suppressionId, setSuppressionId] = useState<string | null>(null);
-  const [onglet, setOnglet] = useState<"articles" | "modele" | "editeur" | "apercu">("editeur");
+  const [onglet, setOnglet] = useState<"articles" | "modele" | "editeur" | "apercu" | "collabora">("editeur");
+  const [sessionCollabora, setSessionCollabora] = useState<SessionBureautiquePiece | null>(null);
+  const [chargementCollabora, setChargementCollabora] = useState(false);
   const [contenuHtml, setContenuHtml] = useState("");
   const [enregistrementContenu, setEnregistrementContenu] = useState(false);
   const [generationEnCours, setGenerationEnCours] = useState(false);
@@ -507,6 +517,20 @@ export default function PageDetailPieceEcrite({
     window.addEventListener("beforeunload", gererAvantQuitter);
     return () => window.removeEventListener("beforeunload", gererAvantQuitter);
   }, [contenuHtml]);
+
+  const ouvrirCollabora = async () => {
+    setChargementCollabora(true);
+    setErreur(null);
+    try {
+      const session = await api.post<SessionBureautiquePiece>(`/api/pieces-ecrites/${pieceId}/session-bureautique/`, {});
+      setSessionCollabora(session);
+      setOnglet("collabora");
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'ouvrir l'éditeur Collabora.");
+    } finally {
+      setChargementCollabora(false);
+    }
+  };
 
   const supprimerArticle = async (artId: string) => {
     try {
@@ -727,6 +751,17 @@ export default function PageDetailPieceEcrite({
               <Pencil className="w-4 h-4" />
               <span className="hidden sm:inline">{modeEditionPiece ? "Fermer" : "Modifier"}</span>
             </button>
+            <button
+              onClick={ouvrirCollabora}
+              disabled={chargementCollabora}
+              className="btn-secondaire disabled:opacity-60"
+              title="Ouvrir dans l'éditeur bureautique Collabora"
+            >
+              {chargementCollabora
+                ? <><RefreshCw className="w-4 h-4 animate-spin" />Collabora…</>
+                : <><Monitor className="w-4 h-4" />Collabora</>
+              }
+            </button>
             {pieceEstTableur ? (
               <button onClick={() => exporter("xlsx")} disabled={exportEnCours !== null} className="btn-secondaire disabled:opacity-60">
                 {exportEnCours === "xlsx" ? "XLSX…" : <><Download className="w-4 h-4" />XLSX</>}
@@ -907,6 +942,7 @@ export default function PageDetailPieceEcrite({
                 { id: "articles", libelle: `Articles (${articles.length})` },
                 ...(piece.modele ? [{ id: "modele", libelle: "Fusion modèle" as const }] : []),
                 { id: "editeur", libelle: "Rédaction" },
+                { id: "collabora", libelle: "Éditeur Collabora" },
                 { id: "apercu", libelle: "Aperçu" },
               ].map((tab) => (
                 <button
@@ -1140,6 +1176,60 @@ export default function PageDetailPieceEcrite({
                   ))
                 )}
               </div>
+            </div>
+          )}
+
+          {onglet === "collabora" && (
+            <div className="carte p-4 md:p-6 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-700">Éditeur bureautique Collabora</p>
+                  <p className="text-sm text-slate-400">
+                    Édition native du document dans Collabora Online. Les modifications sont sauvegardées directement dans le gabarit.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {sessionCollabora && (
+                    <button
+                      type="button"
+                      onClick={() => { setSessionCollabora(null); setOnglet("editeur"); }}
+                      className="btn-secondaire"
+                    >
+                      <X className="w-4 h-4" />Fermer l&apos;éditeur
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={ouvrirCollabora}
+                    disabled={chargementCollabora}
+                    className="btn-primaire disabled:opacity-60"
+                  >
+                    {chargementCollabora
+                      ? <><RefreshCw className="w-4 h-4 animate-spin" />Ouverture…</>
+                      : <><Monitor className="w-4 h-4" />{sessionCollabora ? "Recharger" : "Ouvrir l'éditeur"}</>
+                    }
+                  </button>
+                </div>
+              </div>
+              {!sessionCollabora ? (
+                <div className="flex min-h-[400px] items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50">
+                  <div className="text-center">
+                    <Monitor className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+                    <p className="font-medium text-slate-500">Éditeur Collabora non chargé</p>
+                    <p className="mt-1 text-sm text-slate-400">Cliquez sur « Ouvrir l&apos;éditeur » pour lancer la session bureautique.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-2xl border border-slate-200" style={{ minHeight: "700px" }}>
+                  <iframe
+                    src={sessionCollabora.url_editeur}
+                    title="Éditeur Collabora Online"
+                    className="h-full w-full"
+                    style={{ minHeight: "700px", border: "none" }}
+                    allow="fullscreen"
+                  />
+                </div>
+              )}
             </div>
           )}
 
