@@ -56,6 +56,62 @@ async function obtenirToken(baseUrl) {
   }
 }
 
+const BASE_URL = 'http://127.0.0.1:3082';
+const COURRIEL_CAPTURE = process.env.LBH_COURRIEL || 'admin@lbh-economiste.com';
+const MOT_DE_PASSE_CAPTURE = process.env.LBH_MOT_DE_PASSE || 'LBH-Screenshots-2026!';
+
+async function capturerAuthentifie(phase, nom, url) {
+  console.log(`\n📸 Capture authentifiée [${phase.toUpperCase()}] — ${nom}`);
+  console.log(`   URL : ${url}`);
+
+  const navigateur = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+
+  try {
+    const contexte = await navigateur.newContext({
+      viewport: { width: LARGEUR_VIEWPORT, height: HAUTEUR_VIEWPORT },
+      locale: 'fr-FR',
+      timezoneId: 'Europe/Paris',
+    });
+
+    const page = await contexte.newPage();
+
+    // Connexion via le formulaire
+    await page.goto(`${BASE_URL}/connexion`, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.fill('input[name="courriel"]', COURRIEL_CAPTURE);
+    await page.fill('input[name="mot_de_passe"]', MOT_DE_PASSE_CAPTURE);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(u => !u.toString().includes('/connexion'), { timeout: 15000 });
+    await page.waitForTimeout(1000);
+
+    // Navigation vers la page cible
+    if (!url.includes(BASE_URL)) {
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+    } else {
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+    }
+    await page.waitForTimeout(DELAI_CHARGEMENT);
+
+    const cheminPleine = nomFichier(phase, nom, 'pleine');
+    const cheminDernierPleine = nomFichierDernier(phase, nom, 'pleine');
+    await page.screenshot({ path: cheminPleine, fullPage: true });
+    fs.copyFileSync(cheminPleine, cheminDernierPleine);
+
+    const cheminVue = nomFichier(phase, nom, 'vue');
+    const cheminDernierVue = nomFichierDernier(phase, nom, 'vue');
+    await page.screenshot({ path: cheminVue, fullPage: false });
+    fs.copyFileSync(cheminVue, cheminDernierVue);
+
+    console.log(`   ✓ Pleine page  : ${path.basename(cheminPleine)}`);
+    console.log(`   ✓ Viewport     : ${path.basename(cheminVue)}`);
+    await contexte.close();
+  } finally {
+    await navigateur.close();
+  }
+}
+
 async function capturer(phase, nom, url, options = {}) {
   console.log(`\n📸 Capture [${phase.toUpperCase()}] — ${nom}`);
   console.log(`   URL : ${url}`);
@@ -194,6 +250,31 @@ const [,, commande, ...args] = process.argv;
           process.exit(1);
         }
         await capturer(commande, nom, url);
+        break;
+      }
+
+      case 'auth': {
+        // Capture avec authentification automatique (connexion via formulaire)
+        const [phase, nom, url] = args;
+        if (!phase || !nom || !url) {
+          console.error('Usage : node scripts/capture-ecran.js auth avant|apres "nom" "url"');
+          process.exit(1);
+        }
+        await capturerAuthentifie(phase, nom, url);
+        break;
+      }
+
+      case 'serie-auth': {
+        // Série de captures authentifiées
+        const [phase, nom, urls] = args;
+        if (!phase || !nom || !urls) {
+          console.error('Usage : node scripts/capture-ecran.js serie-auth avant|apres "nom" "url1,url2"');
+          process.exit(1);
+        }
+        const liste = urls.split(',').map(u => u.trim()).filter(Boolean);
+        for (const url of liste) {
+          await capturerAuthentifie(phase, nom + '-' + liste.indexOf(url), url);
+        }
         break;
       }
 
