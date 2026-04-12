@@ -38,7 +38,7 @@ const GROUPES_MENU: GroupeMenu[] = [
   {
     titre: "Bibliothèques",
     entrees: [
-      { libelle: "Bibliothèque de prix", chemin: "/bibliotheque", icone: BookOpen, codeModule: "BIBLIOTHEQUE_PRIX" },
+      { libelle: "Bibliothèque", chemin: "/bibliotheque", icone: BookOpen, codeModule: "BIBLIOTHEQUE_PRIX" },
     ],
   },
   {
