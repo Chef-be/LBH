@@ -20,6 +20,8 @@ from .serialiseurs import (
     LignePrixBibliothequeListeSerialiseur,
     LignePrixBibliothequeDetailSerialiseur,
     LignePrixBibliothequeAvecSousDetailsSerialiseur,
+    LignePrixBibliothequeCompletSerialiseur,
+    LotCCTPResumeSerialiseur,
     SousDetailPrixSerialiseur,
 )
 
@@ -129,6 +131,16 @@ class VueDetailBibliothequeAvecSousDetails(generics.RetrieveAPIView):
     queryset = LignePrixBibliotheque.objects.prefetch_related("sous_details__profil_main_oeuvre").select_related(
         "organisation", "projet", "auteur"
     )
+
+
+class VueDetailBibliothequeComplet(generics.RetrieveAPIView):
+    """Détail complet d'une entrée : sous-détails, prescriptions CCTP liées, répartition DS."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LignePrixBibliothequeCompletSerialiseur
+    queryset = LignePrixBibliotheque.objects.prefetch_related(
+        "sous_details__profil_main_oeuvre",
+        "prescriptions_liees__lot",
+    ).select_related("organisation", "projet", "auteur", "lot_cctp_reference")
 
 
 class VueListeSousDetailPrix(generics.ListCreateAPIView):
@@ -342,3 +354,71 @@ def vue_importer_prix_construction(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+# ---------------------------------------------------------------------------
+# Nouvelles vues : prescriptions CCTP liées et lots CCTP
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_prescriptions_liees(request, pk):
+    """Retourne les prescriptions CCTP liées à une ligne de bibliothèque."""
+    from applications.pieces_ecrites.serialiseurs import PrescriptionCCTPSerialiseur
+    entree = generics.get_object_or_404(
+        LignePrixBibliotheque.objects.prefetch_related("prescriptions_liees__lot"),
+        pk=pk,
+    )
+    prescriptions = entree.prescriptions_liees.select_related("lot", "chapitre").filter(est_actif=True)
+    serialiseur = PrescriptionCCTPSerialiseur(prescriptions, many=True)
+    return Response(serialiseur.data)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_lier_prescriptions(request, pk):
+    """Lie des prescriptions CCTP à une ligne de bibliothèque. Body: {prescription_ids: [uuid...]}"""
+    entree = generics.get_object_or_404(LignePrixBibliotheque, pk=pk)
+    ids = request.data.get("prescription_ids", [])
+    if not isinstance(ids, list):
+        return Response(
+            {"detail": "prescription_ids doit être une liste d'UUID."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    from applications.pieces_ecrites.models import PrescriptionCCTP
+    prescriptions = PrescriptionCCTP.objects.filter(id__in=ids)
+    entree.prescriptions_liees.set(prescriptions)
+    return Response({"detail": f"{prescriptions.count()} prescription(s) liée(s)."})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_lots_cctp(request):
+    """Liste des 18 lots CCTP disponibles pour filtrage et liaison."""
+    from applications.pieces_ecrites.models import LotCCTP
+    lots = LotCCTP.objects.filter(est_actif=True).order_by("ordre", "numero")
+    serialiseur = LotCCTPResumeSerialiseur(lots, many=True)
+    return Response(serialiseur.data)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_caracteristiques(request, pk):
+    """Lecture et mise à jour des caractéristiques techniques d'une ligne de bibliothèque."""
+    entree = generics.get_object_or_404(LignePrixBibliotheque, pk=pk)
+    if request.method == "GET":
+        return Response({
+            "caracteristiques_techniques": entree.caracteristiques_techniques,
+            "conditions_mise_en_oeuvre": entree.conditions_mise_en_oeuvre,
+        })
+    # PATCH
+    if "caracteristiques_techniques" in request.data:
+        entree.caracteristiques_techniques = request.data["caracteristiques_techniques"]
+    if "conditions_mise_en_oeuvre" in request.data:
+        entree.conditions_mise_en_oeuvre = request.data["conditions_mise_en_oeuvre"]
+    entree.save(update_fields=["caracteristiques_techniques", "conditions_mise_en_oeuvre"])
+    return Response({
+        "detail": "Caractéristiques mises à jour.",
+        "caracteristiques_techniques": entree.caracteristiques_techniques,
+        "conditions_mise_en_oeuvre": entree.conditions_mise_en_oeuvre,
+    })
