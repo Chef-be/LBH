@@ -11,6 +11,7 @@ import {
   ArrowLeft, Calendar, MapPin, Building2, User,
   Euro, FolderOpen, Users, Pencil, Trash2,
 } from "lucide-react";
+import { NavigationProjet } from "@/composants/projets/NavigationProjet";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,12 +147,6 @@ function formaterValeurContexte(valeur: string | string[] | boolean) {
   return valeur || "—";
 }
 
-interface ActionProjet {
-  href: string;
-  libelle: string;
-  variante?: "primaire" | "secondaire";
-}
-
 // ---------------------------------------------------------------------------
 // Composant
 // ---------------------------------------------------------------------------
@@ -239,19 +234,6 @@ export function DetailProjet({ id }: { id: string }) {
   const afficherVoirie = natureOuvrage === "infrastructure" || natureOuvrage === "mixte";
   const afficherBatiment = natureOuvrage === "batiment" || natureOuvrage === "mixte" || (!natureOuvrage && (estMaitriseOeuvre || estMaitriseOuvrage));
 
-  const actionsProjet: ActionProjet[] = [
-    { href: `/projets/${id}/economie`, libelle: "Économie" },
-    ...(contexteRentabilite ? [{ href: `/projets/${id}/rentabilite`, libelle: "Rentabilité" }] : []),
-    ...(contexteExecution ? [{ href: `/projets/${id}/execution`, libelle: "Exécution" }] : []),
-    ...(contexteMetres ? [{ href: `/projets/${id}/metres`, libelle: "Métrés" }] : []),
-    ...(contexteAppelsOffres ? [{ href: `/projets/${id}/appels-offres`, libelle: "Appels d'offres" }] : []),
-    { href: `/projets/${id}/documents`, libelle: "Documents" },
-    ...(contextePiecesEcrites ? [{ href: `/projets/${id}/pieces-ecrites`, libelle: "Pièces écrites" }] : []),
-    ...(afficherVoirie ? [{ href: `/projets/${id}/voirie`, libelle: "Voirie" }] : []),
-    ...(afficherBatiment ? [{ href: `/projets/${id}/batiment`, libelle: "Bâtiment" }] : []),
-    { href: `/projets/${id}/modifier`, libelle: "Modifier", variante: "primaire" },
-  ];
-
   return (
     <div className="space-y-6">
       {erreurSuppression && (
@@ -278,19 +260,10 @@ export function DetailProjet({ id }: { id: string }) {
           <p className="text-slate-600 mt-1 text-lg">{projet.intitule}</p>
         </div>
 
-        <div className="flex max-w-full flex-wrap gap-2">
-          {actionsProjet.map((action) => (
-            <Link
-              key={action.href}
-              href={action.href}
-              className={clsx(
-                action.variante === "primaire" ? "btn-primaire" : "btn-secondaire",
-                "text-xs"
-              )}
-            >
-              {action.libelle === "Modifier" ? <span className="inline-flex items-center gap-1"><Pencil size={12} /> Modifier</span> : action.libelle}
-            </Link>
-          ))}
+        <div className="flex items-center gap-2">
+          <Link href={`/projets/${id}/modifier`} className="btn-primaire text-xs">
+            <Pencil size={12} /> Modifier
+          </Link>
           {estSuperAdmin && (
             <button
               type="button"
@@ -304,6 +277,20 @@ export function DetailProjet({ id }: { id: string }) {
           )}
         </div>
       </div>
+
+      {/* Navigation interne au projet */}
+      <NavigationProjet
+        idProjet={id}
+        contexte={{
+          afficherMetres: contexteMetres,
+          afficherPiecesEcrites: contextePiecesEcrites,
+          afficherAppelsOffres: contexteAppelsOffres,
+          afficherExecution: contexteExecution,
+          afficherRentabilite: contexteRentabilite,
+          afficherVoirie: afficherVoirie,
+          afficherBatiment: afficherBatiment,
+        }}
+      />
 
       {/* Grille informations */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
