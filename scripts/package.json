@@ -1,0 +1,18 @@
+{
+  "name": "lbh-scripts",
+  "version": "1.0.0",
+  "description": "Scripts d'outillage — Plateforme LBH",
+  "private": true,
+  "scripts": {
+    "capture-avant": "node capture-ecran.js avant",
+    "capture-apres": "node capture-ecran.js apres",
+    "comparer": "node capture-ecran.js comparer",
+    "lister-captures": "node capture-ecran.js lister"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
