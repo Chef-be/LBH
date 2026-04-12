@@ -447,6 +447,28 @@ export function OngletPrixBibliotheque() {
     }
   };
 
+  const lierAutomatiquement = async () => {
+    setActionGlobale("lier-auto");
+    setErreur(null);
+    try {
+      const reponse = await api.post<{ detail: string; liaisons_creees: number }>(
+        "/api/bibliotheque/lier-auto/",
+        {}
+      );
+      const nb = reponse.liaisons_creees ?? 0;
+      setSucces(
+        reponse.detail
+          ? reponse.detail
+          : `${nb} liaison${nb > 1 ? "s" : ""} créée${nb > 1 ? "s" : ""}.`
+      );
+      invaliderBibliotheque();
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Liaison automatique impossible.");
+    } finally {
+      setActionGlobale(null);
+    }
+  };
+
   const viderBibliotheque = async () => {
     if (!estSuperAdmin) return;
     if (!window.confirm("Vider entièrement la bibliothèque de prix ?")) return;
@@ -535,6 +557,15 @@ export function OngletPrixBibliotheque() {
         >
           <UploadCloud className="w-4 h-4" />
           Importer référentiel
+        </button>
+        <button
+          type="button"
+          className="btn-secondaire text-sm"
+          onClick={lierAutomatiquement}
+          disabled={actionGlobale === "lier-auto"}
+        >
+          <DatabaseZap className="w-4 h-4" />
+          {actionGlobale === "lier-auto" ? "Liaison en cours…" : "Lier automatiquement"}
         </button>
         <button
           type="button"

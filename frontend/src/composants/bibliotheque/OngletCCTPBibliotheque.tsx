@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
@@ -8,9 +9,15 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Eye,
+  FileText,
   Filter,
   Link2,
+  Pencil,
+  Plus,
   Search,
+  Tag,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -20,9 +27,14 @@ import {
 
 interface LotCCTP {
   id: string;
-  numero: string;
+  code?: string;
+  numero?: string;
   intitule: string;
-  nb_prescriptions: number;
+  description?: string;
+  normes?: string[];
+  est_actif?: boolean;
+  ordre?: number;
+  nb_prescriptions?: number;
 }
 
 interface PrescriptionCCTP {
@@ -34,6 +46,19 @@ interface PrescriptionCCTP {
   normes: string[];
   lot: { id: string; numero: string; intitule: string } | string;
   chapitre?: { id: string; intitule: string } | string;
+}
+
+interface ArticleCCTP {
+  id: string;
+  chapitre: string;
+  numero_article: string;
+  code_reference: string;
+  intitule: string;
+  lot?: string | null;
+  corps_etat?: string | null;
+  ligne_prix_reference: string | null;
+  source_url: string;
+  date_modification: string;
 }
 
 interface LigneBibliothequeResume {
@@ -116,7 +141,7 @@ function ModalLierPrescriptions({
 
   const { data: lotsData } = useQuery<LotCCTP[]>({
     queryKey: ["lots-cctp-liste"],
-    queryFn: () => api.get<LotCCTP[]>("/api/bibliotheque/lots-cctp/"),
+    queryFn: () => api.get<LotCCTP[]>("/api/pieces-ecrites/lots-cctp/"),
   });
   const lots = extraireListeResultats(lotsData as unknown as LotCCTP[] | PageResultats<LotCCTP> | null | undefined);
 
@@ -186,7 +211,9 @@ function ModalLierPrescriptions({
           >
             <option value="">Tous les lots</option>
             {lots.map((lot) => (
-              <option key={lot.id} value={lot.id}>{lot.numero} — {lot.intitule}</option>
+              <option key={lot.id} value={lot.id}>
+                {lot.code || lot.numero} — {lot.intitule}
+              </option>
             ))}
           </select>
           <select
@@ -275,25 +302,341 @@ function ModalLierPrescriptions({
 }
 
 // ---------------------------------------------------------------------------
-// Composant principal
+// Sous-composant : modal création/édition lot
 // ---------------------------------------------------------------------------
 
-export function OngletCCTPBibliotheque() {
-  const [sousVue, setSousVue] = useState<"par-lot" | "par-ligne">("par-lot");
+interface FormLot {
+  code: string;
+  intitule: string;
+  description: string;
+  normes: string;
+  est_actif: boolean;
+  ordre: string;
+}
+
+function ModalLot({
+  lot,
+  onFermer,
+  onSauvegarde,
+}: {
+  lot?: LotCCTP | null;
+  onFermer: () => void;
+  onSauvegarde: () => void;
+}) {
+  const [form, setForm] = useState<FormLot>({
+    code: lot?.code || lot?.numero || "",
+    intitule: lot?.intitule || "",
+    description: lot?.description || "",
+    normes: (lot?.normes || []).join(", "),
+    est_actif: lot?.est_actif !== false,
+    ordre: String(lot?.ordre ?? ""),
+  });
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const changer = (champ: keyof FormLot, valeur: string | boolean) => {
+    setForm((f) => ({ ...f, [champ]: valeur }));
+  };
+
+  const sauvegarder = async () => {
+    if (!form.code.trim() || !form.intitule.trim()) {
+      setErreur("Le code et l'intitulé sont obligatoires.");
+      return;
+    }
+    setEnvoi(true);
+    setErreur(null);
+
+    const corps = {
+      code: form.code.trim(),
+      intitule: form.intitule.trim(),
+      description: form.description.trim() || null,
+      normes: form.normes
+        .split(",")
+        .map((n) => n.trim())
+        .filter(Boolean),
+      est_actif: form.est_actif,
+      ordre: form.ordre ? parseInt(form.ordre, 10) : null,
+    };
+
+    try {
+      if (lot) {
+        await api.patch(`/api/pieces-ecrites/lots-cctp/${lot.id}/`, corps);
+      } else {
+        await api.post("/api/pieces-ecrites/lots-cctp/", corps);
+      }
+      onSauvegarde();
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Enregistrement impossible.");
+    } finally {
+      setEnvoi(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="font-semibold text-slate-900">
+            {lot ? "Modifier le lot" : "Nouveau lot CCTP"}
+          </h2>
+          <button type="button" onClick={onFermer} className="rounded-lg p-1.5 hover:bg-slate-100">
+            <X className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="etiquette-champ">
+                Code <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                className="champ-saisie"
+                maxLength={20}
+                placeholder="ex. VRD, GO, ELEC"
+                value={form.code}
+                onChange={(e) => changer("code", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="etiquette-champ">Ordre</label>
+              <input
+                type="number"
+                className="champ-saisie"
+                placeholder="0"
+                value={form.ordre}
+                onChange={(e) => changer("ordre", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="etiquette-champ">
+              Intitulé <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              className="champ-saisie"
+              placeholder="ex. VRD et réseaux"
+              value={form.intitule}
+              onChange={(e) => changer("intitule", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="etiquette-champ">Description</label>
+            <textarea
+              className="champ-saisie min-h-[80px]"
+              placeholder="Description optionnelle du lot…"
+              value={form.description}
+              onChange={(e) => changer("description", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="etiquette-champ">
+              Normes <span className="text-xs text-slate-400">(séparées par des virgules)</span>
+            </label>
+            <input
+              type="text"
+              className="champ-saisie"
+              placeholder="ex. NF P98-170, DTU 20.1"
+              value={form.normes}
+              onChange={(e) => changer("normes", e.target.value)}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.est_actif}
+              onChange={(e) => changer("est_actif", e.target.checked)}
+            />
+            <span className="text-sm text-slate-700">Lot actif</span>
+          </label>
+
+          {erreur && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {erreur}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-6 py-4">
+          <button type="button" onClick={onFermer} className="btn-secondaire text-sm">
+            Annuler
+          </button>
+          <button
+            type="button"
+            className="btn-primaire text-sm"
+            onClick={sauvegarder}
+            disabled={envoi}
+          >
+            {envoi ? "Enregistrement…" : lot ? "Modifier" : "Créer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sous-onglet : Articles CCTP
+// ---------------------------------------------------------------------------
+
+function SousOngletArticles() {
+  const { data: lotsData } = useQuery<LotCCTP[]>({
+    queryKey: ["lots-cctp-articles"],
+    queryFn: () => api.get<LotCCTP[]>("/api/pieces-ecrites/lots-cctp/"),
+  });
+  const lots = extraireListeResultats(lotsData as unknown as LotCCTP[] | PageResultats<LotCCTP> | null | undefined);
+
+  const [recherche, setRecherche] = useState("");
+  const [filtreLot, setFiltreLot] = useState("");
+
+  const params = new URLSearchParams({ est_dans_bibliotheque: "true" });
+  if (recherche) params.set("search", recherche);
+  if (filtreLot) params.set("lot", filtreLot);
+
+  const { data: articlesData, isLoading } = useQuery<ArticleCCTP[] | { results: ArticleCCTP[] }>({
+    queryKey: ["bibliotheque-cctp-articles-v2", recherche, filtreLot],
+    queryFn: () => api.get(`/api/pieces-ecrites/articles/?${params.toString()}`),
+  });
+  const articles = extraireListeResultats(articlesData);
+
+  return (
+    <div className="space-y-4">
+      {/* Filtres */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            placeholder="Rechercher un article…"
+            className="champ-saisie pl-8 text-sm"
+            value={recherche}
+            onChange={(e) => setRecherche(e.target.value)}
+          />
+        </div>
+        {lots.length > 0 && (
+          <select
+            className="champ-saisie w-auto text-sm"
+            value={filtreLot}
+            onChange={(e) => setFiltreLot(e.target.value)}
+          >
+            <option value="">Tous les lots</option>
+            {lots.map((lot) => (
+              <option key={lot.id} value={lot.id}>
+                {lot.code || lot.numero} — {lot.intitule}
+              </option>
+            ))}
+          </select>
+        )}
+        <Link href="/bibliotheque/article/nouveau" className="btn-primaire text-sm ml-auto">
+          <Plus className="h-3.5 w-3.5" />
+          Ajouter un article
+        </Link>
+      </div>
+
+      {/* Tableau */}
+      {isLoading ? (
+        <div className="py-12 text-center text-slate-400 text-sm">Chargement…</div>
+      ) : articles.length === 0 ? (
+        <div className="py-12 text-center text-slate-400 text-sm">
+          {recherche || filtreLot ? "Aucun résultat." : "Aucun article CCTP disponible."}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 text-xs text-slate-500">
+                <th className="text-left py-2 pr-4 font-medium">Intitulé</th>
+                <th className="text-left py-2 pr-4 font-medium">Lot</th>
+                <th className="text-left py-2 pr-4 font-medium">Corps d&apos;état</th>
+                <th className="text-left py-2 pr-4 font-medium">Ligne de prix liée</th>
+                <th className="text-right py-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {articles.map((article) => (
+                <tr key={article.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                  <td className="py-3 pr-4 max-w-xs">
+                    <p className="font-medium text-slate-800">{article.intitule}</p>
+                    {article.numero_article && (
+                      <p className="text-xs text-slate-400 mt-0.5">{article.numero_article}</p>
+                    )}
+                  </td>
+                  <td className="py-3 pr-4 text-xs text-slate-500">
+                    {article.chapitre || "—"}
+                  </td>
+                  <td className="py-3 pr-4 text-xs text-slate-500">
+                    {article.corps_etat || "—"}
+                  </td>
+                  <td className="py-3 pr-4">
+                    {article.ligne_prix_reference ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                        <Link2 className="h-3 w-3" />
+                        Liée
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                        Non liée
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      {article.ligne_prix_reference && (
+                        <Link
+                          href={`/bibliotheque/${article.ligne_prix_reference}`}
+                          className="btn-secondaire text-xs"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ouvrir
+                        </Link>
+                      )}
+                      {article.source_url && (
+                        <a
+                          href={article.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn-secondaire text-xs"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Source
+                        </a>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sous-onglet : Prescriptions (ancienne vue CCTP par lot)
+// ---------------------------------------------------------------------------
+
+function SousOngletPrescriptions() {
   const [lotSelectionne, setLotSelectionne] = useState<LotCCTP | null>(null);
   const [recherchePrescrip, setRecherchePrescrip] = useState("");
   const [filtreTypePrescrip, setFiltreTypePrescrip] = useState("");
   const [rechercheLigne, setRechercheLigne] = useState("");
+  const [sousVue, setSousVue] = useState<"par-lot" | "par-ligne">("par-lot");
   const [modalLiaisonLigneId, setModalLiaisonLigneId] = useState<string | null>(null);
 
-  // Lots CCTP
   const { data: lotsData, isLoading: chargementLots } = useQuery<LotCCTP[]>({
     queryKey: ["bibliotheque-lots-cctp"],
-    queryFn: () => api.get<LotCCTP[]>("/api/bibliotheque/lots-cctp/"),
+    queryFn: () => api.get<LotCCTP[]>("/api/pieces-ecrites/lots-cctp/"),
   });
   const lots = extraireListeResultats(lotsData as unknown as LotCCTP[] | PageResultats<LotCCTP> | null | undefined);
 
-  // Prescriptions du lot sélectionné
   const paramsPrescriptions = new URLSearchParams();
   if (lotSelectionne) paramsPrescriptions.set("lot", lotSelectionne.id);
   if (recherchePrescrip) paramsPrescriptions.set("search", recherchePrescrip);
@@ -309,7 +652,6 @@ export function OngletCCTPBibliotheque() {
     prescriptionsData as unknown as PrescriptionCCTP[] | PageResultats<PrescriptionCCTP> | null | undefined
   );
 
-  // Lignes de bibliothèque (vue par ligne)
   const paramsLignes = new URLSearchParams({ statut_validation: "valide", ordering: "famille,code" });
   if (rechercheLigne) paramsLignes.set("search", rechercheLigne);
 
@@ -356,10 +698,9 @@ export function OngletCCTPBibliotheque() {
       {/* Vue par lot */}
       {sousVue === "par-lot" && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Colonne lots */}
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 px-1 mb-2">
-              18 lots CCTP
+              Lots CCTP
             </p>
             {chargementLots ? (
               <div className="py-4 text-center text-slate-400 text-sm">Chargement…</div>
@@ -379,11 +720,13 @@ export function OngletCCTPBibliotheque() {
                   )}
                 >
                   <div>
-                    <span className="font-mono text-xs text-slate-400 mr-2">{lot.numero}</span>
+                    <span className="font-mono text-xs text-slate-400 mr-2">
+                      {lot.code || lot.numero}
+                    </span>
                     <span className="font-medium">{lot.intitule}</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    {lot.nb_prescriptions > 0 && (
+                    {(lot.nb_prescriptions ?? 0) > 0 && (
                       <span className="badge-neutre text-xs">{lot.nb_prescriptions}</span>
                     )}
                     <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
@@ -393,7 +736,6 @@ export function OngletCCTPBibliotheque() {
             )}
           </div>
 
-          {/* Colonne prescriptions */}
           <div className="md:col-span-2 space-y-3">
             {!lotSelectionne ? (
               <div className="py-12 text-center text-slate-400 text-sm">
@@ -426,7 +768,7 @@ export function OngletCCTPBibliotheque() {
                 <div className="flex items-center gap-2">
                   <Filter size={12} className="text-slate-400" />
                   <h3 className="text-sm font-semibold text-slate-700">
-                    {lotSelectionne.numero} — {lotSelectionne.intitule}
+                    {lotSelectionne.code || lotSelectionne.numero} — {lotSelectionne.intitule}
                   </h3>
                   <span className="badge-neutre text-xs">{prescriptions.length} prescription(s)</span>
                 </div>
@@ -547,6 +889,226 @@ export function OngletCCTPBibliotheque() {
           onFermer={() => setModalLiaisonLigneId(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sous-onglet : Lots CCTP (CRUD)
+// ---------------------------------------------------------------------------
+
+function SousOngletLots() {
+  const queryClient = useQueryClient();
+  const [modalLot, setModalLot] = useState<{ ouvert: boolean; lot?: LotCCTP | null }>({
+    ouvert: false,
+    lot: null,
+  });
+  const [suppressionId, setSuppressionId] = useState<string | null>(null);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [succes, setSucces] = useState<string | null>(null);
+
+  const { data: lotsData, isLoading } = useQuery<LotCCTP[]>({
+    queryKey: ["lots-cctp-crud"],
+    queryFn: () => api.get<LotCCTP[]>("/api/pieces-ecrites/lots-cctp/"),
+  });
+  const lots = extraireListeResultats(lotsData as unknown as LotCCTP[] | PageResultats<LotCCTP> | null | undefined);
+
+  const invalider = () => {
+    queryClient.invalidateQueries({ queryKey: ["lots-cctp-crud"] });
+    queryClient.invalidateQueries({ queryKey: ["bibliotheque-lots-cctp"] });
+    queryClient.invalidateQueries({ queryKey: ["lots-cctp-liste"] });
+    queryClient.invalidateQueries({ queryKey: ["lots-cctp-articles"] });
+  };
+
+  const supprimer = async (lot: LotCCTP) => {
+    if (!window.confirm(`Supprimer le lot "${lot.intitule}" ?`)) return;
+    setSuppressionId(lot.id);
+    setErreur(null);
+    try {
+      await api.supprimer(`/api/pieces-ecrites/lots-cctp/${lot.id}/`);
+      setSucces("Lot supprimé.");
+      invalider();
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Suppression impossible.");
+    } finally {
+      setSuppressionId(null);
+    }
+  };
+
+  const apresCreation = () => {
+    setModalLot({ ouvert: false, lot: null });
+    setSucces("Lot enregistré.");
+    invalider();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-500">
+          Gérer les lots CCTP utilisés dans les prescriptions et articles.
+        </p>
+        <button
+          type="button"
+          className="btn-primaire text-sm"
+          onClick={() => setModalLot({ ouvert: true, lot: null })}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Nouveau lot
+        </button>
+      </div>
+
+      {succes && (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          {succes}
+        </div>
+      )}
+      {erreur && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {erreur}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="py-12 text-center text-slate-400 text-sm">Chargement…</div>
+      ) : lots.length === 0 ? (
+        <div className="py-12 text-center text-slate-400 text-sm">Aucun lot CCTP défini.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 text-xs text-slate-500">
+                <th className="text-left py-2 pr-4 font-medium">Code</th>
+                <th className="text-left py-2 pr-4 font-medium">Intitulé</th>
+                <th className="text-left py-2 pr-4 font-medium">Description</th>
+                <th className="text-left py-2 pr-4 font-medium">Normes</th>
+                <th className="text-center py-2 pr-4 font-medium">Actif</th>
+                <th className="text-right py-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lots.map((lot) => (
+                <tr key={lot.id} className="border-b border-slate-50 hover:bg-slate-50">
+                  <td className="py-3 pr-4 font-mono text-xs font-medium text-slate-700">
+                    {lot.code || lot.numero || "—"}
+                  </td>
+                  <td className="py-3 pr-4 font-medium text-slate-800">{lot.intitule}</td>
+                  <td className="py-3 pr-4 max-w-xs text-xs text-slate-500">
+                    {lot.description
+                      ? lot.description.length > 60
+                        ? `${lot.description.slice(0, 60)}…`
+                        : lot.description
+                      : "—"}
+                  </td>
+                  <td className="py-3 pr-4">
+                    {lot.normes && lot.normes.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {lot.normes.slice(0, 2).map((norme, i) => (
+                          <span key={i} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-slate-600">
+                            {norme}
+                          </span>
+                        ))}
+                        {lot.normes.length > 2 && (
+                          <span className="text-xs text-slate-400">
+                            <Tag className="inline h-3 w-3 mr-0.5" />
+                            +{lot.normes.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 pr-4 text-center">
+                    <span
+                      className={clsx(
+                        "inline-block h-2 w-2 rounded-full",
+                        lot.est_actif !== false ? "bg-green-500" : "bg-slate-300"
+                      )}
+                    />
+                  </td>
+                  <td className="py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn-secondaire text-xs"
+                        onClick={() => setModalLot({ ouvert: true, lot })}
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Éditer
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-danger text-xs"
+                        disabled={suppressionId === lot.id}
+                        onClick={() => supprimer(lot)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Supprimer
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal lot */}
+      {modalLot.ouvert && (
+        <ModalLot
+          lot={modalLot.lot}
+          onFermer={() => setModalLot({ ouvert: false, lot: null })}
+          onSauvegarde={apresCreation}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Composant principal avec 3 sous-onglets
+// ---------------------------------------------------------------------------
+
+type SousOngletCCTP = "articles" | "prescriptions" | "lots";
+
+export function OngletCCTPBibliotheque() {
+  const [sousOnglet, setSousOnglet] = useState<SousOngletCCTP>("articles");
+
+  const onglets: { val: SousOngletCCTP; lib: string; icone: React.ReactNode }[] = [
+    { val: "articles", lib: "Articles CCTP", icone: <FileText className="h-3.5 w-3.5" /> },
+    { val: "prescriptions", lib: "Prescriptions", icone: <BookOpen className="h-3.5 w-3.5" /> },
+    { val: "lots", lib: "Lots", icone: <Tag className="h-3.5 w-3.5" /> },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Sélecteur sous-onglets */}
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+        {onglets.map(({ val, lib, icone }) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => setSousOnglet(val)}
+            className={clsx(
+              "rounded-lg px-3 py-1.5 text-sm transition-colors",
+              sousOnglet === val
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <span className="flex items-center gap-1.5">
+              {icone}
+              {lib}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Contenu du sous-onglet actif */}
+      {sousOnglet === "articles" && <SousOngletArticles />}
+      {sousOnglet === "prescriptions" && <SousOngletPrescriptions />}
+      {sousOnglet === "lots" && <SousOngletLots />}
     </div>
   );
 }
