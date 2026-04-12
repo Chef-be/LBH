@@ -95,6 +95,33 @@ interface ReferenceIndexPrix {
   } | null;
 }
 
+interface ChampExtrait {
+  valeur: string | number;
+  confiance: number;
+  source: string;
+}
+
+interface LotExtrait {
+  numero: string;
+  intitule: string;
+  montant?: number;
+}
+
+interface ChampsExtraits {
+  intitule?: ChampExtrait;
+  reference?: ChampExtrait;
+  maitre_ouvrage_nom?: ChampExtrait;
+  maitre_oeuvre_nom?: ChampExtrait;
+  commune?: ChampExtrait;
+  departement?: ChampExtrait;
+  montant_estime?: ChampExtrait;
+  montant_marche?: ChampExtrait;
+  date_debut_prevue?: ChampExtrait;
+  phase?: ChampExtrait;
+  type_projet?: ChampExtrait;
+  lots?: LotExtrait[];
+}
+
 interface ResultatPreanalyseSources {
   analyses: Array<{
     nom_fichier: string;
@@ -124,6 +151,7 @@ interface ResultatPreanalyseSources {
   };
   pre_remplissage: {
     donnees_entree: Record<string, string>;
+    champs?: ChampsExtraits;
     trace: Record<string, unknown>;
     missions_suggerees: string[];
     methode_estimation: string;
@@ -174,7 +202,7 @@ interface BrouillonProjetLocal {
 }
 
 const CLE_BROUILLON_PROJET = "lbh-projet-nouveau-brouillon-v1";
-const BROUILLON_LOCAL_ACTIVE = false;
+const BROUILLON_LOCAL_ACTIVE = true;
 const CODES_PROCESS_ENTREPRISE = ["reponse_appel_offres", "chiffrage_direct", "devis", "planning_execution", "suivi_rentabilite"];
 const CODES_MISSIONS_MASQUEES_UI = ["mission_economique_transversale"];
 const DERIVES_MOE_PAR_PHASE: Record<string, string[]> = {
@@ -804,24 +832,51 @@ export function FormulaireNouveauProjet() {
   const appliquerPreRemplissage = useCallback((resultat: ResultatPreanalyseSources) => {
     const preRemplissage = resultat.pre_remplissage;
 
-    if (preRemplissage.intitule) {
-      setIntitule((courant) => courant.trim() || preRemplissage.intitule);
+    // Intitulé : priorité au champ extrait du contenu, puis au nom de fichier
+    const intituleChamp = preRemplissage.champs?.intitule?.valeur as string | undefined;
+    const intituleFinal = intituleChamp || preRemplissage.intitule;
+    if (intituleFinal) {
+      setIntitule((courant) => courant.trim() || intituleFinal);
     }
-    const referenceExtraite = typeof preRemplissage.donnees_entree.reference_consultation === "string"
-      ? preRemplissage.donnees_entree.reference_consultation
-      : "";
+
+    // Référence : depuis les champs extraits ou l'heuristique nom de fichier
+    const referenceExtraite =
+      (preRemplissage.champs?.reference?.valeur as string | undefined) ||
+      (typeof preRemplissage.donnees_entree.reference_consultation === "string"
+        ? preRemplissage.donnees_entree.reference_consultation
+        : "");
     if (referenceExtraite) {
       setReference((courant) => courant.trim() || referenceExtraite);
     }
+
     if (preRemplissage.methode_estimation) {
       setMethodeEstimation((courant) => courant || preRemplissage.methode_estimation);
     }
-    if (Object.keys(preRemplissage.donnees_entree).length) {
+
+    // Construire un dictionnaire de valeurs depuis les champs extraits pour donneesEntree
+    const champsSupplementaires: Record<string, string> = {};
+    const champs = preRemplissage.champs;
+    if (champs) {
+      if (champs.commune?.valeur) champsSupplementaires["commune"] = String(champs.commune.valeur);
+      if (champs.departement?.valeur) champsSupplementaires["departement"] = String(champs.departement.valeur);
+      if (champs.montant_estime?.valeur !== undefined) champsSupplementaires["montant_estime"] = String(champs.montant_estime.valeur);
+      if (champs.montant_marche?.valeur !== undefined) champsSupplementaires["montant_marche"] = String(champs.montant_marche.valeur);
+      if (champs.date_debut_prevue?.valeur) champsSupplementaires["date_debut_prevue"] = String(champs.date_debut_prevue.valeur);
+      if (champs.maitre_ouvrage_nom?.valeur) champsSupplementaires["maitre_ouvrage_nom_extrait"] = String(champs.maitre_ouvrage_nom.valeur);
+      if (champs.maitre_oeuvre_nom?.valeur) champsSupplementaires["maitre_oeuvre_nom_extrait"] = String(champs.maitre_oeuvre_nom.valeur);
+    }
+
+    const donneesAMerger = {
+      ...preRemplissage.donnees_entree,
+      ...champsSupplementaires,
+    };
+    if (Object.keys(donneesAMerger).length) {
       setDonneesEntree((courant) => ({
-        ...preRemplissage.donnees_entree,
+        ...donneesAMerger,
         ...courant,
       }));
     }
+
     if (preRemplissage.missions_suggerees.length) {
       const idsCompatibles = (parcours?.referentiels.missions_principales ?? [])
         .filter((mission) => preRemplissage.missions_suggerees.includes(mission.code))
@@ -1710,28 +1765,96 @@ export function FormulaireNouveauProjet() {
 
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-                      <h3 className="text-base font-semibold text-emerald-950">Préremplissage proposé</h3>
-                      <dl className="mt-4 space-y-3 text-sm">
-                        <div>
-                          <dt className="text-xs uppercase tracking-wide text-emerald-700">Intitulé</dt>
-                          <dd className="mt-1 font-medium text-emerald-950">{resultatPreanalyse.pre_remplissage.intitule || "Aucune proposition"}</dd>
+                      <h3 className="text-base font-semibold text-emerald-950">Données extraites</h3>
+                      <p className="mt-1 text-xs text-emerald-700">
+                        Ces valeurs ont été appliquées automatiquement dans le formulaire. Vérifiez-les à l&apos;étape suivante.
+                      </p>
+
+                      {/* Tableau des champs extraits avec niveau de confiance */}
+                      {resultatPreanalyse.pre_remplissage.champs && Object.keys(resultatPreanalyse.pre_remplissage.champs).filter(k => k !== "lots").length > 0 ? (
+                        <div className="mt-4 overflow-hidden rounded-xl border border-emerald-200 bg-white">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-emerald-100 bg-emerald-50/60">
+                                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-emerald-700">Champ</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-emerald-700">Valeur extraite</th>
+                                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-emerald-700">Confiance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {[
+                                { cle: "intitule", libelle: "Intitulé" },
+                                { cle: "reference", libelle: "Référence" },
+                                { cle: "maitre_ouvrage_nom", libelle: "Maître d'ouvrage" },
+                                { cle: "maitre_oeuvre_nom", libelle: "Maître d'œuvre" },
+                                { cle: "commune", libelle: "Commune" },
+                                { cle: "departement", libelle: "Département" },
+                                { cle: "montant_estime", libelle: "Montant estimé" },
+                                { cle: "montant_marche", libelle: "Montant marché" },
+                                { cle: "date_debut_prevue", libelle: "Date de début" },
+                                { cle: "phase", libelle: "Phase" },
+                                { cle: "type_projet", libelle: "Type de projet" },
+                              ].filter(({ cle }) => {
+                                const champs = resultatPreanalyse.pre_remplissage.champs;
+                                return champs && cle in champs && (champs as Record<string, ChampExtrait>)[cle]?.valeur !== undefined;
+                              }).map(({ cle, libelle }) => {
+                                const champs = resultatPreanalyse.pre_remplissage.champs as Record<string, ChampExtrait>;
+                                const champ = champs[cle];
+                                const confiance = champ.confiance;
+                                const pct = Math.round(confiance * 100);
+                                const badgeClasse = pct >= 80
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : pct >= 60
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-slate-100 text-slate-600";
+                                return (
+                                  <tr key={cle} className="border-b border-slate-100 last:border-0">
+                                    <td className="px-3 py-2 text-xs font-medium text-slate-700">{libelle}</td>
+                                    <td className="px-3 py-2 text-xs text-slate-900">{String(champ.valeur)}</td>
+                                    <td className="px-3 py-2">
+                                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${badgeClasse}`}>
+                                        {pct >= 80 ? "Confirmé" : pct >= 60 ? "Vérifier" : "Faible"} {pct}%
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
+                      ) : null}
+
+                      {/* Lots détectés */}
+                      {resultatPreanalyse.pre_remplissage.champs?.lots && resultatPreanalyse.pre_remplissage.champs.lots.length > 0 ? (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                            Lots détectés ({resultatPreanalyse.pre_remplissage.champs.lots.length})
+                          </p>
+                          <ul className="mt-2 space-y-1">
+                            {resultatPreanalyse.pre_remplissage.champs.lots.slice(0, 8).map((lot) => (
+                              <li key={`lot-${lot.numero}`} className="rounded-lg bg-white px-3 py-1.5 text-xs text-slate-800">
+                                Lot {lot.numero} — {lot.intitule}
+                              </li>
+                            ))}
+                            {resultatPreanalyse.pre_remplissage.champs.lots.length > 8 ? (
+                              <li className="text-xs text-slate-500">… et {resultatPreanalyse.pre_remplissage.champs.lots.length - 8} lot(s) supplémentaire(s)</li>
+                            ) : null}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {/* Récapitulatif qualification / missions */}
+                      <dl className="mt-4 space-y-2 border-t border-emerald-100 pt-4 text-sm">
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-emerald-700">Méthode d&apos;estimation</dt>
-                          <dd className="mt-1 font-medium text-emerald-950">{resultatPreanalyse.pre_remplissage.methode_estimation || "Aucune proposition"}</dd>
+                          <dd className="mt-0.5 font-medium text-emerald-950">{resultatPreanalyse.pre_remplissage.methode_estimation || "Aucune proposition"}</dd>
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-emerald-700">Missions suggérées</dt>
-                          <dd className="mt-1 font-medium text-emerald-950">
+                          <dd className="mt-0.5 font-medium text-emerald-950">
                             {resultatPreanalyse.pre_remplissage.missions_suggerees.length
                               ? resultatPreanalyse.pre_remplissage.missions_suggerees.join(", ")
                               : "Aucune mission suggérée"}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs uppercase tracking-wide text-emerald-700">Champs extraits</dt>
-                          <dd className="mt-1 font-medium text-emerald-950">
-                            {Object.keys(resultatPreanalyse.pre_remplissage.donnees_entree).length}
                           </dd>
                         </div>
                       </dl>
