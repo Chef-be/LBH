@@ -19,7 +19,9 @@ NOM_PLATEFORME = config("NOM_PLATEFORME", default="LBH Economiste")
 PREFIXE_CONTENEURS = config("PREFIXE_CONTENEURS", default="lbh")
 PREFIXE_CONTENEURS_SQL = PREFIXE_CONTENEURS.replace("-", "_") or "lbh"
 URL_BASE = config("URL_BASE", default="")
-COLLABORA_PUBLIC_URL = config("COLLABORA_PUBLIC_URL", default="https://office.lbh-economiste.com")
+COLLABORA_PUBLIC_URL = config("COLLABORA_PUBLIC_URL", default="https://lbh-economiste.com/collabora")
+COLLABORA_URL = config("COLLABORA_URL", default="http://lbh-collabora:9980")
+WOPI_SECRET = config("WOPI_SECRET", default="")
 
 # ============================================================
 # SÉCURITÉ
