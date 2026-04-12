@@ -13,6 +13,11 @@ urlpatterns = [
     path("editeur/televersement-image/", views.vue_televerser_image_editeur, name="pieces-ecrites-editeur-televersement-image"),
     path("editeur/importer-word/", views.vue_importer_fichier_word_editeur, name="pieces-ecrites-editeur-importer-word"),
 
+    # Bibliothèque de prescriptions CCTP — lots et générateur
+    path("lots/", views.VueListeLotsTypesCCTP.as_view(), name="lots-cctp"),
+    path("lots/<str:lot_numero>/prescriptions/", views.VueListePrescriptionsLot.as_view(), name="prescriptions-lot"),
+    path("generer-cctp/", views.vue_generer_cctp_multi_lots, name="generer-cctp"),
+
     # Bibliothèque d'articles CCTP
     path("articles/", views.VueListeArticlesCCTP.as_view(), name="articles-cctp-bibliotheque"),
     path("articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="article-cctp-detail"),

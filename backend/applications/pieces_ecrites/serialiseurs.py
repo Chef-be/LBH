@@ -3,7 +3,7 @@
 import json
 
 from rest_framework import serializers
-from .models import ModeleDocument, PieceEcrite, ArticleCCTP
+from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, ChapitrePrescrip, PrescriptionCCTP, GenerateurCCTP
 
 
 class ModeleDocumentSerialiseur(serializers.ModelSerializer):
@@ -129,3 +129,67 @@ class PieceEcriteDetailSerialiseur(serializers.ModelSerializer):
         if obj.redacteur:
             return f"{obj.redacteur.prenom} {obj.redacteur.nom}"
         return None
+
+
+class PrescriptionCCTPSerialiseur(serializers.ModelSerializer):
+    type_libelle = serializers.CharField(source="get_type_prescription_display", read_only=True)
+    niveau_libelle = serializers.CharField(source="get_niveau_display", read_only=True)
+    lot_numero = serializers.CharField(source="lot.numero", read_only=True)
+    chapitre_intitule = serializers.CharField(source="chapitre.intitule", read_only=True)
+
+    class Meta:
+        model = PrescriptionCCTP
+        fields = [
+            "id", "lot", "lot_numero", "chapitre", "chapitre_intitule",
+            "code", "intitule", "corps",
+            "type_prescription", "type_libelle",
+            "niveau", "niveau_libelle",
+            "normes", "tags", "source",
+            "contient_variables", "est_actif", "ordre",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class ChapitrePrescripSerialiseur(serializers.ModelSerializer):
+    prescriptions = PrescriptionCCTPSerialiseur(many=True, read_only=True)
+
+    class Meta:
+        model = ChapitrePrescrip
+        fields = ["id", "lot", "numero", "intitule", "ordre", "prescriptions"]
+        read_only_fields = ["id"]
+
+
+class LotCCTPSerialiseur(serializers.ModelSerializer):
+    chapitres = ChapitrePrescripSerialiseur(many=True, read_only=True)
+    numero_libelle = serializers.CharField(source="get_numero_display", read_only=True)
+    nb_prescriptions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LotCCTP
+        fields = [
+            "id", "numero", "numero_libelle", "intitule", "description",
+            "normes_principales", "est_actif", "ordre",
+            "nb_prescriptions", "chapitres",
+        ]
+        read_only_fields = ["id"]
+
+    def get_nb_prescriptions(self, obj):
+        return obj.prescriptions.filter(est_actif=True).count()
+
+
+class GenerateurCCTPCreationSerialiseur(serializers.Serializer):
+    projet_id = serializers.UUIDField()
+    intitule = serializers.CharField(max_length=300)
+    lots = serializers.ListField(
+        child=serializers.CharField(max_length=10),
+        required=False, default=list,
+    )
+    prescriptions_exclues = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False, default=list,
+    )
+    variables = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False, default=dict,
+    )

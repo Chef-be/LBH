@@ -1084,3 +1084,112 @@ def exporter_piece_ecrite(piece: PieceEcrite, format_sortie: str) -> tuple[bytes
     piece.document_ged = document_ged
     piece.save(update_fields=["fichier_genere", "document_ged", "date_generation", "date_modification"])
     return contenu, type_mime, nom_fichier
+
+
+def generer_cctp_depuis_bibliotheque(
+    projet,
+    intitule: str,
+    lots_numeros: list[str],
+    prescriptions_exclues_ids: list[str],
+    variables: dict,
+    utilisateur=None,
+) -> PieceEcrite:
+    """
+    Génère un CCTP Word complet depuis la bibliothèque de prescriptions.
+    Retourne une PieceEcrite avec le fichier Word généré dans MinIO.
+    """
+    from .models import LotCCTP, PrescriptionCCTP, ModeleDocument
+
+    # Récupérer les lots dans l'ordre
+    lots = LotCCTP.objects.filter(
+        numero__in=lots_numeros, est_actif=True
+    ).prefetch_related(
+        "chapitres__prescriptions"
+    ).order_by("ordre", "numero")
+
+    # Construire le document Word
+    document = DocumentWord()
+
+    # Titre principal
+    document.add_heading(intitule or "Cahier des Clauses Techniques Particulières", level=0)
+
+    # En-tête du projet
+    variables_completes = {
+        "nom_projet": getattr(projet, "intitule", ""),
+        "reference_projet": getattr(projet, "reference", ""),
+        "maitre_ouvrage": getattr(getattr(projet, "organisation", None), "raison_sociale", ""),
+        "date_generation": timezone.now().strftime("%d/%m/%Y"),
+        **variables,
+    }
+
+    entete = document.add_paragraph()
+    entete.add_run(f"Projet : {variables_completes.get('nom_projet', '')}").bold = True
+    document.add_paragraph(f"Référence : {variables_completes.get('reference_projet', '')}")
+    document.add_paragraph(f"Maître d'ouvrage : {variables_completes.get('maitre_ouvrage', '')}")
+    document.add_paragraph(f"Date d'établissement : {variables_completes.get('date_generation', '')}")
+    document.add_paragraph("")
+
+    exclues_ids = set(str(i) for i in prescriptions_exclues_ids)
+
+    for lot in lots:
+        document.add_heading(f"LOT {lot.numero} — {lot.intitule.upper()}", level=1)
+
+        for chapitre in lot.chapitres.all().order_by("ordre"):
+            document.add_heading(f"{chapitre.numero} — {chapitre.intitule}", level=2)
+
+            for prescrip in chapitre.prescriptions.filter(est_actif=True).order_by("ordre"):
+                if str(prescrip.pk) in exclues_ids:
+                    continue
+
+                # Titre de l'article
+                document.add_heading(prescrip.intitule, level=3)
+
+                # Corps avec remplacement de variables
+                corps = prescrip.corps
+                for var, valeur in variables_completes.items():
+                    corps = corps.replace(f"{{{var}}}", str(valeur))
+                # Remplacer variables non résolues par leur valeur par défaut
+                corps = re.sub(r"\{([^}:]+):-([^}]*)\}", r"\2", corps)
+                corps = re.sub(r"\{([^}]+)\}", r"[\1]", corps)
+
+                document.add_paragraph(corps)
+
+                # Normes
+                if prescrip.normes:
+                    p = document.add_paragraph()
+                    p.add_run("Normes applicables : ").italic = True
+                    p.add_run(", ".join(prescrip.normes)).italic = True
+
+    # Sauvegarder le document Word en mémoire
+    flux = BytesIO()
+    document.save(flux)
+    contenu_word = flux.getvalue()
+
+    # Trouver ou créer un modèle CCTP générique
+    modele, _ = ModeleDocument.objects.get_or_create(
+        code="CCTP-GENERE",
+        defaults={
+            "libelle": "CCTP généré automatiquement",
+            "type_document": "cctp",
+            "description": "Modèle utilisé pour les CCTP générés depuis la bibliothèque de prescriptions.",
+        }
+    )
+
+    # Créer la PieceEcrite
+    piece = PieceEcrite.objects.create(
+        projet=projet,
+        modele=modele,
+        intitule=intitule,
+        statut="brouillon",
+        redacteur=utilisateur,
+    )
+    nom_fichier = f"cctp-{slugify(intitule) or 'document'}-{timezone.now():%Y%m%d}.docx"
+    piece.fichier_genere.save(
+        f"pieces_ecrites/{timezone.now():%Y/%m}/{nom_fichier}",
+        ContentFile(contenu_word),
+        save=True,
+    )
+    piece.date_generation = timezone.now()
+    piece.save()
+
+    return piece

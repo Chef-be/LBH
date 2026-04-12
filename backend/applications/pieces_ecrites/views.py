@@ -12,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .models import ModeleDocument, PieceEcrite, ArticleCCTP
+from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, PrescriptionCCTP
 from .office import (
     assurer_gabarit_bureautique,
     construire_url_editeur_collabora,
@@ -41,6 +41,9 @@ from .serialiseurs import (
     PieceEcriteListeSerialiseur,
     PieceEcriteDetailSerialiseur,
     ArticleCCTPSerialiseur,
+    LotCCTPSerialiseur,
+    PrescriptionCCTPSerialiseur,
+    GenerateurCCTPCreationSerialiseur,
 )
 
 
@@ -421,3 +424,59 @@ def vue_importer_fichier_word_editeur(request):
         return Response({"detail": f"Import Word impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(resultat)
+
+
+class VueListeLotsTypesCCTP(generics.ListAPIView):
+    """Liste tous les lots CCTP disponibles avec leurs chapitres."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LotCCTPSerialiseur
+
+    def get_queryset(self):
+        return LotCCTP.objects.filter(est_actif=True).prefetch_related("chapitres__prescriptions")
+
+
+class VueListePrescriptionsLot(generics.ListAPIView):
+    """Liste les prescriptions d'un lot donné."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PrescriptionCCTPSerialiseur
+
+    def get_queryset(self):
+        lot_numero = self.kwargs.get("lot_numero")
+        qs = PrescriptionCCTP.objects.filter(est_actif=True)
+        if lot_numero:
+            qs = qs.filter(lot__numero=lot_numero)
+        type_p = self.request.query_params.get("type")
+        if type_p:
+            qs = qs.filter(type_prescription=type_p)
+        return qs.select_related("lot", "chapitre")
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_generer_cctp_multi_lots(request):
+    """
+    Génère un CCTP Word complet depuis la sélection de lots et prescriptions.
+    Body: {projet_id, intitule, lots: [...], prescriptions_exclues: [...], variables: {...}}
+    """
+    from applications.projets.models import Projet
+    from .services import generer_cctp_depuis_bibliotheque
+
+    serialiseur = GenerateurCCTPCreationSerialiseur(data=request.data, context={"request": request})
+    if not serialiseur.is_valid():
+        return Response(serialiseur.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    donnees = serialiseur.validated_data
+    try:
+        projet = Projet.objects.get(pk=donnees["projet_id"])
+    except Projet.DoesNotExist:
+        return Response({"erreur": "Projet introuvable."}, status=404)
+
+    piece = generer_cctp_depuis_bibliotheque(
+        projet=projet,
+        intitule=donnees["intitule"],
+        lots_numeros=donnees.get("lots", []),
+        prescriptions_exclues_ids=donnees.get("prescriptions_exclues", []),
+        variables=donnees.get("variables", {}),
+        utilisateur=request.user,
+    )
+    return Response(PieceEcriteDetailSerialiseur(piece, context={"request": request}).data, status=201)
