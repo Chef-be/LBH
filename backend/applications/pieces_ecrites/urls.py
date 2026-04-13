@@ -38,4 +38,7 @@ urlpatterns = [
     path("<uuid:pk>/exporter-bpu/", views.vue_exporter_bpu, name="piece-ecrite-exporter-bpu"),
     path("<uuid:piece_id>/articles/", views.VueListeArticlesCCTP.as_view(), name="piece-articles-liste"),
     path("<uuid:piece_id>/articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="piece-article-detail"),
+
+    # Analyse automatique depuis un document GED → extraction CCTP
+    path("analyser-document/<uuid:document_id>/", views.vue_analyser_document_cctp, name="analyser-document-cctp"),
 ]

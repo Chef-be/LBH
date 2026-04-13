@@ -9,7 +9,7 @@ import {
   ArrowLeft, FileText, CheckCircle, AlertCircle, X, Clock,
   Download, GitBranch, MessageSquare, Send, ScanText,
   Shield, Eye, EyeOff, RefreshCw, ChevronRight, Pencil, Save, Trash2, LibraryBig,
-  Layers, FileSpreadsheet,
+  Layers, FileSpreadsheet, BookOpen,
 } from "lucide-react";
 import { ApercuFichierModal } from "@/composants/ui/ApercuFichierModal";
 
@@ -133,6 +133,7 @@ export default function PageDetailDocument({
   const [enregistrementEdition, setEnregistrementEdition] = useState(false);
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [importBibliothequeEnCours, setImportBibliothequeEnCours] = useState(false);
+  const [extractionCctpEnCours, setExtractionCctpEnCours] = useState(false);
   const [typesDocuments, setTypesDocuments] = useState<TypeDocumentOption[]>([]);
   const [dossiersProjet, setDossiersProjet] = useState<DossierDocumentOption[]>([]);
   const [sessionCollabora, setSessionCollabora] = useState<{
@@ -311,6 +312,22 @@ export default function PageDetailDocument({
       setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'importer ce document dans la bibliothèque.");
     } finally {
       setImportBibliothequeEnCours(false);
+    }
+  };
+
+  const extraireCctp = async () => {
+    setExtractionCctpEnCours(true);
+    setErreur(null);
+    try {
+      const reponse = await api.post<{ detail: string; nb_articles: number; nb_articles_crees: number; erreurs: string[] }>(
+        `/api/pieces-ecrites/analyser-document/${id}/`,
+        {}
+      );
+      flash(reponse.detail);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'extraire les articles CCTP depuis ce document.");
+    } finally {
+      setExtractionCctpEnCours(false);
     }
   };
 
@@ -564,6 +581,20 @@ export default function PageDetailDocument({
                 {importBibliothequeEnCours
                   ? <><RefreshCw className="w-4 h-4 animate-spin" />Import…</>
                   : <><LibraryBig className="w-4 h-4" />Vers bibliothèque</>
+                }
+              </button>
+            )}
+            {doc.fichier && (
+              <button
+                type="button"
+                onClick={extraireCctp}
+                disabled={extractionCctpEnCours}
+                className="btn-secondaire disabled:opacity-60"
+                title="Analyser le document et extraire les articles CCTP en bibliothèque"
+              >
+                {extractionCctpEnCours
+                  ? <><RefreshCw className="w-4 h-4 animate-spin" />Extraction…</>
+                  : <><BookOpen className="w-4 h-4" />Extraire CCTP</>
                 }
               </button>
             )}

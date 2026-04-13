@@ -1479,9 +1479,9 @@ def exporter_articles_dpgf(piece: PieceEcrite) -> bytes:
     # Figer les volets (en-têtes)
     ws.freeze_panes = "A5"
 
-    flux = BytesIO()
-    wb.save(flux)
-    return flux.getvalue()
+    flux_dpgf = BytesIO()
+    wb.save(flux_dpgf)
+    return flux_dpgf.getvalue()
 
 
 def exporter_articles_bpu(piece: PieceEcrite) -> bytes:
@@ -1595,3 +1595,251 @@ def exporter_articles_bpu(piece: PieceEcrite) -> bytes:
     flux = BytesIO()
     wb.save(flux)
     return flux.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# B1 — Analyse automatique d'un document et extraction d'articles CCTP
+# ---------------------------------------------------------------------------
+
+#: Mots-clés par lot CCTP (code lot → tuple de mots-clés normalisés)
+_MOTS_CLES_LOTS: dict[str, tuple[str, ...]] = {
+    "VRD":     ("vrd", "voirie", "reseaux", "assainissement", "eau pluviale", "eau usee",
+                "caniveau", "regard", "trottoir", "chaussee", "ecoulement", "raccordement"),
+    "TERR":    ("terrassement", "decaissement", "deblai", "remblai", "excavation",
+                "fouille", "plateforme", "nivellement", "compactage"),
+    "GO":      ("gros oeuvre", "beton", "ferraillage", "voile", "poteau", "poutre",
+                "dalle", "fondation", "radier", "semelle", "armature", "coffrage",
+                "plancher", "maconnerie", "brique", "parpaing", "agglo"),
+    "FAC":     ("facade", "bardage", "enduit", "ravalement", "ite", "isolation thermique exterieure",
+                "parement", "pierre", "composite"),
+    "MRC":     ("mur rideau", "verriere", "facade vitree", "facade structurale"),
+    "MOB":     ("ossature bois", "construction bois", "bois lamelle", "clt", "pan de bois",
+                "structure bois", "charpente bois lamelle colle"),
+    "CHMET":   ("charpente metallique", "metal", "acier", "poteau metallique",
+                "poutre metallique", "profile metallique", "heb", "ipe", "upe"),
+    "CHCZ":    ("charpente", "couverture", "zinguerie", "tuile", "ardoise", "bac acier",
+                "toiture", "faitage", "chevron", "fermette", "noue",
+                "gouttiere", "descente eaux pluviales"),
+    "ETAN":    ("etancheite", "membrane", "bitume", "soudure", "toiture terrasse",
+                "releve", "tpe", "bicouche"),
+    "MENUEXT": ("menuiserie exterieure", "fenetre", "porte fenetre", "baie", "porte d entree",
+                "double vitrage", "triple vitrage", "volet", "store", "brise soleil",
+                "chassis"),
+    "MENUINT": ("menuiserie interieure", "porte interieure", "bloc porte",
+                "serrure", "serrurerie", "quincaillerie", "baguette", "boiserie"),
+    "IPP":     ("isolation", "platerie", "platrerie", "placo", "cloison seche",
+                "doublage", "faux plafond", "laine de verre", "laine de roche",
+                "peinture", "enduit interieur"),
+    "RSC":     ("revetement de sol", "carrelage", "parquet", "resine", "chape",
+                "dalle pvc", "gres cerame", "faience", "revetement mural"),
+    "ELEC":    ("electricite", "courant fort", "courant faible", "tableau electrique",
+                "disjoncteur", "interrupteur", "cablage", "luminaire",
+                "eclairage", "alarme", "intrusion", "controle acces", "vdi"),
+    "PLB":     ("plomberie", "sanitaire", "eau froide", "eau chaude", "wc",
+                "lavabo", "douche", "baignoire", "robinetterie", "tuyauterie",
+                "collecteur", "ballon"),
+    "CVC":     ("chauffage", "ventilation", "climatisation", "cvc", "vmc",
+                "gaine", "aeraulique", "split", "pac", "pompe a chaleur",
+                "plancher chauffant", "radiateur"),
+    "ASC":     ("ascenseur", "monte charge", "elevateur",
+                "cabine", "treuil", "gaine ascenseur"),
+    "PAY":     ("paysager", "espace vert", "plante", "arbre", "gazon", "pelouse",
+                "arrosage automatique", "cloture", "portail",
+                "mobilier urbain", "eclairage exterieur"),
+}
+
+# Patterns de titres de sections dans un CCTP (numérotation hiérarchique)
+_RE_TITRE_CCTP = re.compile(
+    r"^\s*(?:"
+    r"(?P<num_romain>[IVX]{1,4})\.\s+|"
+    r"(?P<num_lettre>[A-Z])\.\s+|"
+    r"(?P<num_chap>\d+(?:\.\d+)*)\s+|"
+    r"(?P<num_article>(?:Art(?:icle)?\.?\s*\d+))\s+"
+    r")(?P<titre>[A-ZÀÂÄÉÈÊËÎÏÔÙÛÜ].{3,})$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _normaliser_texte_cctp(texte: str) -> str:
+    """Normalise un texte pour la comparaison de mots-clés."""
+    import unicodedata as _ud
+    texte = texte.lower()
+    nfkd = _ud.normalize("NFKD", texte)
+    return "".join(c for c in nfkd if not _ud.combining(c))
+
+
+def _classer_lot_cctp(texte_normalise: str) -> str | None:
+    """Retourne le code du lot CCTP dont les mots-clés correspondent le mieux."""
+    meilleur_code: str | None = None
+    meilleur_score = 0
+    for code, mots_cles in _MOTS_CLES_LOTS.items():
+        score = sum(1 for mc in mots_cles if mc in texte_normalise)
+        if score > meilleur_score:
+            meilleur_score = score
+            meilleur_code = code
+    return meilleur_code if meilleur_score >= 1 else None
+
+
+def _extraire_texte_pdf_cctp(contenu: bytes) -> str:
+    """Extrait le texte brut d'un PDF en mémoire."""
+    try:
+        import fitz  # PyMuPDF
+        with fitz.open(stream=contenu, filetype="pdf") as doc:
+            return "\n".join(page.get_text() for page in doc)
+    except Exception:
+        return ""
+
+
+def _extraire_texte_docx_cctp(contenu: bytes) -> str:
+    """Extrait le texte brut d'un DOCX."""
+    try:
+        doc_word = DocumentWord(BytesIO(contenu))
+        return "\n".join(par.text for par in doc_word.paragraphs if par.text.strip())
+    except Exception:
+        return ""
+
+
+def _extraire_texte_fichier(nom_fichier: str, contenu: bytes) -> str:
+    """Détecte le type de fichier et extrait le texte."""
+    ext = Path(nom_fichier).suffix.lower()
+    if ext == ".pdf":
+        return _extraire_texte_pdf_cctp(contenu)
+    if ext in (".docx",):
+        return _extraire_texte_docx_cctp(contenu)
+    if ext in (".txt", ".md", ".rst"):
+        for enc in ("utf-8", "latin-1", "cp1252"):
+            try:
+                return contenu.decode(enc)
+            except UnicodeDecodeError:
+                continue
+    # Tentative générique
+    texte = _extraire_texte_pdf_cctp(contenu)
+    if not texte:
+        texte = _extraire_texte_docx_cctp(contenu)
+    return texte
+
+
+def _segmenter_texte_cctp(texte: str) -> list[dict[str, str]]:
+    """Découpe un texte CCTP en sections numérotées.
+
+    Retourne une liste de dicts {numero, titre, corps}.
+    """
+    lignes = texte.splitlines()
+    sections: list[dict[str, str]] = []
+    section_courante: dict[str, str] | None = None
+
+    for ligne in lignes:
+        m = _RE_TITRE_CCTP.match(ligne)
+        if m:
+            if section_courante and section_courante.get("corps", "").strip():
+                sections.append(section_courante)
+            numero = (
+                m.group("num_romain") or m.group("num_lettre")
+                or m.group("num_chap") or m.group("num_article") or ""
+            )
+            section_courante = {
+                "numero": numero.strip(),
+                "titre": m.group("titre").strip(),
+                "corps": "",
+            }
+        elif section_courante is not None:
+            section_courante["corps"] = section_courante["corps"] + "\n" + ligne
+
+    if section_courante and section_courante.get("corps", "").strip():
+        sections.append(section_courante)
+
+    return sections
+
+
+def analyser_cctp_depuis_document(document) -> dict[str, object]:
+    """Analyse un document (PDF, DOCX, ZIP) et extrait des articles CCTP en bibliothèque.
+
+    Paramètres
+    ----------
+    document : applications.documents.models.Document
+
+    Retour
+    ------
+    dict avec clés : nb_articles (int), nb_articles_crees (int), erreurs (list[str])
+    """
+    import zipfile as _zipmodule
+    from django.core.files.storage import default_storage
+    from .models import ArticleCCTP, LotCCTP
+
+    lots_par_code = {lot.code: lot for lot in LotCCTP.objects.filter(est_actif=True)}
+    erreurs: list[str] = []
+    nb_crees = 0
+    nb_total = 0
+
+    def _traiter_contenu(nom: str, contenu: bytes) -> None:
+        nonlocal nb_crees, nb_total
+        texte = _extraire_texte_fichier(nom, contenu)
+        if not texte.strip():
+            erreurs.append(f"Aucun texte extrait de « {nom} ».")
+            return
+        sections = _segmenter_texte_cctp(texte)
+        if not sections:
+            erreurs.append(f"Aucune section CCTP reconnue dans « {nom} ».")
+            return
+        source_nom = document.nom_fichier_origine or document.intitule or nom
+        for section in sections:
+            nb_total += 1
+            titre = section["titre"][:300]
+            corps = section["corps"].strip()
+            numero = section["numero"]
+            if not titre or len(titre) < 5:
+                continue
+            texte_norme = _normaliser_texte_cctp(f"{titre} {corps[:300]}")
+            code_lot = _classer_lot_cctp(texte_norme)
+            lot = lots_par_code.get(code_lot) if code_lot else None
+            # Dédoublonnage sur intitulé exact + lot
+            if ArticleCCTP.objects.filter(
+                intitule__iexact=titre,
+                lot=lot,
+                est_dans_bibliotheque=True,
+            ).exists():
+                continue
+            ArticleCCTP.objects.create(
+                piece_ecrite=None,
+                lot=lot,
+                numero_article=numero or f"X.{nb_crees + 1}",
+                intitule=titre,
+                corps_article=f"<p>{corps[:4000]}</p>" if corps else "",
+                source=source_nom[:200],
+                est_dans_bibliotheque=True,
+                tags=["import-auto", code_lot or "non-classe"],
+            )
+            nb_crees += 1
+
+    if not document.fichier:
+        return {"nb_articles": 0, "nb_articles_crees": 0, "erreurs": ["Document sans fichier attaché."]}
+
+    try:
+        with default_storage.open(document.fichier.name, "rb") as fh:
+            contenu_fichier = fh.read()
+    except Exception as exc:
+        return {"nb_articles": 0, "nb_articles_crees": 0, "erreurs": [f"Impossible de lire le fichier : {exc}"]}
+
+    nom = document.nom_fichier_origine or Path(document.fichier.name).name
+    ext = Path(nom).suffix.lower()
+
+    if ext == ".zip":
+        try:
+            with _zipmodule.ZipFile(BytesIO(contenu_fichier)) as zf:
+                for entree in zf.infolist():
+                    if entree.is_dir():
+                        continue
+                    sous_ext = Path(entree.filename).suffix.lower()
+                    if sous_ext not in (".pdf", ".docx", ".txt", ".md"):
+                        continue
+                    _traiter_contenu(entree.filename, zf.read(entree.filename))
+        except _zipmodule.BadZipFile:
+            erreurs.append("Fichier ZIP invalide ou corrompu.")
+    else:
+        _traiter_contenu(nom, contenu_fichier)
+
+    return {
+        "nb_articles": nb_total,
+        "nb_articles_crees": nb_crees,
+        "erreurs": erreurs,
+    }

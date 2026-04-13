@@ -28,6 +28,7 @@ from .office import (
     verifier_jeton_wopi_modele,
 )
 from .services import (
+    analyser_cctp_depuis_document,
     construire_donnees_fusion_piece,
     exporter_piece_ecrite,
     exporter_articles_dpgf,
@@ -588,3 +589,23 @@ def vue_exporter_bpu(request, pk):
     )
     reponse["Content-Length"] = str(len(contenu))
     return reponse
+
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_analyser_document_cctp(request, document_id):
+    """Analyse un document existant et extrait des articles CCTP en bibliothèque."""
+    from applications.documents.models import Document
+    document = generics.get_object_or_404(Document, pk=document_id)
+    resultat = analyser_cctp_depuis_document(document)
+    return Response(
+        {
+            "detail": (
+                f"{resultat['nb_articles_crees']} article(s) CCTP créé(s) "
+                f"sur {resultat['nb_articles']} section(s) détectée(s)."
+            ),
+            **resultat,
+        },
+        status=status.HTTP_200_OK,
+    )
