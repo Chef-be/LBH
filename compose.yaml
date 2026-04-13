@@ -211,14 +211,13 @@ services:
     cap_add:
       - MKNOD
     environment:
-      - aliasgroup1=https://${DOMAINE_PRINCIPAL:-lbh-economiste.com}
-      - aliasgroup2=http://lbh-nginx:80
-      - aliasgroup3=http://127.0.0.1:3082
       - username=${COLLABORA_ADMIN_UTILISATEUR:-admin}
       - password=${COLLABORA_ADMIN_MOT_DE_PASSE}
       - DONT_GEN_SSL_CERT=YES
-      - extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:logging.level=warning --o:net.post_allow.host[0]=lbh-nginx --o:net.post_allow.host[1]=lbh-backend --o:net.post_allow.host[2]=lbh-economiste.com --o:storage.wopi.host[0]=lbh-backend:8000 --o:storage.wopi.host[1]=lbh-economiste.com --o:net.frame_ancestors=https://lbh-economiste.com https://www.lbh-economiste.com
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:logging.level=warning --o:net.post_allow.host[0]=lbh-nginx --o:net.post_allow.host[1]=lbh-backend --o:net.post_allow.host[2]=lbh-economiste.com --o:net.frame_ancestors=https://lbh-economiste.com https://www.lbh-economiste.com
       - TZ=${FUSEAU_HORAIRE}
+    volumes:
+      - ./collabora/coolwsd.xml:/etc/coolwsd/coolwsd.xml:ro
     networks:
       - lbh-reseau
     healthcheck:

@@ -426,6 +426,8 @@ export default function PageDetailPieceEcrite({
   });
   const [ancrePlanActive, setAncrePlanActive] = useState<string | null>(null);
   const contenuSynchroniseRef = useRef("");
+  const formulaireCollaboraRef = useRef<HTMLFormElement>(null);
+  const cibleIframeCollabora = `collabora-piece-${pieceId}`;
 
   const charger = useCallback(async () => {
     try {
@@ -517,6 +519,12 @@ export default function PageDetailPieceEcrite({
     window.addEventListener("beforeunload", gererAvantQuitter);
     return () => window.removeEventListener("beforeunload", gererAvantQuitter);
   }, [contenuHtml]);
+
+  // Soumettre le formulaire caché WOPI dès que la session est prête et l'onglet collabora actif
+  useEffect(() => {
+    if (!sessionCollabora || onglet !== "collabora" || !formulaireCollaboraRef.current) return;
+    formulaireCollaboraRef.current.submit();
+  }, [sessionCollabora, onglet]);
 
   const ouvrirCollabora = async () => {
     setChargementCollabora(true);
@@ -1221,12 +1229,24 @@ export default function PageDetailPieceEcrite({
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-slate-200" style={{ minHeight: "700px" }}>
+                  {/* Formulaire caché WOPI — l'access_token doit passer par le corps POST, pas l'URL */}
+                  <form
+                    ref={formulaireCollaboraRef}
+                    action={sessionCollabora.url_editeur}
+                    method="post"
+                    target={cibleIframeCollabora}
+                    className="hidden"
+                  >
+                    <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
+                    <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
+                  </form>
                   <iframe
-                    src={sessionCollabora.url_editeur}
+                    name={cibleIframeCollabora}
+                    src="about:blank"
                     title="Éditeur Collabora Online"
                     className="h-full w-full"
                     style={{ minHeight: "700px", border: "none" }}
-                    allow="fullscreen"
+                    allow="clipboard-read; clipboard-write; fullscreen"
                   />
                 </div>
               )}

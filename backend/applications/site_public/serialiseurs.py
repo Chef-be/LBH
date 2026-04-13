@@ -2,6 +2,7 @@
 
 import json
 from django.core.files.uploadedfile import UploadedFile
+from django.urls import reverse
 from rest_framework import serializers
 from .contenu_accueil import contenu_accueil_par_defaut
 from .contenus_pages import contenus_pages_par_defaut
@@ -108,6 +109,20 @@ class ConfigurationSiteSerialiseur(serializers.ModelSerializer):
             contenus_pages_par_defaut(),
             donnees.get("contenus_pages") or {},
         )
+        # Remplace les URLs MinIO internes (lbh-minio:9000) par des endpoints
+        # proxy Django accessibles publiquement depuis le navigateur.
+        if instance.logo:
+            donnees["logo"] = reverse("site-logo")
+        else:
+            donnees["logo"] = None
+        if instance.logo_pied_de_page or instance.logo:
+            donnees["logo_pied_de_page"] = reverse("site-logo-pied-de-page")
+        else:
+            donnees["logo_pied_de_page"] = None
+        if instance.favicon:
+            donnees["favicon"] = reverse("site-favicon")
+        else:
+            donnees["favicon"] = None
         return donnees
 
     def _decoder_json_si_necessaire(self, valeur, champ):

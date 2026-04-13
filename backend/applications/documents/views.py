@@ -12,7 +12,7 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.urls import reverse
 from rest_framework import generics, permissions, status, filters
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
@@ -327,7 +327,7 @@ def vue_document_session_bureautique(request, pk):
     jeton = creer_jeton_wopi_document(document, request.user)
     wopi_base = getattr(settings, "WOPI_BASE_URL", "").rstrip("/")
     chemin_wopi = reverse("document-wopi-fichier", kwargs={"pk": document.pk})
-    wopi_src = f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)
+    wopi_src = (f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)).rstrip("/")
     extension = extension_bureautique_document(document)
     url_editeur = construire_url_editeur_collabora_document(wopi_src, jeton, extension)
 
@@ -345,6 +345,7 @@ def vue_document_session_bureautique(request, pk):
 
 
 @api_view(["GET", "POST"])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def vue_document_wopi_fichier(request, pk):
     document = generics.get_object_or_404(Document, pk=pk)
@@ -413,6 +414,7 @@ def vue_document_wopi_fichier(request, pk):
 
 
 @api_view(["GET", "POST"])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def vue_document_wopi_contenu(request, pk):
     document = generics.get_object_or_404(Document, pk=pk)

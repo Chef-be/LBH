@@ -179,11 +179,11 @@ def _discovery_urlsrc(extension: str) -> str:
 
 
 def construire_url_editeur_collabora(wopi_src: str, access_token: str, extension: str) -> str:
+    # access_token n'est PAS inclus dans l'URL — il doit être transmis uniquement via le corps
+    # du formulaire HTML (champ caché access_token). L'inclure dans l'URL amène Collabora 25.04
+    # à l'intégrer dans le chemin WebSocket WOPISrc, produisant "Invalid URI []".
     urlsrc = _discovery_urlsrc(extension.lstrip("."))
-    parametres = (
-        f"WOPISrc={urllib_parse.quote(wopi_src, safe='')}"
-        "&lang=fr"
-    )
+    parametres = f"WOPISrc={urllib_parse.quote(wopi_src, safe='')}&lang=fr"
     return f"{urlsrc}{parametres}"
 
 

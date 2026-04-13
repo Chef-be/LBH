@@ -7,7 +7,7 @@ from django.core.files.base import ContentFile
 from django.http import FileResponse, HttpResponse
 from django.urls import reverse
 from rest_framework import generics, permissions, status, filters
-from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, parser_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -116,7 +116,8 @@ def vue_modele_document_session_bureautique(request, pk):
     # On utilise WOPI_BASE_URL (URL interne backend joignable par Collabora).
     wopi_base = getattr(settings, "WOPI_BASE_URL", "").rstrip("/")
     chemin_wopi = reverse("modele-document-wopi-fichier", kwargs={"pk": modele.pk})
-    wopi_src = f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)
+    # rstrip("/") : Collabora ajoute "/contents" au WOPISrc, le slash final provoquerait "//contents"
+    wopi_src = (f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)).rstrip("/")
     extension = extension_gabarit_modele(modele)
     url_editeur = construire_url_editeur_collabora(wopi_src, jeton, extension)
 
@@ -134,6 +135,7 @@ def vue_modele_document_session_bureautique(request, pk):
 
 
 @api_view(["GET", "POST"])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def vue_modele_document_wopi_fichier(request, pk):
     modele = generics.get_object_or_404(ModeleDocument, pk=pk)
@@ -202,6 +204,7 @@ def vue_modele_document_wopi_fichier(request, pk):
 
 
 @api_view(["GET", "POST"])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def vue_modele_document_wopi_contenu(request, pk):
     modele = generics.get_object_or_404(ModeleDocument, pk=pk)
