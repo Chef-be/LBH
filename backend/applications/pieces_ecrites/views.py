@@ -140,12 +140,17 @@ def vue_modele_document_wopi_fichier(request, pk):
     contexte = _verifier_acces_wopi_modele(request, modele)
 
     if request.method == "GET":
-        contenu = lire_contenu_gabarit(modele)
+        # CheckFileInfo — retourne les métadonnées sans lire le contenu du fichier
+        assurer_gabarit_bureautique(modele)
+        try:
+            taille = modele.gabarit.size if modele.gabarit else 0
+        except Exception:
+            taille = 0
         return Response(
             {
                 "BaseFileName": nom_affichage_gabarit(modele),
                 "OwnerId": str(modele.pk),
-                "Size": len(contenu),
+                "Size": taille,
                 "Version": str(int(modele.date_modification.timestamp())) if modele.date_modification else "1",
                 "UserId": contexte["utilisateur_id"],
                 "UserFriendlyName": f"Administrateur {getattr(settings, 'NOM_PLATEFORME', 'LBH Economiste')}",

@@ -351,12 +351,17 @@ def vue_document_wopi_fichier(request, pk):
     contexte = _verifier_acces_wopi_document(request, document)
 
     if request.method == "GET":
-        contenu = lire_contenu_document(document)
+        # CheckFileInfo — retourne les métadonnées sans lire le contenu du fichier
+        assurer_fichier_bureautique_document(document)
+        try:
+            taille = document.fichier.size if document.fichier else 0
+        except Exception:
+            taille = document.taille_octets or 0
         return Response(
             {
                 "BaseFileName": nom_affichage_document(document),
                 "OwnerId": str(document.pk),
-                "Size": len(contenu),
+                "Size": taille,
                 "Version": str(int(document.date_modification.timestamp())) if document.date_modification else "1",
                 "UserId": contexte["utilisateur_id"],
                 "UserFriendlyName": getattr(request.user, "get_full_name", lambda: "Utilisateur LBH")() if hasattr(request, "user") else "Utilisateur LBH",

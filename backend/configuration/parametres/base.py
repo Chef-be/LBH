@@ -191,6 +191,16 @@ CELERY_TASK_ROUTES = {
 DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 
+# Django 4.2+ — STORAGES prend la priorité sur DEFAULT_FILE_STORAGE
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
 AWS_ACCESS_KEY_ID = config("MINIO_ACCES_CLE", default="")
 AWS_SECRET_ACCESS_KEY = config("MINIO_SECRET_CLE", default="")
 AWS_STORAGE_BUCKET_NAME = config("MINIO_CORBEILLE_DOCUMENTS", default="documents")
