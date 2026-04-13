@@ -26,6 +26,7 @@ urlpatterns = [
     path("<uuid:pk>/analyser/", views.vue_lancer_analyse_document, name="document-analyser"),
     path("<uuid:pk>/importer-bibliotheque/", views.vue_importer_document_bibliotheque, name="document-importer-bibliotheque"),
     path("<uuid:pk>/appliquer-suggestions/", views.vue_appliquer_suggestions_document, name="document-appliquer-suggestions"),
+    path("<uuid:pk>/creer-etude-prix/", views.vue_creer_etude_prix_depuis_document, name="document-creer-etude-prix"),
 
     # Annotations et diffusions
     path("<uuid:doc_id>/annotations/", views.VueAnnotationsDocument.as_view(), name="document-annotations"),

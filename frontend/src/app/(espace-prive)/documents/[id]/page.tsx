@@ -9,7 +9,7 @@ import {
   ArrowLeft, FileText, CheckCircle, AlertCircle, X, Clock,
   Download, GitBranch, MessageSquare, Send, ScanText,
   Shield, Eye, EyeOff, RefreshCw, ChevronRight, Pencil, Save, Trash2, LibraryBig,
-  Layers, FileSpreadsheet, BookOpen,
+  Layers, FileSpreadsheet, BookOpen, Calculator,
 } from "lucide-react";
 import { ApercuFichierModal } from "@/composants/ui/ApercuFichierModal";
 
@@ -134,6 +134,7 @@ export default function PageDetailDocument({
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [importBibliothequeEnCours, setImportBibliothequeEnCours] = useState(false);
   const [extractionCctpEnCours, setExtractionCctpEnCours] = useState(false);
+  const [creationEtudeEnCours, setCreationEtudeEnCours] = useState(false);
   const [typesDocuments, setTypesDocuments] = useState<TypeDocumentOption[]>([]);
   const [dossiersProjet, setDossiersProjet] = useState<DossierDocumentOption[]>([]);
   const [sessionCollabora, setSessionCollabora] = useState<{
@@ -312,6 +313,22 @@ export default function PageDetailDocument({
       setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'importer ce document dans la bibliothèque.");
     } finally {
       setImportBibliothequeEnCours(false);
+    }
+  };
+
+  const creerEtudePrix = async () => {
+    if (!doc) return;
+    setCreationEtudeEnCours(true);
+    setErreur(null);
+    try {
+      const reponse = await api.post<{ detail: string; id: string }>(
+        `/api/documents/${id}/creer-etude-prix/`,
+        { intitule: `${doc.intitule} — Étude de prix` }
+      );
+      router.push(`/economie/etudes-de-prix/${reponse.id}`);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de créer l'étude de prix.");
+      setCreationEtudeEnCours(false);
     }
   };
 
@@ -598,6 +615,18 @@ export default function PageDetailDocument({
                 }
               </button>
             )}
+            <button
+              type="button"
+              onClick={creerEtudePrix}
+              disabled={creationEtudeEnCours}
+              className="btn-secondaire disabled:opacity-60"
+              title="Créer une étude de prix depuis ce document"
+            >
+              {creationEtudeEnCours
+                ? <><RefreshCw className="w-4 h-4 animate-spin" />Création…</>
+                : <><Calculator className="w-4 h-4" />Étude de prix</>
+              }
+            </button>
             {peutValider && (
               <button onClick={valider} className="btn-primaire">
                 <CheckCircle className="w-4 h-4" />Valider

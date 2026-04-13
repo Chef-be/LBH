@@ -724,6 +724,33 @@ def vue_previsualiser_suggestions_documents(request):
     )
 
 
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_creer_etude_prix_depuis_document(request, pk):
+    """Crée une étude de prix squelette à partir d'un document GED."""
+    from applications.economie.models import EtudePrix
+    doc = generics.get_object_or_404(
+        Document.objects.select_related("projet", "type_document"),
+        pk=pk,
+    )
+    intitule = request.data.get("intitule") or f"{doc.intitule} — Étude de prix"
+    methode = request.data.get("methode") or "estimatif"
+    lot_type = request.data.get("lot_type") or ""
+    etude = EtudePrix.objects.create(
+        intitule=intitule,
+        methode=methode,
+        lot_type=lot_type,
+        projet=doc.projet,
+        statut="brouillon",
+        description=f"Créée depuis le document GED : {doc.reference} — {doc.intitule}",
+        millesime=2025,
+    )
+    return Response(
+        {"detail": "Étude de prix créée.", "id": str(etude.id), "intitule": etude.intitule},
+        status=status.HTTP_201_CREATED,
+    )
+
+
 class VueAnnotationsDocument(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AnnotationDocumentSerialiseur
