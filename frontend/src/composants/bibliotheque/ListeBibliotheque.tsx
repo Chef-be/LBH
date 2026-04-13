@@ -263,7 +263,7 @@ export function ListeBibliotheque() {
     if (!window.confirm(
       "Lancer le recalcul analytique inversé de toute la bibliothèque ?\n\n" +
       "Chaque ligne sera traitée par étude de prix inversée (DS = PV × Kpv)\n" +
-      "basée sur les coefficients ARTIPRIX 2025 par corps d'état."
+      "La décomposition est calculée par étude de prix inversée (DS = PV × Kpv)."
     )) return;
 
     setErreur(null);
@@ -639,7 +639,7 @@ export function ListeBibliotheque() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-slate-900">Recalcul analytique</h3>
-                  <p className="text-xs text-slate-500">Étude de prix inversée — ARTIPRIX 2025</p>
+                  <p className="text-xs text-slate-500">Étude de prix inversée analytique</p>
                 </div>
               </div>
               {recalculProgression.statut === "termine" && (

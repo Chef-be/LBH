@@ -8,8 +8,8 @@ import { clsx } from "clsx";
 import { useConfiguration } from "@/contextes/FournisseurConfiguration";
 import { api, extraireListeResultats } from "@/crochets/useApi";
 import {
-  LayoutDashboard, FolderKanban, BookOpen, FileEdit, Settings,
-  Activity, Globe, Users, Mail,
+  LayoutDashboard, FolderKanban, BookOpen,
+  Activity, Globe, Users, Mail, Shield,
   ChevronLeft, Menu,
 } from "lucide-react";
 import { obtenirMarqueAffichee, obtenirNomPlateforme } from "@/lib/site-public";
@@ -52,12 +52,10 @@ const GROUPES_MENU: GroupeMenu[] = [
 const GROUPE_ADMIN: GroupeMenu = {
   titre: "Administration",
   entrees: [
-    { libelle: "Site public", chemin: "/", icone: Globe, nouvelOnglet: true },
-    { libelle: "Contenus du site", chemin: "/administration", icone: Settings },
-    { libelle: "Modèles de documents", chemin: "/administration/modeles-documents", icone: FileEdit },
+    { libelle: "Administration", chemin: "/administration", icone: Shield },
     { libelle: "Utilisateurs", chemin: "/utilisateurs", icone: Users },
     { libelle: "Supervision", chemin: "/supervision", icone: Activity },
-    { libelle: "Paramètres", chemin: "/parametres", icone: Settings },
+    { libelle: "Site public", chemin: "/", icone: Globe, nouvelOnglet: true },
   ],
 };
 

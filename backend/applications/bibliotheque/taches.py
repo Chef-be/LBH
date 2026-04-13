@@ -5,7 +5,7 @@
     PV HT = DS × (1 + α_FC + α_Fop) / (1 − α_FG − α_BA)
   Inversée :
     DS = PV × (1 − α_FG − α_BA) / (1 + α_FC + α_Fop)
-  Décomposition DS par ratios ARTIPRIX 2025 par corps d'état.
+  Décomposition DS par ratios statistiques par corps d'état.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ TTL_PROGRESSION = 3600  # 1 heure
 
 # ============================================================
 # Tables de coefficients par corps d'état / famille
-# (Manuel Étude de Prix Cusant & Widloecher 6e éd. + ARTIPRIX 2025)
+# Coefficients standards étude de prix BTP par corps d'état
 # ============================================================
 
 # α_FC  = frais de chantier en % DS
@@ -85,7 +85,7 @@ COEFFICIENTS_PAR_CORPS_ETAT: dict[str, tuple[float, float, float, float]] = {
 }
 
 # Ratios de décomposition DS → (MO%, Matériaux%, Matériel%, Frais_divers%)
-# Source : ARTIPRIX 2025, bordereaux moyens par corps d'état
+# Ratios statistiques standards par corps d'état
 RATIOS_DECOMPOSITION_DS: dict[str, tuple[float, float, float, float]] = {
     "gros_oeuvre":          (0.32, 0.48, 0.15, 0.05),
     "beton":                (0.30, 0.50, 0.15, 0.05),
@@ -128,7 +128,7 @@ RATIOS_DECOMPOSITION_DS: dict[str, tuple[float, float, float, float]] = {
     "defaut":               (0.33, 0.50, 0.12, 0.05),
 }
 
-# Taux horaire MO de référence (€/h, charges comprises) — ARTIPRIX 2025
+# Taux horaire MO de référence (€/h, charges comprises) par corps d'état
 TAUX_HORAIRE_MO_REFERENCE: dict[str, Decimal] = {
     "gros_oeuvre":          Decimal("44.00"),
     "beton":                Decimal("44.00"),

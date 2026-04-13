@@ -828,6 +828,30 @@ class ProfilMainOeuvre(models.Model):
     )
     heures_par_jour = models.DecimalField(max_digits=5, decimal_places=2, default=decimal.Decimal("7.00"))
 
+    # Heures supplémentaires mensuelles par taux de majoration
+    nb_heures_supp_25_mensuelles = models.DecimalField(
+        max_digits=6, decimal_places=2, default=decimal.Decimal("0.00"),
+        verbose_name="HS majorées à 25 % (h/mois)",
+        help_text="Nombre d'heures supplémentaires mensuelles majorées à 25 %.",
+    )
+    nb_heures_supp_50_mensuelles = models.DecimalField(
+        max_digits=6, decimal_places=2, default=decimal.Decimal("0.00"),
+        verbose_name="HS majorées à 50 % (h/mois)",
+        help_text="Nombre d'heures supplémentaires mensuelles majorées à 50 % (dimanches, fériés).",
+    )
+
+    # Compléments employeur mensuels
+    panier_repas_journalier = models.DecimalField(
+        max_digits=8, decimal_places=2, default=decimal.Decimal("0.00"),
+        verbose_name="Panier repas journalier (€)",
+        help_text="Montant journalier du panier ou titre-restaurant employeur.",
+    )
+    jours_travail_mensuels_defaut = models.DecimalField(
+        max_digits=5, decimal_places=2, default=decimal.Decimal("21.67"),
+        verbose_name="Jours de travail mensuels",
+        help_text="Nombre moyen de jours travaillés par mois (base 260 j / 12).",
+    )
+
     taux_charges_salariales = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.2200"))
     taux_charges_patronales = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.4200"))
     taux_absenteisme = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.0300"))

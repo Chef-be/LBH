@@ -709,8 +709,27 @@ def donnees_simulation_depuis_profil(profil, surcharges: dict | None = None) -> 
         "contrat_travail": surcharges.get("contrat_travail", "cdi"),
         "statut_cadre": surcharges.get("statut_cadre", profil.categorie in {"ingenieur", "conducteur"}),
         "quotite_travail": surcharges.get("quotite_travail", Decimal("1")),
+        # HS à deux taux — priorité aux surcharges, sinon valeurs du profil
+        "nb_heures_supp_25_mensuelles": surcharges.get(
+            "nb_heures_supp_25_mensuelles",
+            getattr(profil, "nb_heures_supp_25_mensuelles", Decimal("0")) or Decimal("0"),
+        ),
+        "nb_heures_supp_50_mensuelles": surcharges.get(
+            "nb_heures_supp_50_mensuelles",
+            getattr(profil, "nb_heures_supp_50_mensuelles", Decimal("0")) or Decimal("0"),
+        ),
+        # Compatibilité ascendante — mono-taux
         "heures_supplementaires_mensuelles": surcharges.get("heures_supplementaires_mensuelles", Decimal("0")),
         "majoration_heures_supplementaires": surcharges.get("majoration_heures_supplementaires", Decimal("0.25")),
+        # Panier repas — calculé depuis le profil
+        "panier_repas_mensuel": surcharges.get(
+            "panier_repas_mensuel",
+            (
+                getattr(profil, "panier_repas_journalier", Decimal("0")) or Decimal("0")
+            ) * (
+                getattr(profil, "jours_travail_mensuels_defaut", Decimal("21.67")) or Decimal("21.67")
+            ),
+        ),
         "mutuelle_employeur_mensuelle": surcharges.get(
             "mutuelle_employeur_mensuelle",
             _premiere_valeur(
@@ -770,8 +789,15 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
     contrat_travail = donnees.get("contrat_travail", "cdi")
     statut_cadre = bool(donnees.get("statut_cadre", False))
     quotite_travail = d(donnees.get("quotite_travail")) or Decimal("1")
-    heures_supplementaires = d(donnees.get("heures_supplementaires_mensuelles"))
+
+    # Heures supplémentaires — deux taux séparés (25% et 50%)
+    heures_supp_25 = d(donnees.get("nb_heures_supp_25_mensuelles")) or Decimal("0")
+    heures_supp_50 = d(donnees.get("nb_heures_supp_50_mensuelles")) or Decimal("0")
+    # Compatibilité ascendante mono-taux
+    heures_supplementaires = d(donnees.get("heures_supplementaires_mensuelles")) or Decimal("0")
     majoration_heures_supp = d(donnees.get("majoration_heures_supplementaires")) or Decimal("0.25")
+
+    panier_repas_mensuel = d(donnees.get("panier_repas_mensuel")) or Decimal("0")
     mutuelle_employeur = d(donnees.get("mutuelle_employeur_mensuelle"))
     titres_restaurant = d(donnees.get("titres_restaurant_employeur_mensuels"))
     prime_transport = d(donnees.get("prime_transport_mensuelle"))
@@ -811,7 +837,19 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
     smic_horaire = _smic_horaire(localisation)
     smic_mensuel = arrondir(smic_horaire * heures_mensuelles)
     taux_horaire_brut_reference = brut / heures_mensuelles if heures_mensuelles > 0 else Decimal("0")
-    montant_heures_supp = heures_supplementaires * taux_horaire_brut_reference * (Decimal("1") + majoration_heures_supp)
+
+    # HS à deux taux distincts (25% et 50%) — priorité sur mono-taux
+    if heures_supp_25 > 0 or heures_supp_50 > 0:
+        montant_hs_25 = heures_supp_25 * taux_horaire_brut_reference * Decimal("1.25")
+        montant_hs_50 = heures_supp_50 * taux_horaire_brut_reference * Decimal("1.50")
+        montant_heures_supp = montant_hs_25 + montant_hs_50
+        heures_supplementaires = heures_supp_25 + heures_supp_50
+    else:
+        # Compatibilité ascendante mono-taux
+        montant_heures_supp = heures_supplementaires * taux_horaire_brut_reference * (Decimal("1") + majoration_heures_supp)
+        montant_hs_25 = Decimal("0")
+        montant_hs_50 = Decimal("0")
+
     remuneration_brute = brut + primes + avantages + montant_heures_supp
     cotisations_salariales = remuneration_brute * taux_charges_salariales
     net_hors_impot = remuneration_brute - cotisations_salariales
@@ -819,7 +857,7 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
     reduction_generale = _estimer_reduction_generale(remuneration_brute, charges_patronales_brutes, smic_mensuel, appliquer_rgdu)
     charges_patronales = charges_patronales_brutes - reduction_generale
 
-    cout_social_complements = mutuelle_employeur + titres_restaurant + prime_transport
+    cout_social_complements = mutuelle_employeur + titres_restaurant + prime_transport + panier_repas_mensuel
     indemnite_precarite = remuneration_brute * Decimal("0.10") if contrat_travail == "cdd" else Decimal("0")
     cout_employeur = remuneration_brute + charges_patronales + cout_social_complements + indemnite_precarite
     couts_indirects = cout_equipement + cout_transport + cout_structure
@@ -894,6 +932,10 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
             "salaire_brut_mensuel": float(arrondir(brut)),
             "primes_mensuelles": float(arrondir(primes)),
             "avantages_mensuels": float(arrondir(avantages)),
+            "nb_heures_supp_25_mensuelles": float(arrondir(heures_supp_25, 2)),
+            "nb_heures_supp_50_mensuelles": float(arrondir(heures_supp_50, 2)),
+            "montant_hs_25": float(arrondir(montant_hs_25)),
+            "montant_hs_50": float(arrondir(montant_hs_50)),
             "heures_supplementaires_mensuelles": float(arrondir(heures_supplementaires, 2)),
             "montant_heures_supplementaires": float(arrondir(montant_heures_supp)),
             "remuneration_brute_mensuelle": float(arrondir(remuneration_brute)),
@@ -902,6 +944,7 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
             "charges_patronales_brutes": float(arrondir(charges_patronales_brutes)),
             "reduction_generale_estimee": float(arrondir(reduction_generale)),
             "charges_patronales": float(arrondir(charges_patronales)),
+            "panier_repas_mensuel": float(arrondir(panier_repas_mensuel)),
             "mutuelle_employeur_mensuelle": float(arrondir(mutuelle_employeur)),
             "titres_restaurant_employeur_mensuels": float(arrondir(titres_restaurant)),
             "prime_transport_mensuelle": float(arrondir(prime_transport)),
