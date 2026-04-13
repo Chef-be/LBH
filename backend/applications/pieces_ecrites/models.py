@@ -202,30 +202,9 @@ class LotCCTP(models.Model):
     Lot de travaux pour un CCTP — correspond aux 18 lots types BTP.
     Pré-alimenté depuis les descriptifs CCTP (Widloecher & Cusant 3e éd.)
     """
-    NUMEROS_LOTS = [
-        ("7.1",  "7.1 — VRD et réseaux"),
-        ("7.2",  "7.2 — Terrassements"),
-        ("7.3",  "7.3 — Gros Œuvre"),
-        ("7.4",  "7.4 — Façades et bardages"),
-        ("7.5",  "7.5 — Murs-rideaux"),
-        ("7.6",  "7.6 — Construction ossature bois"),
-        ("7.7",  "7.7 — Charpente métallique"),
-        ("7.8",  "7.8 — Charpente-Couverture-Zinguerie"),
-        ("7.9",  "7.9 — Étanchéité"),
-        ("7.10", "7.10 — Menuiseries extérieures"),
-        ("7.11", "7.11 — Menuiseries intérieures et serrurerie"),
-        ("7.12", "7.12 — Isolation-Plâtrerie-Peinture"),
-        ("7.13", "7.13 — Revêtements de sols et carrelage"),
-        ("7.14", "7.14 — Électricité courants forts et faibles"),
-        ("7.15", "7.15 — Plomberie sanitaires"),
-        ("7.16", "7.16 — CVC — Chauffage Ventilation Climatisation"),
-        ("7.17", "7.17 — Ascenseur et monte-charge"),
-        ("7.18", "7.18 — Aménagements paysagers et espaces verts"),
-        ("autre", "Autre lot"),
-    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    numero = models.CharField(max_length=10, choices=NUMEROS_LOTS, unique=True, verbose_name="Numéro de lot")
+    code = models.CharField(max_length=20, unique=True, db_index=True, verbose_name="Code lot")
     intitule = models.CharField(max_length=200, verbose_name="Intitulé")
     description = models.TextField(blank=True, verbose_name="Description")
     normes_principales = models.JSONField(default=list, blank=True, verbose_name="Normes et DTU principaux")
@@ -236,10 +215,10 @@ class LotCCTP(models.Model):
         db_table = "pieces_ecrites_lot_cctp"
         verbose_name = "Lot CCTP"
         verbose_name_plural = "Lots CCTP"
-        ordering = ["ordre", "numero"]
+        ordering = ["ordre", "code"]
 
     def __str__(self):
-        return f"{self.numero} — {self.intitule}"
+        return f"{self.code} — {self.intitule}"
 
 
 class ChapitrePrescrip(models.Model):
@@ -257,7 +236,7 @@ class ChapitrePrescrip(models.Model):
         ordering = ["lot", "ordre", "numero"]
 
     def __str__(self):
-        return f"{self.lot.numero} / {self.numero} — {self.intitule}"
+        return f"{self.lot.code} / {self.numero} — {self.intitule}"
 
 
 class PrescriptionCCTP(models.Model):
@@ -334,7 +313,7 @@ class PrescriptionCCTP(models.Model):
         ordering = ["lot", "chapitre", "ordre"]
 
     def __str__(self):
-        return f"[{self.lot.numero}] {self.intitule[:80]}"
+        return f"[{self.lot.code}] {self.intitule[:80]}"
 
 
 class GenerateurCCTP(models.Model):

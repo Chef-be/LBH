@@ -111,6 +111,12 @@ class LignePrixBibliotheque(models.Model):
         verbose_name="Lot CCTP de référence",
     )
 
+    # Illustrations (URLs d'images extraites lors de l'import)
+    illustrations = models.JSONField(
+        default=list, blank=True, verbose_name="Illustrations",
+        help_text="Liste d'URLs d'images illustrant la prestation",
+    )
+
     # Caractéristiques techniques
     caracteristiques_techniques = models.JSONField(
         default=dict, blank=True,

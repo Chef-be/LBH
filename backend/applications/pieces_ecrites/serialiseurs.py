@@ -134,13 +134,13 @@ class PieceEcriteDetailSerialiseur(serializers.ModelSerializer):
 class PrescriptionCCTPSerialiseur(serializers.ModelSerializer):
     type_libelle = serializers.CharField(source="get_type_prescription_display", read_only=True)
     niveau_libelle = serializers.CharField(source="get_niveau_display", read_only=True)
-    lot_numero = serializers.CharField(source="lot.numero", read_only=True)
+    lot_code = serializers.CharField(source="lot.code", read_only=True)
     chapitre_intitule = serializers.CharField(source="chapitre.intitule", read_only=True)
 
     class Meta:
         model = PrescriptionCCTP
         fields = [
-            "id", "lot", "lot_numero", "chapitre", "chapitre_intitule",
+            "id", "lot", "lot_code", "chapitre", "chapitre_intitule",
             "code", "intitule", "corps",
             "type_prescription", "type_libelle",
             "niveau", "niveau_libelle",
@@ -162,13 +162,12 @@ class ChapitrePrescripSerialiseur(serializers.ModelSerializer):
 
 class LotCCTPSerialiseur(serializers.ModelSerializer):
     chapitres = ChapitrePrescripSerialiseur(many=True, read_only=True)
-    numero_libelle = serializers.CharField(source="get_numero_display", read_only=True)
     nb_prescriptions = serializers.SerializerMethodField()
 
     class Meta:
         model = LotCCTP
         fields = [
-            "id", "numero", "numero_libelle", "intitule", "description",
+            "id", "code", "intitule", "description",
             "normes_principales", "est_actif", "ordre",
             "nb_prescriptions", "chapitres",
         ]
@@ -182,7 +181,7 @@ class GenerateurCCTPCreationSerialiseur(serializers.Serializer):
     projet_id = serializers.UUIDField()
     intitule = serializers.CharField(max_length=300)
     lots = serializers.ListField(
-        child=serializers.CharField(max_length=10),
+        child=serializers.CharField(max_length=20),
         required=False, default=list,
     )
     prescriptions_exclues = serializers.ListField(

@@ -984,10 +984,36 @@ class Command(BaseCommand):
         nb_chapitres = 0
         nb_prescriptions = 0
 
+        # Correspondance entre les anciens numéros de lot et les codes métier
+        CODES_PAR_NUMERO = {
+            "7.1": "VRD",
+            "7.2": "TERR",
+            "7.3": "GO",
+            "7.4": "FAC",
+            "7.5": "MRC",
+            "7.6": "MOB",
+            "7.7": "CHMET",
+            "7.8": "CHCZ",
+            "7.9": "ETAN",
+            "7.10": "MENUEXT",
+            "7.11": "MENUINT",
+            "7.12": "IPP",
+            "7.13": "RSC",
+            "7.14": "ELEC",
+            "7.15": "PLB",
+            "7.16": "CVC",
+            "7.17": "ASC",
+            "7.18": "PAY",
+        }
+
         for donnees_lot in LOTS:
             chapitres_data = donnees_lot.pop("chapitres", [])
+            # Convertir le champ "numero" en "code" si nécessaire
+            if "numero" in donnees_lot and "code" not in donnees_lot:
+                numero_source = donnees_lot.pop("numero")
+                donnees_lot["code"] = CODES_PAR_NUMERO.get(numero_source, numero_source)
             lot, cree = LotCCTP.objects.update_or_create(
-                numero=donnees_lot["numero"],
+                code=donnees_lot["code"],
                 defaults=donnees_lot,
             )
             if cree:

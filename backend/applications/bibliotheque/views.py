@@ -15,6 +15,7 @@ from .services import (
     importer_bordereaux_prix_references,
     importer_referentiel_prix_construction,
     recalculer_composantes_depuis_sous_details,
+    recalculer_depuis_prix_vente,
 )
 from .serialiseurs import (
     LignePrixBibliothequeListeSerialiseur,
@@ -170,67 +171,94 @@ class VueDetailSousDetailPrix(generics.RetrieveUpdateDestroyAPIView):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_recalculer_sous_details(request, pk):
-    """Recalcule et met à jour les composantes de coût depuis les sous-détails."""
+    """
+    Recalcule une ligne par étude de prix inversée analytique.
+    Stratégie :
+    1. Sous-détails existants → recalcul classique + vérification cohérence PV
+    2. PV connu, pas de sous-détails → DS = PV × Kpv inverse (Cusant & Widloecher)
+       puis décomposition par ratios ARTIPRIX 2025
+    3. Ni sous-détails ni PV → erreur 400
+    """
+    from .taches import recalculer_ligne_inverse
+
     entree = generics.get_object_or_404(LignePrixBibliotheque, pk=pk)
-    totaux = recalculer_composantes_depuis_sous_details(entree)
-    for champ, valeur in totaux.items():
+    composantes, methode = recalculer_ligne_inverse(entree)
+
+    if not composantes:
+        return Response(
+            {"detail": "Aucun sous-détail ni prix de vente disponible pour recalculer."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    for champ, valeur in composantes.items():
         setattr(entree, champ, valeur)
-    entree.save(update_fields=list(totaux.keys()))
+    entree.save(update_fields=list(composantes.keys()) + ["date_modification"])
+
+    libelle_methode = {
+        "sous_details": "Recalcul depuis sous-détails.",
+        "inversees": "Étude de prix inversée (DS = PV × Kpv).",
+        "affinees": "Sous-détails affinés par étude inversée (écart > 30%).",
+    }.get(methode, "Recalcul effectué.")
 
     return Response({
-        "detail": "Composantes recalculées depuis les sous-détails.",
-        "debourse_sec_unitaire": str(totaux["debourse_sec_unitaire"]),
+        "detail": libelle_methode,
+        "methode": methode,
+        "debourse_sec_unitaire": str(composantes.get("debourse_sec_unitaire", "0")),
+        "cout_matieres": str(composantes.get("cout_matieres", "0")),
+        "cout_materiel": str(composantes.get("cout_materiel", "0")),
+        "temps_main_oeuvre": str(composantes.get("temps_main_oeuvre", "0")),
+        "cout_horaire_mo": str(composantes.get("cout_horaire_mo", "0")),
     })
 
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_recalculer_bibliotheque(request):
-    """Recalcule l'ensemble de la bibliothèque et génère les sous-détails absents si demandé."""
-    regenerer_absents = _coerce_booleen(request.data.get("regenerer_absents", True))
-    forcer_regeneration = _coerce_booleen(request.data.get("forcer_regeneration", False))
+    """
+    Lance le recalcul asynchrone de toute la bibliothèque via Celery.
+    Retourne immédiatement un tache_id pour suivre la progression.
+    La progression est accessible via GET /recalcul-progression/<tache_id>/
+    """
+    import uuid
+    from .taches import tache_recalculer_bibliotheque, cle_progression
+    from django.core.cache import cache
 
-    qs = LignePrixBibliotheque.objects.prefetch_related("sous_details").all()
+    tache_id = str(uuid.uuid4())
+    filtre_statut = request.data.get("statut_validation") or None
+    filtre_famille = request.data.get("famille") or None
 
-    statut_validation = request.data.get("statut_validation")
-    if statut_validation:
-        qs = qs.filter(statut_validation=statut_validation)
+    # Initialiser la progression avant de lancer la tâche
+    cache.set(cle_progression(tache_id), {
+        "statut": "en_attente", "traites": 0, "total": 0,
+        "pourcentage": 0, "message": "En attente de démarrage...",
+    }, timeout=3600)
 
-    famille = request.data.get("famille")
-    if famille:
-        qs = qs.filter(famille__iexact=famille)
-
-    lignes_recalculees = 0
-    lignes_regenerees = 0
-    sous_details_generes = 0
-    lignes_ignorees = 0
-
-    for ligne in qs:
-        if regenerer_absents:
-            generes = generer_sous_details_depuis_composantes(ligne, forcer=forcer_regeneration)
-            if generes > 0:
-                lignes_regenerees += 1
-                sous_details_generes += generes
-
-        if not ligne.sous_details.exists():
-            lignes_ignorees += 1
-            continue
-
-        totaux = recalculer_composantes_depuis_sous_details(ligne)
-        for champ, valeur in totaux.items():
-            setattr(ligne, champ, valeur)
-        ligne.save(update_fields=list(totaux.keys()))
-        lignes_recalculees += 1
-
-    return Response(
-        {
-            "detail": "Bibliothèque recalculée.",
-            "lignes_recalculees": lignes_recalculees,
-            "lignes_regenerees": lignes_regenerees,
-            "sous_details_generes": sous_details_generes,
-            "lignes_ignorees": lignes_ignorees,
-        }
+    tache_recalculer_bibliotheque.delay(
+        tache_id=tache_id,
+        filtre_statut=filtre_statut,
+        filtre_famille=filtre_famille,
     )
+
+    return Response({
+        "detail": "Recalcul lancé en arrière-plan.",
+        "tache_id": tache_id,
+    }, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_progression_recalcul(request, tache_id):
+    """Retourne la progression d'un recalcul en cours ou terminé."""
+    from .taches import cle_progression
+    from django.core.cache import cache
+
+    progression = cache.get(cle_progression(tache_id))
+    if progression is None:
+        return Response(
+            {"detail": "Tâche introuvable ou expirée."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(progression)
 
 
 @api_view(["DELETE", "POST"])
@@ -249,6 +277,69 @@ def vue_vider_bibliotheque(request):
             "suppression_detail": details[1],
         }
     )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_lier_auto_prix_articles(request):
+    """Lie automatiquement les lignes de prix aux articles CCTP par similarité de désignation."""
+    from applications.pieces_ecrites.models import ArticleCCTP
+
+    articles_sans_liaison = ArticleCCTP.objects.filter(
+        ligne_prix_reference__isnull=True,
+        est_dans_bibliotheque=True,
+    ).select_related()
+
+    lignes_prix = list(
+        LignePrixBibliotheque.objects.values(
+            "id", "designation_courte", "designation_longue"
+        )
+    )
+
+    def _mots_significatifs(texte: str) -> set:
+        """Extrait les mots de longueur > 4 caractères depuis un texte."""
+        if not texte:
+            return set()
+        return {
+            mot.lower()
+            for mot in texte.replace("-", " ").split()
+            if len(mot) > 4
+        }
+
+    liaisons_creees = 0
+    articles_traites = 0
+
+    for article in articles_sans_liaison:
+        articles_traites += 1
+        mots_article = _mots_significatifs(article.intitule)
+        if len(mots_article) < 3:
+            continue
+
+        meilleure_ligne_id = None
+        meilleur_score = 0
+
+        for ligne in lignes_prix:
+            mots_ligne = _mots_significatifs(
+                (ligne["designation_courte"] or "") + " " + (ligne["designation_longue"] or "")
+            )
+            score = len(mots_article & mots_ligne)
+            if score >= 3 and score > meilleur_score:
+                meilleur_score = score
+                meilleure_ligne_id = ligne["id"]
+
+        if meilleure_ligne_id:
+            try:
+                ligne_ref = LignePrixBibliotheque.objects.get(pk=meilleure_ligne_id)
+                article.ligne_prix_reference = ligne_ref
+                article.save(update_fields=["ligne_prix_reference"])
+                liaisons_creees += 1
+            except LignePrixBibliotheque.DoesNotExist:
+                pass
+
+    return Response({
+        "liaisons_creees": liaisons_creees,
+        "articles_traites": articles_traites,
+    })
 
 
 @api_view(["POST"])

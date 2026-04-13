@@ -179,7 +179,7 @@ def _valeur_fusion_piece(piece: PieceEcrite, nom: str) -> str:
         "responsable_projet": projet.responsable.nom_complet if projet.responsable else "",
         "date_generation": timezone.localtime().strftime("%d/%m/%Y"),
         "lot_intitule": lot.intitule if lot else "",
-        "lot_numero": str(lot.numero) if lot else "",
+        "lot_numero": str(lot.code) if lot else "",
         "redacteur_nom": utilisateur.nom_complet if utilisateur else "",
         "piece_intitule": piece.intitule,
         "modele_libelle": piece.modele.libelle if piece.modele_id else "",
@@ -1102,10 +1102,10 @@ def generer_cctp_depuis_bibliotheque(
 
     # Récupérer les lots dans l'ordre
     lots = LotCCTP.objects.filter(
-        numero__in=lots_numeros, est_actif=True
+        code__in=lots_numeros, est_actif=True
     ).prefetch_related(
         "chapitres__prescriptions"
-    ).order_by("ordre", "numero")
+    ).order_by("ordre", "code")
 
     # Construire le document Word
     document = DocumentWord()
@@ -1132,7 +1132,7 @@ def generer_cctp_depuis_bibliotheque(
     exclues_ids = set(str(i) for i in prescriptions_exclues_ids)
 
     for lot in lots:
-        document.add_heading(f"LOT {lot.numero} — {lot.intitule.upper()}", level=1)
+        document.add_heading(f"LOT {lot.code} — {lot.intitule.upper()}", level=1)
 
         for chapitre in lot.chapitres.all().order_by("ordre"):
             document.add_heading(f"{chapitre.numero} — {chapitre.intitule}", level=2)

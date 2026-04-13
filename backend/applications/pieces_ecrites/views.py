@@ -426,6 +426,41 @@ def vue_importer_fichier_word_editeur(request):
     return Response(resultat)
 
 
+class VueLotCCTPListeCreation(generics.ListCreateAPIView):
+    """Liste et création des lots CCTP."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LotCCTPSerialiseur
+
+    def get_queryset(self):
+        inclure_inactifs = self.request.query_params.get("inclure_inactifs") == "1"
+        qs = LotCCTP.objects.prefetch_related("chapitres__prescriptions")
+        if not inclure_inactifs:
+            qs = qs.filter(est_actif=True)
+        return qs
+
+    def perform_create(self, serializer):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Seul un super-administrateur peut créer un lot CCTP.")
+        serializer.save()
+
+
+class VueLotCCTPDetail(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, modification et suppression d'un lot CCTP."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LotCCTPSerialiseur
+    queryset = LotCCTP.objects.prefetch_related("chapitres__prescriptions")
+
+    def perform_update(self, serializer):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Seul un super-administrateur peut modifier un lot CCTP.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Seul un super-administrateur peut supprimer un lot CCTP.")
+        instance.delete()
+
+
 class VueListeLotsTypesCCTP(generics.ListAPIView):
     """Liste tous les lots CCTP disponibles avec leurs chapitres."""
     permission_classes = [permissions.IsAuthenticated]
@@ -444,7 +479,7 @@ class VueListePrescriptionsLot(generics.ListAPIView):
         lot_numero = self.kwargs.get("lot_numero")
         qs = PrescriptionCCTP.objects.filter(est_actif=True)
         if lot_numero:
-            qs = qs.filter(lot__numero=lot_numero)
+            qs = qs.filter(lot__code=lot_numero)
         type_p = self.request.query_params.get("type")
         if type_p:
             qs = qs.filter(type_prescription=type_p)

@@ -179,6 +179,7 @@ CELERY_TASK_ROUTES = {
     "applications.economie.taches.*": {"queue": "calculs"},
     "applications.pieces_ecrites.taches.*": {"queue": "documents"},
     "applications.parametres.taches.*": {"queue": "principale"},
+    "bibliotheque.*": {"queue": "calculs"},
 }
 
 # ============================================================

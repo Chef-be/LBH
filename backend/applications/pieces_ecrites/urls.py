@@ -16,6 +16,8 @@ urlpatterns = [
     # Bibliothèque de prescriptions CCTP — lots et générateur
     path("lots/", views.VueListeLotsTypesCCTP.as_view(), name="lots-cctp"),
     path("lots/<str:lot_numero>/prescriptions/", views.VueListePrescriptionsLot.as_view(), name="prescriptions-lot"),
+    path("lots-cctp/", views.VueLotCCTPListeCreation.as_view(), name="lots-cctp-liste"),
+    path("lots-cctp/<uuid:pk>/", views.VueLotCCTPDetail.as_view(), name="lots-cctp-detail"),
     path("generer-cctp/", views.vue_generer_cctp_multi_lots, name="generer-cctp"),
 
     # Bibliothèque d'articles CCTP

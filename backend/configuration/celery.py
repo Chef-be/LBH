@@ -22,7 +22,8 @@ application_celery = Celery("plateforme_lbh")
 application_celery.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Découverte automatique des tâches dans toutes les applications Django installées
-application_celery.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+# Le projet utilise "taches" au lieu du nom par défaut "tasks"
+application_celery.autodiscover_tasks(lambda: settings.INSTALLED_APPS, related_name="taches")
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ urlpatterns = [
     path("importer-fichiers/", views.vue_importer_bordereaux_fichiers, name="bibliotheque-importer-fichiers"),
     path("importer-prix-construction/", views.vue_importer_prix_construction, name="bibliotheque-importer-prix-construction"),
     path("recalculer-tous/", views.vue_recalculer_bibliotheque, name="bibliotheque-recalculer-tous"),
+    path("recalcul-progression/<str:tache_id>/", views.vue_progression_recalcul, name="bibliotheque-progression-recalcul"),
+    path("lier-auto/", views.vue_lier_auto_prix_articles, name="lier-auto-prix-articles"),
     path("vider/", views.vue_vider_bibliotheque, name="bibliotheque-vider"),
 
     # Bibliothèque — détail et actions
