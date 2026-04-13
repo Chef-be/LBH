@@ -183,8 +183,10 @@ def _discovery_urlsrc(extension: str) -> str:
 
 
 def construire_url_editeur_collabora_document(wopi_src: str, access_token: str, extension: str) -> str:
-    # access_token n'est PAS inclus dans l'URL — il doit être transmis uniquement via le corps
-    # du formulaire HTML (champ caché access_token). L'inclure dans l'URL amène Collabora 25.04
-    # à l'intégrer dans le chemin WebSocket WOPISrc, produisant "Invalid URI []".
+    # access_token est inclus dans l'URL afin que le JS de cool.html puisse le lire et
+    # l'insérer dans le chemin WebSocket (/cool/{WOPISrc+token}/ws).
+    # Il est AUSSI transmis dans le corps du formulaire HTML (POST) pour que Collabora
+    # l'utilise lors des appels GetFile/PutFile.
     urlsrc = _discovery_urlsrc(extension.lstrip("."))
-    return f"{urlsrc}WOPISrc={urllib_parse.quote(wopi_src, safe='')}&lang=fr"
+    token_encode = urllib_parse.quote(access_token, safe="") if access_token else ""
+    return f"{urlsrc}WOPISrc={urllib_parse.quote(wopi_src, safe='')}&lang=fr&access_token={token_encode}&access_token_ttl=28800000"

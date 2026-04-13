@@ -9,6 +9,7 @@ urlpatterns = [
     path("modeles/<uuid:pk>/", views.VueDetailModeleDocument.as_view(), name="modele-document-detail"),
     path("modeles/<uuid:pk>/session-bureautique/", views.vue_modele_document_session_bureautique, name="modele-document-session-bureautique"),
     path("wopi/modeles/<uuid:pk>/", views.vue_modele_document_wopi_fichier, name="modele-document-wopi-fichier"),
+    path("wopi/modeles/<uuid:pk>", views.vue_modele_document_wopi_fichier),  # sans slash final (CheckFileInfo depuis Collabora)
     path("wopi/modeles/<uuid:pk>/contents", views.vue_modele_document_wopi_contenu, name="modele-document-wopi-contenu"),
     path("editeur/televersement-image/", views.vue_televerser_image_editeur, name="pieces-ecrites-editeur-televersement-image"),
     path("editeur/importer-word/", views.vue_importer_fichier_word_editeur, name="pieces-ecrites-editeur-importer-word"),

@@ -18,6 +18,7 @@ urlpatterns = [
     path("<uuid:pk>/", views.VueDetailDocument.as_view(), name="document-detail"),
     path("<uuid:pk>/session-bureautique/", views.vue_document_session_bureautique, name="document-session-bureautique"),
     path("<uuid:pk>/wopi/", views.vue_document_wopi_fichier, name="document-wopi-fichier"),
+    path("<uuid:pk>/wopi", views.vue_document_wopi_fichier),  # sans slash final (CheckFileInfo depuis Collabora)
     path("<uuid:pk>/wopi/contents", views.vue_document_wopi_contenu, name="document-wopi-contenu"),
     path("<uuid:pk>/valider/", views.vue_valider_document, name="document-valider"),
     path("<uuid:pk>/nouvelle-version/", views.vue_nouvelle_version, name="document-nouvelle-version"),
