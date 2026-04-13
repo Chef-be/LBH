@@ -126,7 +126,7 @@ export default function PageAdminCCTP() {
   };
 
   const supprimerLot = async (lot: LotCCTP) => {
-    if (!window.confirm(`Supprimer le lot "${lot.code} — ${lot.intitule}" ?\n\nSes articles et prescriptions seront désassociés.`)) return;
+    if (!window.confirm(`Supprimer le corps d'état "${lot.code} — ${lot.intitule}" ?\n\nSes articles CCTP seront désassociés.`)) return;
     setErreur(null);
     try {
       await api.supprimer(`/api/pieces-ecrites/lots-cctp/${lot.id}/`);
@@ -187,12 +187,11 @@ export default function PageAdminCCTP() {
   return (
     <div className="space-y-6">
       <EntetePageAdmin
-        titre="CCTP — Lots & Articles"
-        description="Gestion des lots CCTP, articles, prescriptions et normes associées."
+        titre="CCTP — Corps d'état & Articles"
+        description="Gestion des corps d'état (lots CCTP) et des articles de prescription technique."
         statistiques={[
-          { libelle: "Lots CCTP", valeur: lots.length },
-          { libelle: "Articles", valeur: lots.reduce((s, l) => s + (l.nb_articles ?? 0), 0) },
-          { libelle: "Prescriptions", valeur: lots.reduce((s, l) => s + (l.nb_prescriptions ?? 0), 0) },
+          { libelle: "Corps d'état", valeur: lots.length },
+          { libelle: "Articles CCTP", valeur: lots.reduce((s, l) => s + (l.nb_articles ?? 0), 0) },
         ]}
         actions={(
           <div className="flex gap-2">
@@ -225,8 +224,8 @@ export default function PageAdminCCTP() {
 
       {/* Liste des lots */}
       <CarteSectionAdmin
-        titre={`${lotsFiltrés.length} lot${lotsFiltrés.length > 1 ? "s" : ""} CCTP`}
-        description="Cliquez sur un lot pour consulter ses articles et prescriptions."
+        titre={`${lotsFiltrés.length} corps d'état`}
+        description="Cliquez sur un corps d'état pour consulter ses articles CCTP."
       >
         {chargement ? (
           <div className="py-12 text-center text-sm text-slate-400">Chargement…</div>
@@ -254,8 +253,7 @@ export default function PageAdminCCTP() {
                       <p className="text-sm font-medium text-slate-800 truncate">{lot.intitule}</p>
                     </div>
                     <p className="mt-0.5 text-xs text-slate-400">
-                      {lot.nb_articles ?? 0} article{(lot.nb_articles ?? 0) > 1 ? "s" : ""} ·{" "}
-                      {lot.nb_prescriptions ?? 0} prescription{(lot.nb_prescriptions ?? 0) > 1 ? "s" : ""}
+                      {lot.nb_articles ?? 0} article{(lot.nb_articles ?? 0) > 1 ? "s" : ""} CCTP
                     </p>
                   </div>
 

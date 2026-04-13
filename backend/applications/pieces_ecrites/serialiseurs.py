@@ -168,18 +168,22 @@ class ChapitrePrescripSerialiseur(serializers.ModelSerializer):
 class LotCCTPSerialiseur(serializers.ModelSerializer):
     chapitres = ChapitrePrescripSerialiseur(many=True, read_only=True)
     nb_prescriptions = serializers.SerializerMethodField()
+    nb_articles = serializers.SerializerMethodField()
 
     class Meta:
         model = LotCCTP
         fields = [
             "id", "code", "intitule", "description",
             "normes_principales", "est_actif", "ordre",
-            "nb_prescriptions", "chapitres",
+            "nb_prescriptions", "nb_articles", "chapitres",
         ]
         read_only_fields = ["id"]
 
     def get_nb_prescriptions(self, obj):
         return obj.prescriptions.filter(est_actif=True).count()
+
+    def get_nb_articles(self, obj):
+        return obj.articles.filter(est_dans_bibliotheque=True).count()
 
 
 class GenerateurCCTPCreationSerialiseur(serializers.Serializer):

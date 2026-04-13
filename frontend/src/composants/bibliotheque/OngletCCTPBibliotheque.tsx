@@ -55,7 +55,8 @@ interface ArticleCCTP {
   code_reference: string;
   intitule: string;
   lot?: string | null;
-  corps_etat?: string | null;
+  lot_code?: string | null;
+  lot_intitule?: string | null;
   ligne_prix_reference: string | null;
   source_url: string;
   date_modification: string;
@@ -552,8 +553,8 @@ function SousOngletArticles() {
             <thead>
               <tr className="border-b border-slate-100 text-xs text-slate-500">
                 <th className="text-left py-2 pr-4 font-medium">Intitulé</th>
-                <th className="text-left py-2 pr-4 font-medium">Lot</th>
                 <th className="text-left py-2 pr-4 font-medium">Corps d&apos;état</th>
+                <th className="text-left py-2 pr-4 font-medium">Chapitre</th>
                 <th className="text-left py-2 pr-4 font-medium">Ligne de prix liée</th>
                 <th className="text-right py-2 font-medium">Actions</th>
               </tr>
@@ -568,10 +569,12 @@ function SousOngletArticles() {
                     )}
                   </td>
                   <td className="py-3 pr-4 text-xs text-slate-500">
-                    {article.chapitre || "—"}
+                    {article.lot_code
+                      ? <span><span className="font-mono mr-1">{article.lot_code}</span>{article.lot_intitule || ""}</span>
+                      : "—"}
                   </td>
                   <td className="py-3 pr-4 text-xs text-slate-500">
-                    {article.corps_etat || "—"}
+                    {article.chapitre || "—"}
                   </td>
                   <td className="py-3 pr-4">
                     {article.ligne_prix_reference ? (
@@ -945,7 +948,7 @@ function SousOngletLots() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">
-          Gérer les lots CCTP utilisés dans les prescriptions et articles.
+          Gérer les corps d&apos;état (lots CCTP) utilisés pour classifier les articles.
         </p>
         <button
           type="button"
@@ -1070,15 +1073,14 @@ function SousOngletLots() {
 // Composant principal avec 3 sous-onglets
 // ---------------------------------------------------------------------------
 
-type SousOngletCCTP = "articles" | "prescriptions" | "lots";
+type SousOngletCCTP = "articles" | "lots";
 
 export function OngletCCTPBibliotheque() {
   const [sousOnglet, setSousOnglet] = useState<SousOngletCCTP>("articles");
 
   const onglets: { val: SousOngletCCTP; lib: string; icone: React.ReactNode }[] = [
     { val: "articles", lib: "Articles CCTP", icone: <FileText className="h-3.5 w-3.5" /> },
-    { val: "prescriptions", lib: "Prescriptions", icone: <BookOpen className="h-3.5 w-3.5" /> },
-    { val: "lots", lib: "Lots", icone: <Tag className="h-3.5 w-3.5" /> },
+    { val: "lots", lib: "Corps d\u2019état (lots)", icone: <Tag className="h-3.5 w-3.5" /> },
   ];
 
   return (
@@ -1107,7 +1109,6 @@ export function OngletCCTPBibliotheque() {
 
       {/* Contenu du sous-onglet actif */}
       {sousOnglet === "articles" && <SousOngletArticles />}
-      {sousOnglet === "prescriptions" && <SousOngletPrescriptions />}
       {sousOnglet === "lots" && <SousOngletLots />}
     </div>
   );
