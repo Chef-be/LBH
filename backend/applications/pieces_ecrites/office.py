@@ -148,8 +148,14 @@ def supprimer_verrou_modele(modele: ModeleDocument):
 
 
 def _discovery_urlsrc(extension: str) -> str:
-    url_base = getattr(settings, "COLLABORA_PUBLIC_URL", "https://office.lbh-economiste.com").rstrip("/")
-    with urllib_request.urlopen(f"{url_base}/hosting/discovery", timeout=10) as reponse:
+    """
+    Interroge la discovery WOPI via l'URL interne Docker, puis remplace le préfixe
+    interne (https://lbh-collabora:9980) par l'URL publique accessible depuis le navigateur.
+    """
+    url_interne = getattr(settings, "COLLABORA_URL", "http://lbh-collabora:9980").rstrip("/")
+    url_publique = getattr(settings, "COLLABORA_PUBLIC_URL", "https://lbh-economiste.com/collabora").rstrip("/")
+
+    with urllib_request.urlopen(f"{url_interne}/hosting/discovery", timeout=10) as reponse:
         contenu = reponse.read()
 
     racine = ElementTree.fromstring(contenu)
@@ -157,11 +163,16 @@ def _discovery_urlsrc(extension: str) -> str:
     for action in racine.findall(".//action"):
         ext = action.attrib.get("ext")
         nom = action.attrib.get("name")
-        urlsrc = action.attrib.get("urlsrc")
-        if ext == extension and urlsrc:
-            if nom == "edit":
-                return urlsrc
-            candidats.append(urlsrc)
+        urlsrc_brut = action.attrib.get("urlsrc", "")
+        if not (ext == extension and urlsrc_brut):
+            continue
+        # Remplacer le préfixe interne par l'URL publique Nginx
+        # ex : https://lbh-collabora:9980/browser/... → https://lbh-economiste.com/collabora/browser/...
+        urlsrc = urlsrc_brut.replace("https://lbh-collabora:9980", url_publique)
+        urlsrc = urlsrc.replace("http://lbh-collabora:9980", url_publique)
+        if nom == "edit":
+            return urlsrc
+        candidats.append(urlsrc)
     if candidats:
         return candidats[0]
     raise RuntimeError(f"Aucune action Collabora disponible pour l'extension {extension}.")

@@ -21,6 +21,9 @@ PREFIXE_CONTENEURS_SQL = PREFIXE_CONTENEURS.replace("-", "_") or "lbh"
 URL_BASE = config("URL_BASE", default="")
 COLLABORA_PUBLIC_URL = config("COLLABORA_PUBLIC_URL", default="https://lbh-economiste.com/collabora")
 COLLABORA_URL = config("COLLABORA_URL", default="http://lbh-collabora:9980")
+# URL de base utilisée pour construire les WOPISrc que Collabora rappelle.
+# Doit être joignable depuis le conteneur lbh-collabora (URL interne backend ou publique).
+WOPI_BASE_URL = config("WOPI_BASE_URL", default="http://lbh-backend:8000")
 WOPI_SECRET = config("WOPI_SECRET", default="")
 
 # ============================================================

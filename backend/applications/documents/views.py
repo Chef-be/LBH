@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+from django.conf import settings
 from django.http import HttpResponse
 from django.urls import reverse
 from rest_framework import generics, permissions, status, filters
@@ -324,7 +325,9 @@ def vue_document_session_bureautique(request, pk):
 
     assurer_fichier_bureautique_document(document)
     jeton = creer_jeton_wopi_document(document, request.user)
-    wopi_src = request.build_absolute_uri(reverse("document-wopi-fichier", kwargs={"pk": document.pk}))
+    wopi_base = getattr(settings, "WOPI_BASE_URL", "").rstrip("/")
+    chemin_wopi = reverse("document-wopi-fichier", kwargs={"pk": document.pk})
+    wopi_src = f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)
     extension = extension_bureautique_document(document)
     url_editeur = construire_url_editeur_collabora_document(wopi_src, jeton, extension)
 

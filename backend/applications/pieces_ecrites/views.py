@@ -112,9 +112,11 @@ def vue_modele_document_session_bureautique(request, pk):
     assurer_gabarit_bureautique(modele)
 
     jeton = creer_jeton_wopi_modele(modele, request.user)
-    wopi_src = request.build_absolute_uri(
-        reverse("modele-document-wopi-fichier", kwargs={"pk": modele.pk})
-    )
+    # WOPISrc : URL que Collabora appellera pour lire/écrire le fichier.
+    # On utilise WOPI_BASE_URL (URL interne backend joignable par Collabora).
+    wopi_base = getattr(settings, "WOPI_BASE_URL", "").rstrip("/")
+    chemin_wopi = reverse("modele-document-wopi-fichier", kwargs={"pk": modele.pk})
+    wopi_src = f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)
     extension = extension_gabarit_modele(modele)
     url_editeur = construire_url_editeur_collabora(wopi_src, jeton, extension)
 
