@@ -367,6 +367,72 @@ export default function PageDetailDocument({
   const erreursAnalyse = Array.isArray(analyse.erreurs) ? analyse.erreurs as Array<Record<string, unknown>> : [];
   const typeDetecte = classification.type_document as Record<string, unknown> | undefined;
   const projetSuggere = suggestions.projet as Record<string, unknown> | undefined;
+  // Éditeur plein écran quand la session Collabora est active
+  if (editeurOuvert && sessionCollabora) {
+    return (
+      <div className="-m-6 flex h-[calc(100vh-56px)] flex-col overflow-hidden">
+        {/* Barre compacte */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setEditeurOuvert(false)}
+              className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors shrink-0"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Retour</span>
+            </button>
+            <div className="h-4 w-px bg-slate-200 shrink-0" />
+            {sessionCollabora.type_bureautique === "tableur"
+              ? <FileSpreadsheet className="w-4 h-4 shrink-0 text-emerald-500" />
+              : <FileText className="w-4 h-4 shrink-0 text-blue-500" />}
+            <span className="truncate text-sm font-semibold text-slate-800">{doc.reference}</span>
+            <span className="hidden sm:block truncate text-sm text-slate-500">— {doc.intitule}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">Sauvegarde auto</span>
+            <button
+              type="button"
+              onClick={ouvrirCollabora}
+              disabled={chargementCollabora}
+              className="btn-secondaire py-1.5 text-xs"
+              title="Relancer l'éditeur"
+            >
+              <RefreshCw size={13} className={chargementCollabora ? "animate-spin" : ""} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditeurOuvert(false)}
+              className="text-slate-400 hover:text-slate-600 transition-colors"
+              title="Fermer l'éditeur"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        {/* Formulaire WOPI caché */}
+        <form
+          ref={formulaireCollaboraRef}
+          action={sessionCollabora.url_editeur}
+          method="post"
+          target={cibleCollabora}
+          className="hidden"
+        >
+          <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
+          <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
+        </form>
+        {/* iframe plein écran */}
+        <iframe
+          name={cibleCollabora}
+          src="about:blank"
+          title={`Éditeur ${doc.intitule}`}
+          className="flex-1 w-full border-0"
+          allow="clipboard-read; clipboard-write; fullscreen"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Navigation */}
@@ -518,43 +584,6 @@ export default function PageDetailDocument({
           </div>
         </div>
       </div>
-
-      {/* Éditeur Collabora Online */}
-      {editeurOuvert && sessionCollabora && (
-        <div className="carte overflow-hidden p-0">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-              {sessionCollabora.type_bureautique === "tableur"
-                ? <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-                : <FileText className="w-4 h-4 text-blue-500" />}
-              <span>{sessionCollabora.nom_fichier}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">Sauvegarde automatique</span>
-              <button type="button" onClick={() => setEditeurOuvert(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-          <form
-            ref={formulaireCollaboraRef}
-            action={sessionCollabora.url_editeur}
-            method="post"
-            target={cibleCollabora}
-            className="hidden"
-          >
-            <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
-            <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
-          </form>
-          <iframe
-            name={cibleCollabora}
-            src="about:blank"
-            title={`Éditeur ${doc.intitule}`}
-            className="h-[820px] w-full border-0"
-            allow="clipboard-read; clipboard-write"
-          />
-        </div>
-      )}
 
       {modeEdition && (
         <div className="carte p-6 space-y-4">

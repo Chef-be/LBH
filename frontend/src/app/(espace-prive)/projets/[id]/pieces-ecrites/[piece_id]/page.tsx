@@ -709,6 +709,69 @@ export default function PageDetailPieceEcrite({
     },
   }[etatSauvegardeContenu];
 
+  // Éditeur Collabora plein écran quand la session est active
+  if (onglet === "collabora" && sessionCollabora) {
+    return (
+      <div className="-m-6 flex h-[calc(100vh-56px)] flex-col overflow-hidden">
+        {/* Barre compacte */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => { setOnglet("editeur"); }}
+              className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors shrink-0"
+            >
+              <ChevronRight className="w-4 h-4 rotate-180" />
+              <span className="hidden sm:inline">Retour</span>
+            </button>
+            <div className="h-4 w-px bg-slate-200 shrink-0" />
+            <FileText className="w-4 h-4 shrink-0 text-indigo-500" />
+            <span className="truncate text-sm font-semibold text-slate-800">{piece.intitule}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">Sauvegarde auto</span>
+            <button
+              type="button"
+              onClick={ouvrirCollabora}
+              disabled={chargementCollabora}
+              className="btn-secondaire py-1.5 text-xs"
+              title="Recharger l'éditeur"
+            >
+              <RefreshCw size={13} className={chargementCollabora ? "animate-spin" : ""} />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSessionCollabora(null); setOnglet("editeur"); }}
+              className="text-slate-400 hover:text-slate-600 transition-colors"
+              title="Fermer l'éditeur"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        {/* Formulaire WOPI caché */}
+        <form
+          ref={formulaireCollaboraRef}
+          action={sessionCollabora.url_editeur}
+          method="post"
+          target={cibleIframeCollabora}
+          className="hidden"
+        >
+          <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
+          <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
+        </form>
+        {/* iframe plein écran */}
+        <iframe
+          name={cibleIframeCollabora}
+          src="about:blank"
+          title="Éditeur Collabora Online"
+          className="flex-1 w-full border-0"
+          allow="clipboard-read; clipboard-write; fullscreen"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Fil d'Ariane */}

@@ -11,6 +11,8 @@ import {
   FileText,
   Info,
   Layers,
+  PanelRight,
+  PanelRightClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -195,6 +197,7 @@ export default function PageAdministrationModelesDocuments() {
   const [nouveauModele, setNouveauModele] = useState(false);
   const [groupeOuvert, setGroupeOuvert] = useState<string>("Projet");
   const [panneauDroit, setPanneauDroit] = useState<"proprietes" | "variables" | "gabarit">("variables");
+  const [panneauDroitVisible, setPanneauDroitVisible] = useState(true);
 
   // -------------------------------------------------------------------------
   // Chargement
@@ -241,6 +244,11 @@ export default function PageAdministrationModelesDocuments() {
   useEffect(() => {
     if (!sessionBureautique || !formulaireBureautiqueRef.current) return;
     formulaireBureautiqueRef.current.submit();
+  }, [sessionBureautique]);
+
+  // Masquer le panneau droit dès que l'éditeur s'ouvre pour maximiser l'espace bureautique
+  useEffect(() => {
+    if (sessionBureautique) setPanneauDroitVisible(false);
   }, [sessionBureautique]);
 
   // -------------------------------------------------------------------------
@@ -393,7 +401,7 @@ export default function PageAdministrationModelesDocuments() {
   const totalVariables = VARIABLES_SYSTEME.reduce((acc, g) => acc + g.variables.length, 0) + edition.variables_fusion.length;
 
   return (
-    <div className="flex h-[calc(100vh-72px)] flex-col overflow-hidden">
+    <div className="-m-6 flex h-[calc(100vh-56px)] flex-col overflow-hidden">
       {/* ------------------------------------------------------------------ */}
       {/* Barre supérieure                                                     */}
       {/* ------------------------------------------------------------------ */}
@@ -523,6 +531,14 @@ export default function PageAdministrationModelesDocuments() {
                     )}
                     {chargementBureautique ? "Connexion…" : estBureautiqueOuvert ? "Relancer" : `Ouvrir ${libelleEditeur(edition.type_document)}`}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setPanneauDroitVisible((v) => !v)}
+                    className="btn-secondaire py-1.5 text-xs"
+                    title={panneauDroitVisible ? "Masquer le panneau" : "Afficher le panneau"}
+                  >
+                    {panneauDroitVisible ? <PanelRightClose size={13} /> : <PanelRight size={13} />}
+                  </button>
                 </div>
               </>
             ) : (
@@ -591,7 +607,7 @@ export default function PageAdministrationModelesDocuments() {
                   src="about:blank"
                   title={`Éditeur ${edition.libelle || edition.code}`}
                   className="h-full w-full border-0"
-                  allow="clipboard-read; clipboard-write"
+                  allow="clipboard-read; clipboard-write; fullscreen"
                 />
               </>
             )}
@@ -601,7 +617,7 @@ export default function PageAdministrationModelesDocuments() {
         {/* ============================================================== */}
         {/* Panneau droit — propriétés + variables                          */}
         {/* ============================================================== */}
-        <aside className="flex w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
+        {panneauDroitVisible && <aside className="flex w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
           {/* Navigation du panneau */}
           <div className="flex shrink-0 border-b border-slate-200">
             {(["proprietes", "variables", "gabarit"] as const).map((p) => (
@@ -919,7 +935,7 @@ export default function PageAdministrationModelesDocuments() {
               </button>
             </div>
           )}
-        </aside>
+        </aside>}
       </div>
     </div>
   );
