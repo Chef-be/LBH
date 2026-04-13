@@ -33,6 +33,9 @@ urlpatterns = [
     path("<uuid:pk>/proposition-cctp/", views.vue_proposition_article_cctp, name="piece-ecrite-proposition-cctp"),
     path("<uuid:pk>/generer-modele/", views.vue_generer_piece_depuis_modele, name="piece-ecrite-generer-modele"),
     path("<uuid:pk>/export/<str:format_sortie>/", views.vue_exporter_piece_ecrite, name="piece-ecrite-export"),
+    path("<uuid:pk>/renumeroter/", views.vue_renumeroter_articles, name="piece-ecrite-renumeroter"),
+    path("<uuid:pk>/exporter-dpgf/", views.vue_exporter_dpgf, name="piece-ecrite-exporter-dpgf"),
+    path("<uuid:pk>/exporter-bpu/", views.vue_exporter_bpu, name="piece-ecrite-exporter-bpu"),
     path("<uuid:piece_id>/articles/", views.VueListeArticlesCCTP.as_view(), name="piece-articles-liste"),
     path("<uuid:piece_id>/articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="piece-article-detail"),
 ]

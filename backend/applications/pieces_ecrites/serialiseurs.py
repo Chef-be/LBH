@@ -60,18 +60,23 @@ class ModeleDocumentSerialiseur(serializers.ModelSerializer):
 
 
 class ArticleCCTPSerialiseur(serializers.ModelSerializer):
+    lot_code = serializers.CharField(source="lot.code", read_only=True, allow_null=True)
+    lot_intitule = serializers.CharField(source="lot.intitule", read_only=True, allow_null=True)
+
     class Meta:
         model = ArticleCCTP
         fields = [
-            "id", "piece_ecrite", "chapitre", "numero_article",
-            "code_reference", "intitule", "corps_article",
+            "id", "piece_ecrite", "lot", "lot_code", "lot_intitule",
+            "chapitre", "numero_article", "code_reference",
+            "intitule", "corps_article",
             "source", "source_url", "ligne_prix_reference",
             "normes_applicables", "est_dans_bibliotheque", "tags",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "date_creation", "date_modification"]
+        read_only_fields = ["id", "lot_code", "lot_intitule", "date_creation", "date_modification"]
         extra_kwargs = {
             "piece_ecrite": {"required": False, "allow_null": True},
+            "lot": {"required": False, "allow_null": True},
         }
 
 

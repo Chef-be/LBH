@@ -158,7 +158,13 @@ def _discovery_urlsrc(extension: str) -> str:
     """
     Interroge la discovery WOPI via l'URL interne Docker, puis remplace le préfixe
     interne par l'URL publique accessible depuis le navigateur.
+    Le résultat est mis en cache Redis 5 minutes pour éviter un appel HTTP à chaque ouverture.
     """
+    cle_cache = f"collabora:discovery:urlsrc:{extension}"
+    resultat_cache = cache.get(cle_cache)
+    if resultat_cache:
+        return resultat_cache
+
     url_interne = getattr(settings, "COLLABORA_URL", "http://lbh-collabora:9980").rstrip("/")
     url_publique = getattr(settings, "COLLABORA_PUBLIC_URL", "https://lbh-economiste.com/collabora").rstrip("/")
 
@@ -175,9 +181,11 @@ def _discovery_urlsrc(extension: str) -> str:
         urlsrc = urlsrc_brut.replace("https://lbh-collabora:9980", url_publique)
         urlsrc = urlsrc.replace("http://lbh-collabora:9980", url_publique)
         if nom == "edit":
+            cache.set(cle_cache, urlsrc, 300)
             return urlsrc
         candidats.append(urlsrc)
     if candidats:
+        cache.set(cle_cache, candidats[0], 300)
         return candidats[0]
     raise RuntimeError(f"Aucune action Collabora disponible pour l'extension {extension}.")
 

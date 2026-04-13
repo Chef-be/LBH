@@ -30,10 +30,13 @@ from .office import (
 from .services import (
     construire_donnees_fusion_piece,
     exporter_piece_ecrite,
+    exporter_articles_dpgf,
+    exporter_articles_bpu,
     generer_piece_depuis_modele,
     importer_fichier_word_en_html,
     proposer_article_cctp_assiste,
     regenerer_piece_ecrite,
+    renumeroter_articles_cctp,
     televerser_image_editeur,
 )
 from .serialiseurs import (
@@ -283,14 +286,21 @@ class VueDetailPieceEcrite(generics.RetrieveUpdateDestroyAPIView):
 class VueListeArticlesCCTP(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ArticleCCTPSerialiseur
-    filter_backends = [filters.SearchFilter]
-    search_fields = ["intitule", "corps_article", "chapitre"]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["intitule", "corps_article", "chapitre", "code_reference"]
+    ordering_fields = ["chapitre", "numero_article", "lot__code", "date_modification"]
+    ordering = ["chapitre", "numero_article"]
 
     def get_queryset(self):
         piece_id = self.kwargs.get("piece_id")
         if piece_id:
-            return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id)
-        return ArticleCCTP.objects.filter(est_dans_bibliotheque=True)
+            qs = ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot")
+        else:
+            qs = ArticleCCTP.objects.filter(est_dans_bibliotheque=True).select_related("lot")
+        lot_id = self.request.query_params.get("lot")
+        if lot_id:
+            qs = qs.filter(lot_id=lot_id)
+        return qs
 
     def perform_create(self, serializer):
         piece_id = self.kwargs.get("piece_id")
@@ -308,8 +318,8 @@ class VueDetailArticleCCTP(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         piece_id = self.kwargs.get("piece_id")
         if piece_id:
-            return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id)
-        return ArticleCCTP.objects.all()
+            return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot")
+        return ArticleCCTP.objects.select_related("lot").all()
 
 
 @api_view(["POST"])
@@ -525,3 +535,56 @@ def vue_generer_cctp_multi_lots(request):
         utilisateur=request.user,
     )
     return Response(PieceEcriteDetailSerialiseur(piece, context={"request": request}).data, status=201)
+
+
+# ---------------------------------------------------------------------------
+# A4 — Renumérotation automatique des articles CCTP
+# ---------------------------------------------------------------------------
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_renumeroter_articles(request, pk):
+    """Renumérotation automatique des articles CCTP selon la norme Widloecher & Cusant."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    nb = renumeroter_articles_cctp(piece)
+    return Response({"detail": f"{nb} article(s) renuméroté(s).", "nb_modifies": nb})
+
+
+# ---------------------------------------------------------------------------
+# A5 — Export DPGF / BPU
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_exporter_dpgf(request, pk):
+    """Exporte les articles CCTP au format DPGF (.xlsx)."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    from django.utils.text import slugify as _slugify
+    contenu = exporter_articles_dpgf(piece)
+    nom_fichier = f"DPGF_{_slugify(piece.intitule) or piece.pk}_{timezone.localtime():%Y%m%d}.xlsx"
+    reponse = FileResponse(
+        BytesIO(contenu),
+        as_attachment=True,
+        filename=nom_fichier,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    reponse["Content-Length"] = str(len(contenu))
+    return reponse
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_exporter_bpu(request, pk):
+    """Exporte les articles CCTP au format BPU (.xlsx)."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    from django.utils.text import slugify as _slugify
+    contenu = exporter_articles_bpu(piece)
+    nom_fichier = f"BPU_{_slugify(piece.intitule) or piece.pk}_{timezone.localtime():%Y%m%d}.xlsx"
+    reponse = FileResponse(
+        BytesIO(contenu),
+        as_attachment=True,
+        filename=nom_fichier,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    reponse["Content-Length"] = str(len(contenu))
+    return reponse

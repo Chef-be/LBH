@@ -1193,3 +1193,405 @@ def generer_cctp_depuis_bibliotheque(
     piece.save()
 
     return piece
+
+
+# ---------------------------------------------------------------------------
+# A4 — Renumérotation automatique des articles CCTP (Widloecher & Cusant)
+# ---------------------------------------------------------------------------
+
+def renumeroter_articles_cctp(piece: PieceEcrite) -> int:
+    """
+    Renumérotation automatique des articles d'une pièce CCTP selon la structure
+    Widloecher & Cusant (3e éd.) :
+      Partie I — Dispositions générales : I.1, I.2, I.3…
+      Partie II — Descriptif des ouvrages : II.{chapitre}.{rang} ou II.{rang}
+
+    Les articles sont regroupés par chapitre (champ `chapitre`).
+    Les chapitres vides ou « Dispositions générales » → Partie I.
+    Les autres chapitres → Partie II numérotés dans l'ordre d'apparition.
+
+    Retourne le nombre d'articles mis à jour.
+    """
+    from .models import ArticleCCTP
+
+    articles = list(
+        piece.articles.select_related("lot").order_by("chapitre", "numero_article", "date_creation")
+    )
+    if not articles:
+        return 0
+
+    # Séparer dispositions générales et descriptif
+    CHAPITRES_GENERAUX = {
+        "", "dispositions générales", "generalites", "généralités",
+        "objet du marché", "documents de référence", "normes applicables",
+        "prescriptions générales", "objet", "généralités et objet",
+    }
+
+    groupe_general: list[ArticleCCTP] = []
+    chapitres: dict[str, list[ArticleCCTP]] = {}
+
+    for article in articles:
+        cle = (article.chapitre or "").strip().lower()
+        if cle in CHAPITRES_GENERAUX:
+            groupe_general.append(article)
+        else:
+            chapitres.setdefault(article.chapitre or "Descriptif", []).append(article)
+
+    a_mettre_a_jour: list[ArticleCCTP] = []
+
+    # Partie I — Dispositions générales
+    for rang, article in enumerate(groupe_general, start=1):
+        nouveau_numero = f"I.{rang}"
+        if article.numero_article != nouveau_numero:
+            article.numero_article = nouveau_numero
+            a_mettre_a_jour.append(article)
+
+    # Partie II — Descriptif des ouvrages
+    for num_chap, (intitule_chapitre, liste_articles) in enumerate(chapitres.items(), start=1):
+        for rang, article in enumerate(liste_articles, start=1):
+            nouveau_numero = f"II.{num_chap}.{rang}"
+            if article.numero_article != nouveau_numero:
+                article.numero_article = nouveau_numero
+                a_mettre_a_jour.append(article)
+
+    if a_mettre_a_jour:
+        ArticleCCTP.objects.bulk_update(a_mettre_a_jour, ["numero_article"])
+
+    return len(a_mettre_a_jour)
+
+
+# ---------------------------------------------------------------------------
+# A5 — Export DPGF / BPU depuis les articles CCTP
+# ---------------------------------------------------------------------------
+
+def _styles_excel_dpgf(wb):
+    """Retourne un dict de styles nommés pour le DPGF/BPU."""
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side, numbers
+
+    fin_mince = Side(style="thin", color="C0C8D8")
+    bordure = Border(left=fin_mince, right=fin_mince, top=fin_mince, bottom=fin_mince)
+
+    return {
+        "entete": {
+            "font": Font(bold=True, color="FFFFFF", size=10),
+            "fill": PatternFill("solid", fgColor="2D4A8A"),
+            "alignment": Alignment(horizontal="center", vertical="center", wrap_text=True),
+            "border": bordure,
+        },
+        "lot": {
+            "font": Font(bold=True, color="FFFFFF", size=9),
+            "fill": PatternFill("solid", fgColor="4A6FA5"),
+            "alignment": Alignment(horizontal="left", vertical="center"),
+            "border": bordure,
+        },
+        "chapitre": {
+            "font": Font(bold=True, size=9, color="1E3A5F"),
+            "fill": PatternFill("solid", fgColor="D6E4F0"),
+            "alignment": Alignment(horizontal="left", vertical="center"),
+            "border": bordure,
+        },
+        "article": {
+            "font": Font(size=9),
+            "alignment": Alignment(horizontal="left", vertical="top", wrap_text=True),
+            "border": bordure,
+        },
+        "numero": {
+            "font": Font(size=9, bold=True, color="2D4A8A"),
+            "alignment": Alignment(horizontal="center", vertical="top"),
+            "border": bordure,
+        },
+        "montant": {
+            "font": Font(size=9),
+            "alignment": Alignment(horizontal="right", vertical="top"),
+            "border": bordure,
+            "number_format": "#,##0.00",
+        },
+        "total": {
+            "font": Font(bold=True, size=9),
+            "fill": PatternFill("solid", fgColor="EFF4FB"),
+            "alignment": Alignment(horizontal="right", vertical="center"),
+            "border": bordure,
+            "number_format": "#,##0.00",
+        },
+    }
+
+
+def _appliquer_style(cellule, style: dict):
+    from openpyxl.styles import Font, PatternFill, Alignment, Border
+    for attr, valeur in style.items():
+        if attr == "number_format":
+            cellule.number_format = valeur
+        else:
+            setattr(cellule, attr, valeur)
+
+
+def exporter_articles_dpgf(piece: PieceEcrite) -> bytes:
+    """
+    Génère un fichier DPGF (.xlsx) depuis les articles CCTP d'une pièce écrite.
+    Chaque article CCTP = une ligne DPGF avec : code, désignation, unité, quantité, PU, montant.
+    Les articles sont regroupés par lot CCTP puis par chapitre.
+    Compatible avec le BPU (désignation seule) et la DQE (avec quantités).
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    articles = list(
+        piece.articles.select_related("lot").order_by(
+            "lot__ordre", "lot__code", "chapitre", "numero_article"
+        )
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "DPGF"
+
+    styles = _styles_excel_dpgf(wb)
+
+    # Informations projet en en-tête
+    projet = piece.projet
+    ws.merge_cells("A1:F1")
+    titre = ws["A1"]
+    titre.value = f"DÉCOMPOSITION DU PRIX GLOBAL ET FORFAITAIRE — {piece.intitule.upper()}"
+    _appliquer_style(titre, {
+        "font": Font(bold=True, size=12, color="1E3A5F"),
+        "alignment": Alignment(horizontal="center", vertical="center"),
+    })
+    ws.row_dimensions[1].height = 20
+
+    ws.merge_cells("A2:F2")
+    sous_titre = ws["A2"]
+    lot_projet = piece.lot
+    sous_titre.value = (
+        f"Projet : {projet.reference} — {projet.intitule}"
+        + (f"  |  Lot : {lot_projet.numero} {lot_projet.intitule}" if lot_projet else "")
+        + f"  |  Date : {timezone.localtime().strftime('%d/%m/%Y')}"
+    )
+    _appliquer_style(sous_titre, {
+        "font": Font(size=9, color="4A6FA5"),
+        "alignment": Alignment(horizontal="center"),
+    })
+    ws.row_dimensions[2].height = 14
+
+    # En-têtes colonnes (ligne 4)
+    entetes = ["N°", "DÉSIGNATION DES OUVRAGES", "UNITÉ", "QUANTITÉ", "PRIX UNITAIRE HT (€)", "MONTANT HT (€)"]
+    largeurs = [12, 55, 10, 12, 20, 18]
+    for col, (libelle, largeur) in enumerate(zip(entetes, largeurs), start=1):
+        cellule = ws.cell(row=4, column=col, value=libelle)
+        _appliquer_style(cellule, styles["entete"])
+        ws.column_dimensions[get_column_letter(col)].width = largeur
+    ws.row_dimensions[4].height = 30
+
+    ligne = 5
+    lot_courant = None
+    chapitre_courant = None
+    premiere_ligne_lot = None
+    sommes_lots: list[tuple[int, int]] = []  # (ligne_debut, ligne_fin)
+
+    for article in articles:
+        lot_cctp = article.lot
+        lot_libelle = f"{lot_cctp.code} — {lot_cctp.intitule}" if lot_cctp else "Sans lot"
+
+        # Séparateur de lot
+        if lot_libelle != lot_courant:
+            if premiere_ligne_lot is not None:
+                # Total du lot précédent
+                ws.merge_cells(f"A{ligne}:E{ligne}")
+                ws.cell(row=ligne, column=1, value=f"Total {lot_courant}")
+                _appliquer_style(ws.cell(row=ligne, column=1), styles["total"])
+                cellule_total = ws.cell(row=ligne, column=6)
+                cellule_total.value = f"=SUM(F{premiere_ligne_lot}:F{ligne - 1})"
+                _appliquer_style(cellule_total, styles["total"])
+                sommes_lots.append((premiere_ligne_lot, ligne))
+                ligne += 1
+
+            ws.merge_cells(f"A{ligne}:F{ligne}")
+            cellule_lot = ws.cell(row=ligne, column=1, value=lot_libelle.upper())
+            _appliquer_style(cellule_lot, styles["lot"])
+            ws.row_dimensions[ligne].height = 18
+            premiere_ligne_lot = ligne + 1
+            lot_courant = lot_libelle
+            chapitre_courant = None
+            ligne += 1
+
+        # Séparateur de chapitre
+        chapitre = (article.chapitre or "").strip()
+        if chapitre and chapitre != chapitre_courant:
+            ws.merge_cells(f"A{ligne}:F{ligne}")
+            cellule_chap = ws.cell(row=ligne, column=1, value=chapitre)
+            _appliquer_style(cellule_chap, styles["chapitre"])
+            ws.row_dimensions[ligne].height = 16
+            chapitre_courant = chapitre
+            ligne += 1
+
+        # Ligne article
+        num = ws.cell(row=ligne, column=1, value=article.numero_article)
+        _appliquer_style(num, styles["numero"])
+
+        desig = ws.cell(row=ligne, column=2, value=article.intitule)
+        _appliquer_style(desig, styles["article"])
+
+        unite = ws.cell(row=ligne, column=3, value="")
+        _appliquer_style(unite, styles["article"])
+
+        qte = ws.cell(row=ligne, column=4, value=None)
+        _appliquer_style(qte, styles["montant"])
+
+        pu = ws.cell(row=ligne, column=5, value=None)
+        _appliquer_style(pu, styles["montant"])
+
+        montant = ws.cell(row=ligne, column=6, value=f"=D{ligne}*E{ligne}")
+        _appliquer_style(montant, styles["montant"])
+
+        ws.row_dimensions[ligne].height = 16
+        ligne += 1
+
+    # Total dernier lot
+    if premiere_ligne_lot is not None:
+        ws.merge_cells(f"A{ligne}:E{ligne}")
+        ws.cell(row=ligne, column=1, value=f"Total {lot_courant}")
+        _appliquer_style(ws.cell(row=ligne, column=1), styles["total"])
+        cellule_total = ws.cell(row=ligne, column=6)
+        cellule_total.value = f"=SUM(F{premiere_ligne_lot}:F{ligne - 1})"
+        _appliquer_style(cellule_total, styles["total"])
+        sommes_lots.append((premiere_ligne_lot, ligne))
+        ligne += 1
+
+    # Total général
+    if sommes_lots:
+        ligne += 1
+        ws.merge_cells(f"A{ligne}:E{ligne}")
+        total_gen = ws.cell(row=ligne, column=1, value="TOTAL GÉNÉRAL HT")
+        _appliquer_style(total_gen, {
+            "font": Font(bold=True, size=10, color="FFFFFF"),
+            "fill": PatternFill("solid", fgColor="1E3A5F"),
+            "alignment": Alignment(horizontal="right", vertical="center"),
+        })
+        formule = "+".join(f"F{r_fin}" for _, r_fin in sommes_lots)
+        cellule_tg = ws.cell(row=ligne, column=6, value=f"={formule}")
+        _appliquer_style(cellule_tg, {
+            "font": Font(bold=True, size=10, color="FFFFFF"),
+            "fill": PatternFill("solid", fgColor="1E3A5F"),
+            "alignment": Alignment(horizontal="right"),
+            "number_format": "#,##0.00",
+        })
+        ws.row_dimensions[ligne].height = 22
+
+    # Figer les volets (en-têtes)
+    ws.freeze_panes = "A5"
+
+    flux = BytesIO()
+    wb.save(flux)
+    return flux.getvalue()
+
+
+def exporter_articles_bpu(piece: PieceEcrite) -> bytes:
+    """
+    Génère un fichier BPU (.xlsx) depuis les articles CCTP d'une pièce écrite.
+    Chaque article CCTP = une ligne BPU avec :
+      code, désignation complète (intitulé + corps), unité, prix unitaire.
+    Le corps de l'article est inclus en note de bas de cellule pour le cahier des charges.
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    articles = list(
+        piece.articles.select_related("lot").order_by(
+            "lot__ordre", "lot__code", "chapitre", "numero_article"
+        )
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "BPU"
+
+    styles = _styles_excel_dpgf(wb)
+
+    projet = piece.projet
+    ws.merge_cells("A1:E1")
+    titre = ws["A1"]
+    titre.value = f"BORDEREAU DES PRIX UNITAIRES — {piece.intitule.upper()}"
+    _appliquer_style(titre, {
+        "font": Font(bold=True, size=12, color="1E3A5F"),
+        "alignment": Alignment(horizontal="center", vertical="center"),
+    })
+    ws.row_dimensions[1].height = 20
+
+    ws.merge_cells("A2:E2")
+    sous_titre = ws["A2"]
+    sous_titre.value = (
+        f"Projet : {projet.reference} — {projet.intitule}"
+        f"  |  Date : {timezone.localtime().strftime('%d/%m/%Y')}"
+    )
+    _appliquer_style(sous_titre, {
+        "font": Font(size=9, color="4A6FA5"),
+        "alignment": Alignment(horizontal="center"),
+    })
+    ws.row_dimensions[2].height = 14
+
+    entetes = ["N°", "DÉSIGNATION ET CAHIER DES CHARGES", "UNITÉ", "PRIX UNITAIRE HT (€)", "OBSERVATIONS"]
+    largeurs = [12, 70, 10, 20, 25]
+    for col, (libelle, largeur) in enumerate(zip(entetes, largeurs), start=1):
+        cellule = ws.cell(row=4, column=col, value=libelle)
+        _appliquer_style(cellule, styles["entete"])
+        ws.column_dimensions[get_column_letter(col)].width = largeur
+    ws.row_dimensions[4].height = 30
+
+    ligne = 5
+    lot_courant = None
+    chapitre_courant = None
+
+    for article in articles:
+        lot_cctp = article.lot
+        lot_libelle = f"{lot_cctp.code} — {lot_cctp.intitule}" if lot_cctp else "Sans lot"
+
+        if lot_libelle != lot_courant:
+            ws.merge_cells(f"A{ligne}:E{ligne}")
+            cellule_lot = ws.cell(row=ligne, column=1, value=lot_libelle.upper())
+            _appliquer_style(cellule_lot, styles["lot"])
+            ws.row_dimensions[ligne].height = 18
+            lot_courant = lot_libelle
+            chapitre_courant = None
+            ligne += 1
+
+        chapitre = (article.chapitre or "").strip()
+        if chapitre and chapitre != chapitre_courant:
+            ws.merge_cells(f"A{ligne}:E{ligne}")
+            cellule_chap = ws.cell(row=ligne, column=1, value=chapitre)
+            _appliquer_style(cellule_chap, styles["chapitre"])
+            ws.row_dimensions[ligne].height = 16
+            chapitre_courant = chapitre
+            ligne += 1
+
+        # Pour le BPU : désignation = intitulé + corps de l'article (cahier des charges)
+        corps_texte = _html_vers_texte(article.corps_article or "")
+        designation_complete = article.intitule
+        if corps_texte:
+            designation_complete = f"{article.intitule}\n{corps_texte}"
+
+        num = ws.cell(row=ligne, column=1, value=article.numero_article)
+        _appliquer_style(num, styles["numero"])
+
+        desig = ws.cell(row=ligne, column=2, value=designation_complete)
+        _appliquer_style(desig, {**styles["article"], "alignment": Alignment(
+            horizontal="left", vertical="top", wrap_text=True
+        )})
+
+        unite = ws.cell(row=ligne, column=3, value="")
+        _appliquer_style(unite, styles["article"])
+
+        pu = ws.cell(row=ligne, column=4, value=None)
+        _appliquer_style(pu, styles["montant"])
+
+        obs = ws.cell(row=ligne, column=5, value="")
+        _appliquer_style(obs, styles["article"])
+
+        # Hauteur proportionnelle au nombre de lignes du corps
+        nb_lignes = max(1, len(designation_complete.splitlines()))
+        ws.row_dimensions[ligne].height = max(20, min(120, nb_lignes * 13))
+        ligne += 1
+
+    ws.freeze_panes = "A5"
+
+    flux = BytesIO()
+    wb.save(flux)
+    return flux.getvalue()

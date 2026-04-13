@@ -11,6 +11,8 @@ import {
   FileText,
   Info,
   Layers,
+  PanelLeft,
+  PanelLeftClose,
   PanelRight,
   PanelRightClose,
   Pencil,
@@ -198,6 +200,10 @@ export default function PageAdministrationModelesDocuments() {
   const [groupeOuvert, setGroupeOuvert] = useState<string>("Projet");
   const [panneauDroit, setPanneauDroit] = useState<"proprietes" | "variables" | "gabarit">("variables");
   const [panneauDroitVisible, setPanneauDroitVisible] = useState(true);
+  const [panneauGaucheVisible, setPanneauGaucheVisible] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("modeles-panneau-gauche") !== "ferme";
+  });
 
   // -------------------------------------------------------------------------
   // Chargement
@@ -250,6 +256,11 @@ export default function PageAdministrationModelesDocuments() {
   useEffect(() => {
     if (sessionBureautique) setPanneauDroitVisible(false);
   }, [sessionBureautique]);
+
+  // Persister l'état du panneau gauche
+  useEffect(() => {
+    localStorage.setItem("modeles-panneau-gauche", panneauGaucheVisible ? "ouvert" : "ferme");
+  }, [panneauGaucheVisible]);
 
   // -------------------------------------------------------------------------
   // Actions modèles
@@ -424,6 +435,14 @@ export default function PageAdministrationModelesDocuments() {
           {erreur && (
             <span className="max-w-xs rounded-xl bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700">{erreur}</span>
           )}
+          <button
+            type="button"
+            onClick={() => setPanneauGaucheVisible((v) => !v)}
+            className="btn-secondaire py-1.5 text-xs"
+            title={panneauGaucheVisible ? "Masquer la liste" : "Afficher la liste"}
+          >
+            {panneauGaucheVisible ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+          </button>
           <button type="button" onClick={demarrerNouveauModele} className="btn-primaire">
             <Plus size={15} /> Nouveau modèle
           </button>
@@ -440,7 +459,7 @@ export default function PageAdministrationModelesDocuments() {
         {/* ============================================================== */}
         {/* Panneau gauche — liste des modèles                              */}
         {/* ============================================================== */}
-        <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50">
+        {panneauGaucheVisible && <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 transition-all">
           <div className="shrink-0 border-b border-slate-200 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
               {modeles.length} modèle{modeles.length !== 1 ? "s" : ""}
@@ -493,7 +512,7 @@ export default function PageAdministrationModelesDocuments() {
               </>
             )}
           </div>
-        </aside>
+        </aside>}
 
         {/* ============================================================== */}
         {/* Zone centrale — éditeur Collabora                               */}
