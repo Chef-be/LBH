@@ -41,4 +41,7 @@ urlpatterns = [
 
     # Analyse automatique depuis un document GED → extraction CCTP
     path("analyser-document/<uuid:document_id>/", views.vue_analyser_document_cctp, name="analyser-document-cctp"),
+
+    # Variables de fusion disponibles pour une pièce
+    path("<uuid:pk>/variables/", views.vue_variables_piece, name="piece-ecrite-variables"),
 ]

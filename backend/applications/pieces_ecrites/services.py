@@ -165,16 +165,38 @@ def _valeur_fusion_piece(piece: PieceEcrite, nom: str) -> str:
     projet = piece.projet
     lot = piece.lot
     utilisateur = piece.redacteur
+    # Dates d'exécution (depuis SuiviExecution si disponible)
+    date_os_demarrage = ""
+    date_fin_contractuelle = ""
+    duree_contractuelle = ""
+    montant_marche = ""
+    try:
+        suivi = projet.suivis_execution.order_by("-date_creation").first()
+        if suivi:
+            if suivi.date_os_demarrage:
+                date_os_demarrage = suivi.date_os_demarrage.strftime("%d/%m/%Y")
+            if suivi.date_fin_contractuelle:
+                date_fin_contractuelle = suivi.date_fin_contractuelle.strftime("%d/%m/%Y")
+            if suivi.duree_contractuelle_jours:
+                duree_contractuelle = f"{suivi.duree_contractuelle_jours} jours ouvrés"
+            if suivi.montant_marche_ht:
+                montant_marche = f"{float(suivi.montant_marche_ht):,.0f} € HT".replace(",", " ")
+    except Exception:
+        pass
+
     valeurs = {
         "nom_projet": projet.intitule,
         "reference_projet": projet.reference,
         "description_projet": projet.description or "",
         "commune_projet": projet.commune or "",
         "departement_projet": projet.departement or "",
+        "adresse_chantier": f"{projet.commune or ''}{' (' + projet.departement + ')' if projet.departement else ''}".strip(),
         "phase_projet": projet.get_phase_actuelle_display() if projet.phase_actuelle else "",
         "statut_projet": projet.get_statut_display(),
         "maitre_ouvrage": projet.maitre_ouvrage.nom if projet.maitre_ouvrage else "",
+        "moa": projet.maitre_ouvrage.nom if projet.maitre_ouvrage else "",
         "maitre_oeuvre": projet.maitre_oeuvre.nom if projet.maitre_oeuvre else "",
+        "moe": projet.maitre_oeuvre.nom if projet.maitre_oeuvre else "",
         "organisation": projet.organisation.nom if projet.organisation else "",
         "responsable_projet": projet.responsable.nom_complet if projet.responsable else "",
         "date_generation": timezone.localtime().strftime("%d/%m/%Y"),
@@ -183,6 +205,12 @@ def _valeur_fusion_piece(piece: PieceEcrite, nom: str) -> str:
         "redacteur_nom": utilisateur.nom_complet if utilisateur else "",
         "piece_intitule": piece.intitule,
         "modele_libelle": piece.modele.libelle if piece.modele_id else "",
+        # Variables chantier / marché
+        "date_os_demarrage": date_os_demarrage,
+        "date_debut_travaux": date_os_demarrage,
+        "date_fin_contractuelle": date_fin_contractuelle,
+        "duree_contractuelle": duree_contractuelle,
+        "montant_marche": montant_marche,
     }
     return str(valeurs.get(nom, ""))
 
@@ -202,9 +230,16 @@ def construire_donnees_fusion_piece(piece: PieceEcrite) -> dict[str, str]:
     for nom in (
         "nom_projet",
         "reference_projet",
+        "description_projet",
         "commune_projet",
+        "departement_projet",
+        "adresse_chantier",
+        "phase_projet",
+        "statut_projet",
         "maitre_ouvrage",
+        "moa",
         "maitre_oeuvre",
+        "moe",
         "organisation",
         "responsable_projet",
         "date_generation",
@@ -213,6 +248,11 @@ def construire_donnees_fusion_piece(piece: PieceEcrite) -> dict[str, str]:
         "redacteur_nom",
         "piece_intitule",
         "modele_libelle",
+        "date_os_demarrage",
+        "date_debut_travaux",
+        "date_fin_contractuelle",
+        "duree_contractuelle",
+        "montant_marche",
         "contenu_principal",
     ):
         donnees.setdefault(nom, _valeur_fusion_piece(piece, nom))
@@ -721,17 +761,41 @@ def _generer_rapport_analyse(piece: PieceEcrite) -> str:
 
 
 def generer_contenu_piece_depuis_articles(piece: PieceEcrite) -> str:
-    articles = piece.articles.order_by("chapitre", "numero_article", "date_creation")
+    """Génère le contenu HTML de la pièce depuis ses articles CCTP.
+
+    Les variables de fusion ({{variable}}) présentes dans les corps d'articles
+    sont automatiquement interpolées avec les données du projet.
+    """
+    articles = piece.articles.select_related("lot").order_by(
+        "lot__ordre", "chapitre", "numero_article", "date_creation"
+    )
+    # Construire le dictionnaire de fusion une seule fois
+    donnees_fusion = construire_donnees_fusion_piece(piece)
+
     blocs = [
         f"<h1>{piece.intitule}</h1>",
         "<section>",
         f"<p><strong>Projet :</strong> {piece.projet.reference} — {piece.projet.intitule}</p>",
     ]
+    if donnees_fusion.get("maitre_ouvrage"):
+        blocs.append(f"<p><strong>Maître d'ouvrage :</strong> {donnees_fusion['maitre_ouvrage']}</p>")
+    if donnees_fusion.get("commune_projet"):
+        blocs.append(f"<p><strong>Commune :</strong> {donnees_fusion['commune_projet']}</p>")
+    if donnees_fusion.get("date_generation"):
+        blocs.append(f"<p><strong>Date :</strong> {donnees_fusion['date_generation']}</p>")
     if piece.modele_id:
         blocs.append(f"<p><strong>Modèle :</strong> {piece.modele.libelle}</p>")
     blocs.append("</section>")
 
+    lot_courant: str | None = None
     for article in articles:
+        # En-tête de lot si changement
+        lot_code = article.lot.code if article.lot_id else None
+        lot_intitule = article.lot.intitule if article.lot_id else None
+        if lot_code and lot_code != lot_courant:
+            blocs.append(f"<h2>Lot {lot_code} — {lot_intitule}</h2>")
+            lot_courant = lot_code
+
         titre = " — ".join(
             partie for partie in [
                 ".".join(partie for partie in [article.chapitre, article.numero_article] if partie),
@@ -739,8 +803,11 @@ def generer_contenu_piece_depuis_articles(piece: PieceEcrite) -> str:
             ] if partie
         )
         blocs.append("<section>")
-        blocs.append(f"<h2>{titre or 'Article'}</h2>")
-        corps = _balise_paragraphe_si_necessaire(article.corps_article)
+        blocs.append(f"<h3>{titre or 'Article'}</h3>")
+        # Corps avec interpolation des variables projet
+        corps_brut = article.corps_article or ""
+        corps_interpole = interpoler_variables_modele(corps_brut, donnees_fusion)
+        corps = _balise_paragraphe_si_necessaire(corps_interpole)
         if corps:
             blocs.append(corps)
         if article.normes_applicables:

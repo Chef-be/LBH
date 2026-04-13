@@ -9,6 +9,7 @@ import { EditeurTexteRiche } from "@/composants/ui/EditeurTexteRiche";
 import {
   ChevronRight, CheckCircle, AlertCircle, X, Plus,
   Pencil, Trash2, Save, FileText, GripVertical, RefreshCw, Download, Sparkles, Clock3, ListTree, Monitor,
+  Library, Search, ChevronsRight,
 } from "lucide-react";
 
 interface ArticleCCTP {
@@ -436,6 +437,15 @@ export default function PageDetailPieceEcrite({
   const [intituleEditionPiece, setIntituleEditionPiece] = useState("");
   const [enregistrementPiece, setEnregistrementPiece] = useState(false);
   const [suppressionPieceEnCours, setSuppressionPieceEnCours] = useState(false);
+  const [panneauBibliotheque, setPanneauBibliotheque] = useState(false);
+  const [lotFiltre, setLotFiltre] = useState("");
+  const [rechercheBibliotheque, setRechercheBibliotheque] = useState("");
+  const [articlesBibliotheque, setArticlesBibliotheque] = useState<ArticleCCTP[]>([]);
+  const [chargementBibliotheque, setChargementBibliotheque] = useState(false);
+  const [importEnCours, setImportEnCours] = useState<string | null>(null);
+  const [lotsBibliotheque, setLotsBibliotheque] = useState<{ id: string; code: string; intitule: string }[]>([]);
+  const [variablesProjet, setVariablesProjet] = useState<{ nom: string; valeur: string; vide: boolean }[]>([]);
+  const [panneauVariables, setPanneauVariables] = useState(false);
   const [etatSauvegardeContenu, setEtatSauvegardeContenu] = useState<"synchro" | "modifie" | "sauvegarde" | "erreur">("synchro");
   const [derniereSauvegardeContenu, setDerniereSauvegardeContenu] = useState<string | null>(null);
   const [planDocument, setPlanDocument] = useState<PlanDocumentItem[]>([]);
@@ -467,6 +477,70 @@ export default function PageDetailPieceEcrite({
     setSucces(msg);
     setTimeout(() => setSucces(null), 3000);
   }, []);
+
+  const chargerBibliotheque = useCallback(async () => {
+    setChargementBibliotheque(true);
+    try {
+      const params = new URLSearchParams({ est_dans_bibliotheque: "true", page_size: "50" });
+      if (lotFiltre) params.set("lot", lotFiltre);
+      if (rechercheBibliotheque.trim()) params.set("search", rechercheBibliotheque.trim());
+      const reponse = await api.get<{ results?: ArticleCCTP[] } | ArticleCCTP[]>(
+        `/api/pieces-ecrites/articles/?${params}`
+      );
+      const liste = Array.isArray(reponse) ? reponse : (reponse.results ?? []);
+      setArticlesBibliotheque(liste);
+    } catch {
+      setArticlesBibliotheque([]);
+    } finally {
+      setChargementBibliotheque(false);
+    }
+  }, [lotFiltre, rechercheBibliotheque]);
+
+  useEffect(() => {
+    if (!panneauBibliotheque) return;
+    chargerBibliotheque();
+  }, [panneauBibliotheque, chargerBibliotheque]);
+
+  useEffect(() => {
+    api.get<{ results?: { id: string; code: string; intitule: string }[] } | { id: string; code: string; intitule: string }[]>(
+      "/api/pieces-ecrites/lots-cctp/"
+    )
+      .then((rep) => {
+        const liste = Array.isArray(rep) ? rep : (rep.results ?? []);
+        setLotsBibliotheque(liste);
+      })
+      .catch(() => setLotsBibliotheque([]));
+  }, []);
+
+  useEffect(() => {
+    if (!panneauVariables || variablesProjet.length > 0) return;
+    api.get<{ variables: { nom: string; valeur: string; vide: boolean }[] }>(`/api/pieces-ecrites/${pieceId}/variables/`)
+      .then((rep) => setVariablesProjet(rep.variables ?? []))
+      .catch(() => setVariablesProjet([]));
+  }, [panneauVariables, pieceId, variablesProjet.length]);
+
+  const importerArticleBibliotheque = async (article: ArticleCCTP) => {
+    setImportEnCours(article.id);
+    try {
+      await api.post(`/api/pieces-ecrites/${pieceId}/articles/`, {
+        piece_ecrite: pieceId,
+        lot: article.lot || "",
+        chapitre: article.chapitre || "",
+        numero_article: article.numero_article || "",
+        intitule: article.intitule,
+        corps_article: article.corps_article || "",
+        normes_applicables: versTexteListe(article.normes_applicables),
+        est_dans_bibliotheque: false,
+        tags: versTexteListe(article.tags),
+      });
+      await charger();
+      flash(`Article « ${article.intitule.slice(0, 60)} » importé.`);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'importer l'article.");
+    } finally {
+      setImportEnCours(null);
+    }
+  };
 
   const sauvegarderContenu = useCallback(async (silencieux = false) => {
     if (contenuHtml === contenuSynchroniseRef.current) {
@@ -1094,9 +1168,18 @@ export default function PageDetailPieceEcrite({
                     </>
                   )}
                   {piece.statut !== "valide" && (
-                    <button onClick={() => { setArticleEdit(null); setModal(true); }} className="btn-primaire">
-                      <Plus className="w-4 h-4" />Ajouter un article
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setPanneauBibliotheque((o) => !o)}
+                        className={`btn-secondaire text-xs py-1.5 ${panneauBibliotheque ? "bg-violet-50 border-violet-300 text-violet-700" : ""}`}
+                        title="Importer un article depuis la bibliothèque CCTP"
+                      >
+                        <Library className="w-3.5 h-3.5" />Bibliothèque
+                      </button>
+                      <button onClick={() => { setArticleEdit(null); setModal(true); }} className="btn-primaire">
+                        <Plus className="w-4 h-4" />Ajouter un article
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -1186,6 +1269,101 @@ export default function PageDetailPieceEcrite({
                   ))}
                 </div>
               )}
+
+              {/* Panneau bibliothèque CCTP */}
+              {panneauBibliotheque && (
+                <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Library className="w-4 h-4 text-violet-600" />
+                      <h3 className="text-sm font-semibold text-violet-800">Bibliothèque CCTP</h3>
+                      <span className="text-xs text-violet-500">— cliquer sur un article pour l&apos;importer</span>
+                    </div>
+                    <button onClick={() => setPanneauBibliotheque(false)} className="p-1 rounded hover:bg-violet-100 text-violet-400">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Rechercher…"
+                        className="champ-saisie pl-8 py-1.5 text-sm"
+                        value={rechercheBibliotheque}
+                        onChange={(e) => setRechercheBibliotheque(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") chargerBibliotheque(); }}
+                      />
+                    </div>
+                    <select
+                      className="champ-saisie py-1.5 text-sm"
+                      value={lotFiltre}
+                      onChange={(e) => setLotFiltre(e.target.value)}
+                    >
+                      <option value="">Tous les lots</option>
+                      {lotsBibliotheque.map((lot) => (
+                        <option key={lot.id} value={lot.id}>{lot.code} — {lot.intitule}</option>
+                      ))}
+                    </select>
+                    <button onClick={chargerBibliotheque} className="btn-secondaire text-xs py-1.5">
+                      <RefreshCw className={`w-3.5 h-3.5 ${chargementBibliotheque ? "animate-spin" : ""}`} />
+                    </button>
+                  </div>
+
+                  <div className="max-h-[480px] overflow-y-auto space-y-2 pr-1">
+                    {chargementBibliotheque ? (
+                      <p className="py-6 text-center text-sm text-slate-400">Chargement…</p>
+                    ) : articlesBibliotheque.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-slate-400">
+                        Aucun article. Modifiez les filtres ou lancez une recherche.
+                      </p>
+                    ) : articlesBibliotheque.map((art) => (
+                      <div
+                        key={art.id}
+                        className="flex items-start gap-3 rounded-xl border border-violet-100 bg-white p-3 hover:border-violet-300 hover:bg-violet-50 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-mono text-xs text-slate-400">{art.numero_article}</span>
+                            {art.lot_code && (
+                              <span className="text-xs font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
+                                {art.lot_code}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-semibold text-slate-800 line-clamp-1">{art.intitule}</p>
+                          {art.corps_article && (
+                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">
+                              {art.corps_article.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()}
+                            </p>
+                          )}
+                          {versTexteListe(art.normes_applicables) && (
+                            <p className="text-xs text-slate-400 mt-1">
+                              {versTexteListe(art.normes_applicables).slice(0, 80)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => importerArticleBibliotheque(art)}
+                          disabled={importEnCours === art.id}
+                          className="shrink-0 flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-colors"
+                          title="Importer cet article dans la pièce écrite"
+                        >
+                          {importEnCours === art.id
+                            ? <RefreshCw className="w-3 h-3 animate-spin" />
+                            : <ChevronsRight className="w-3.5 h-3.5" />
+                          }
+                          Importer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400 text-right">
+                    {articlesBibliotheque.length} résultat{articlesBibliotheque.length !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1266,6 +1444,38 @@ export default function PageDetailPieceEcrite({
                     </div>
                   </div>
                 )}
+
+                {/* Panneau variables projet disponibles */}
+                <div className="carte space-y-3">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between text-left"
+                    onClick={() => setPanneauVariables((o) => !o)}
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-700">Variables projet disponibles</p>
+                      <p className="text-xs text-slate-400">Syntaxe : {"{{nom_variable}}"} dans le texte</p>
+                    </div>
+                    <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${panneauVariables ? "rotate-90" : ""}`} />
+                  </button>
+                  {panneauVariables && (
+                    <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                      {variablesProjet.length === 0 ? (
+                        <p className="text-xs text-slate-400 py-2">Chargement…</p>
+                      ) : variablesProjet.map((variable) => (
+                        <div
+                          key={variable.nom}
+                          className={`group flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-xs transition-colors cursor-pointer hover:bg-slate-50 ${variable.vide ? "border-slate-100 opacity-60" : "border-slate-200"}`}
+                          onClick={() => navigator.clipboard?.writeText(`{{${variable.nom}}}`)}
+                          title={`Cliquer pour copier {{${variable.nom}}}`}
+                        >
+                          <span className="font-mono text-primaire-700">{"{{" + variable.nom + "}}"}</span>
+                          <span className="text-slate-500 truncate max-w-[120px]">{variable.valeur || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

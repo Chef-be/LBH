@@ -609,3 +609,19 @@ def vue_analyser_document_cctp(request, document_id):
         },
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_variables_piece(request, pk):
+    """Retourne le dictionnaire complet des variables de fusion disponibles pour une pièce."""
+    from .services import construire_donnees_fusion_piece
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    donnees = construire_donnees_fusion_piece(piece)
+    # Supprimer contenu_principal (trop volumineux)
+    donnees.pop("contenu_principal", None)
+    variables = [
+        {"nom": nom, "valeur": valeur, "vide": not valeur}
+        for nom, valeur in sorted(donnees.items())
+    ]
+    return Response({"variables": variables, "total": len(variables)})
