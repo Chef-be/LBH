@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent } from "react";
+import { useRef, useState, useEffect, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
@@ -9,16 +9,20 @@ import { useSessionStore } from "@/crochets/useSession";
 import { ActionsRapidesAdaptatives } from "@/composants/ui/ActionsRapides";
 import {
   Calculator,
+  CheckCircle,
   DatabaseZap,
+  FileSpreadsheet,
   FileUp,
   FileText,
   Filter,
+  Link2,
   Pencil,
   Plus,
   Search,
   Trash2,
   UploadCloud,
   Eye,
+  X,
 } from "lucide-react";
 
 interface LigneBibliotheque {
@@ -82,6 +86,42 @@ export function ListeBibliotheque() {
   const [actionGlobale, setActionGlobale] = useState<string | null>(null);
   const [succes, setSucces] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
+
+  // Suivi progression recalcul (async)
+  const [recalculTacheId, setRecalculTacheId] = useState<string | null>(null);
+  const [recalculProgression, setRecalculProgression] = useState<{
+    statut: string; pourcentage: number; traites: number; total: number;
+    message: string; lignes_inversees?: number; lignes_recalculees?: number;
+    lignes_ignorees?: number;
+  } | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Polling progression recalcul
+  useEffect(() => {
+    if (!recalculTacheId) return;
+    intervalRef.current = setInterval(async () => {
+      try {
+        const prog = await api.get<typeof recalculProgression>(
+          `/api/bibliotheque/recalcul-progression/${recalculTacheId}/`
+        );
+        if (prog) {
+          setRecalculProgression(prog);
+          if (prog.statut === "termine" || prog.statut === "erreur") {
+            clearInterval(intervalRef.current!);
+            setActionGlobale(null);
+            if (prog.statut === "termine") invaliderBibliotheque();
+          }
+        }
+      } catch { /* ignoré */ }
+    }, 2000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [recalculTacheId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fermerModalRecalcul = () => {
+    setRecalculTacheId(null);
+    setRecalculProgression(null);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  };
 
   const params = new URLSearchParams({ ordering: "famille,code", page: String(page) });
   if (recherche) params.set("search", recherche);
@@ -220,29 +260,43 @@ export function ListeBibliotheque() {
   };
 
   const recalculerTousLesSousDetails = async () => {
-    const confirmation = window.confirm(
-      "Générer ou recalculer les sous-détails analytiques de toute la bibliothèque ?"
-    );
-    if (!confirmation) return;
+    if (!window.confirm(
+      "Lancer le recalcul analytique inversé de toute la bibliothèque ?\n\n" +
+      "Chaque ligne sera traitée par étude de prix inversée (DS = PV × Kpv)\n" +
+      "basée sur les coefficients ARTIPRIX 2025 par corps d'état."
+    )) return;
 
+    setErreur(null);
+    setRecalculProgression(null);
     setActionGlobale("recalcul-global");
+
+    try {
+      const reponse = await api.post<{ detail: string; tache_id: string }>(
+        "/api/bibliotheque/recalculer-tous/", {}
+      );
+      setRecalculTacheId(reponse.tache_id);
+      setRecalculProgression({
+        statut: "en_attente", pourcentage: 0, traites: 0, total: 0,
+        message: "Démarrage...",
+      });
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de lancer le recalcul.");
+      setActionGlobale(null);
+    }
+  };
+
+  const lierAutomatiquement = async () => {
+    setActionGlobale("lier-auto");
     setErreur(null);
     try {
-      const reponse = await api.post<{
-        detail: string;
-        lignes_recalculees: number;
-        lignes_regenerees: number;
-        sous_details_generes: number;
-        lignes_ignorees: number;
-      }>("/api/bibliotheque/recalculer-tous/", {
-        regenerer_absents: true,
-      });
-      setSucces(
-        `${reponse.detail} ${reponse.lignes_recalculees} ligne(s) recalculée(s), ${reponse.lignes_regenerees} ligne(s) régénérée(s), ${reponse.sous_details_generes} sous-détail(s) créé(s).`
+      const reponse = await api.post<{ detail: string; liaisons_creees: number }>(
+        "/api/bibliotheque/lier-auto/", {}
       );
+      const nb = reponse.liaisons_creees ?? 0;
+      setSucces(`${nb} liaison${nb > 1 ? "s" : ""} prix↔CCTP créée${nb > 1 ? "s" : ""}.`);
       invaliderBibliotheque();
     } catch (e) {
-      setErreur(e instanceof ErreurApi ? e.detail : "Recalcul global impossible.");
+      setErreur(e instanceof ErreurApi ? e.detail : "Liaison automatique impossible.");
     } finally {
       setActionGlobale(null);
     }
@@ -274,7 +328,7 @@ export function ListeBibliotheque() {
       <input
         ref={selecteurFichiersRef}
         type="file"
-        accept=".pdf,.PDF"
+        accept=".pdf,.PDF,.xlsx,.xls,.XLSX,.XLS"
         multiple
         className="hidden"
         onChange={televerserFichiers}
@@ -318,8 +372,8 @@ export function ListeBibliotheque() {
             onClick={() => selecteurFichiersRef.current?.click()}
             disabled={actionGlobale === "televersement"}
           >
-            <FileUp className="w-4 h-4" />
-            Importer PDF
+            <FileSpreadsheet className="w-4 h-4" />
+            Importer PDF / Excel
           </button>
           <button
             type="button"
@@ -342,11 +396,20 @@ export function ListeBibliotheque() {
           <button
             type="button"
             className="btn-secondaire text-sm"
+            onClick={lierAutomatiquement}
+            disabled={actionGlobale === "lier-auto"}
+          >
+            <Link2 className="w-4 h-4" />
+            Lier prix ↔ CCTP
+          </button>
+          <button
+            type="button"
+            className="btn-secondaire text-sm"
             onClick={recalculerTousLesSousDetails}
             disabled={actionGlobale === "recalcul-global"}
           >
             <Calculator className="w-4 h-4" />
-            Calculer tous les sous-détails
+            {actionGlobale === "recalcul-global" ? "Recalcul en cours…" : "Recalculer tous"}
           </button>
           <Link href="/documents" className="btn-secondaire text-sm">
             <FileText className="w-4 h-4" />
@@ -561,6 +624,85 @@ export function ListeBibliotheque() {
             >
               Suivant →
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de progression recalcul */}
+      {recalculProgression && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl bg-primaire-50 p-2">
+                  <Calculator className="h-5 w-5 text-primaire-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-900">Recalcul analytique</h3>
+                  <p className="text-xs text-slate-500">Étude de prix inversée — ARTIPRIX 2025</p>
+                </div>
+              </div>
+              {recalculProgression.statut === "termine" && (
+                <button type="button" onClick={fermerModalRecalcul} className="rounded-lg p-1.5 hover:bg-slate-100">
+                  <X className="h-4 w-4 text-slate-500" />
+                </button>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <span>{recalculProgression.message}</span>
+                <span className="font-mono font-medium text-slate-700">{recalculProgression.pourcentage} %</span>
+              </div>
+              <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={clsx("h-full rounded-full transition-all duration-500",
+                    recalculProgression.statut === "termine" ? "bg-green-500" : "bg-primaire-500"
+                  )}
+                  style={{ width: `${recalculProgression.pourcentage}%` }}
+                />
+              </div>
+              {recalculProgression.total > 0 && (
+                <p className="mt-1 text-xs text-slate-400 text-right">
+                  {recalculProgression.traites} / {recalculProgression.total} lignes
+                </p>
+              )}
+            </div>
+
+            {(recalculProgression.lignes_inversees !== undefined || recalculProgression.lignes_recalculees !== undefined) && (
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                {recalculProgression.lignes_recalculees !== undefined && (
+                  <div className="rounded-xl bg-blue-50 p-3 text-center">
+                    <p className="text-lg font-bold text-blue-700">{recalculProgression.lignes_recalculees}</p>
+                    <p className="text-xs text-blue-500">Sous-détails</p>
+                  </div>
+                )}
+                {recalculProgression.lignes_inversees !== undefined && (
+                  <div className="rounded-xl bg-green-50 p-3 text-center">
+                    <p className="text-lg font-bold text-green-700">{recalculProgression.lignes_inversees}</p>
+                    <p className="text-xs text-green-500">Inversées</p>
+                  </div>
+                )}
+                {recalculProgression.lignes_ignorees !== undefined && (
+                  <div className="rounded-xl bg-slate-50 p-3 text-center">
+                    <p className="text-lg font-bold text-slate-500">{recalculProgression.lignes_ignorees}</p>
+                    <p className="text-xs text-slate-400">Ignorées</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {recalculProgression.statut === "termine" && (
+              <div className="flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                Recalcul terminé. Données mises à jour.
+              </div>
+            )}
+            {recalculProgression.statut === "termine" && (
+              <button type="button" onClick={fermerModalRecalcul} className="mt-4 w-full btn-primaire justify-center">
+                Fermer
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -541,7 +541,7 @@ export default function PageDetailBibliotheque({ params }: { params: Promise<{ i
                       Total déboursé sec
                     </td>
                     <td className="py-2 pr-3 text-right font-mono text-sm font-bold text-primaire-700">
-                      {fmt(ligne.sous_details.reduce((s, sd) => s + sd.montant_ht, 0))}
+                      {fmt(ligne.sous_details.reduce((s, sd) => s + Number(sd.montant_ht || 0), 0))}
                     </td>
                     <td></td>
                   </tr>

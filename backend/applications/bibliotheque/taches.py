@@ -501,3 +501,70 @@ def telecharger_illustrations_ligne_prix(ligne_prix_id: str) -> dict:
     ligne.illustrations = existantes
     ligne.save(update_fields=["illustrations"])
     return {"traite": ligne_prix_id, "illustrations": len(existantes)}
+
+
+# ============================================================
+# Tâche Celery — Liaison automatique prix ↔ articles CCTP
+# ============================================================
+
+@shared_task(name="bibliotheque.lier_auto_prix_articles")
+def tache_lier_auto_prix_articles() -> dict:
+    """
+    Lie automatiquement les lignes de la bibliothèque aux articles CCTP
+    par similarité de désignation (mots significatifs > 4 caractères).
+    Planifiée quotidiennement par Celery Beat (3h30).
+    """
+    from applications.pieces_ecrites.models import ArticleCCTP
+    from .models import LignePrixBibliotheque
+
+    articles_sans_liaison = list(
+        ArticleCCTP.objects.filter(
+            ligne_prix_reference__isnull=True,
+            est_dans_bibliotheque=True,
+        ).values("id", "intitule")
+    )
+
+    lignes_prix = list(
+        LignePrixBibliotheque.objects.filter(
+            statut_validation__in=("valide", "a_valider")
+        ).values("id", "designation_courte", "designation_longue")
+    )
+
+    def _mots(texte: str) -> set:
+        if not texte:
+            return set()
+        return {m.lower() for m in texte.replace("-", " ").split() if len(m) > 4}
+
+    liaisons_creees = 0
+    for article_data in articles_sans_liaison:
+        mots_article = _mots(article_data["intitule"])
+        if len(mots_article) < 2:
+            continue
+
+        meilleure_id = None
+        meilleur_score = 2  # score minimal pour matcher
+
+        for ligne in lignes_prix:
+            mots_ligne = _mots(
+                (ligne["designation_courte"] or "") + " " + (ligne["designation_longue"] or "")
+            )
+            score = len(mots_article & mots_ligne)
+            if score > meilleur_score:
+                meilleur_score = score
+                meilleure_id = ligne["id"]
+
+        if meilleure_id:
+            try:
+                article = ArticleCCTP.objects.get(pk=article_data["id"])
+                article.ligne_prix_reference_id = meilleure_id
+                article.save(update_fields=["ligne_prix_reference"])
+                liaisons_creees += 1
+            except ArticleCCTP.DoesNotExist:
+                pass
+
+    journal.info("Liaison auto prix↔CCTP : %d liaisons créées sur %d articles traités.",
+                 liaisons_creees, len(articles_sans_liaison))
+    return {
+        "articles_traites": len(articles_sans_liaison),
+        "liaisons_creees": liaisons_creees,
+    }

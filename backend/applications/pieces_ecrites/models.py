@@ -158,6 +158,13 @@ class ArticleCCTP(models.Model):
         verbose_name="Pièce écrite",
     )
 
+    # Lot CCTP de référence (pour les articles de bibliothèque)
+    lot = models.ForeignKey(
+        "LotCCTP", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="articles",
+        verbose_name="Lot CCTP",
+    )
+
     # Classification
     chapitre = models.CharField(max_length=200, blank=True, verbose_name="Chapitre")
     numero_article = models.CharField(max_length=20, verbose_name="Numéro d'article")

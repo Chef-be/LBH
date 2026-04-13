@@ -360,11 +360,11 @@ def vue_importer_bordereaux_prix(request):
 @permission_classes([permissions.IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
 def vue_importer_bordereaux_fichiers(request):
-    """Importe des bordereaux PDF téléversés manuellement."""
+    """Importe des bordereaux PDF ou Excel téléversés manuellement."""
     fichiers = request.FILES.getlist("fichiers")
     if not fichiers:
         return Response(
-            {"detail": "Téléverser au moins un fichier PDF à analyser."},
+            {"detail": "Téléverser au moins un fichier PDF ou Excel à analyser."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -375,13 +375,14 @@ def vue_importer_bordereaux_fichiers(request):
     total_crees = 0
     total_maj = 0
     fichiers_ignores = 0
+    EXTENSIONS_ACCEPTEES = {".pdf", ".xlsx", ".xls"}
 
     with TemporaryDirectory(prefix="lbh-bibliotheque-") as dossier_temporaire:
         racine = Path(dossier_temporaire)
 
         for fichier in fichiers:
             suffixe = Path(fichier.name).suffix.lower()
-            if suffixe != ".pdf":
+            if suffixe not in EXTENSIONS_ACCEPTEES:
                 fichiers_ignores += 1
                 continue
 

@@ -780,7 +780,11 @@ def importer_bordereaux_prix_references(auteur=None, limite: int | None = None) 
 
 @transaction.atomic
 def importer_bordereau_depuis_fichier(chemin: Path, auteur=None, limite: int | None = None) -> dict[str, int]:
-    """Importe un bordereau téléversé en PDF vers la bibliothèque de prix."""
+    """Importe un bordereau téléversé (PDF ou Excel) vers la bibliothèque de prix."""
+    suffixe = chemin.suffix.lower()
+    if suffixe in (".xlsx", ".xls"):
+        return importer_bordereau_depuis_excel(chemin, auteur=auteur, limite=limite)
+
     lignes = parser_bordereau_artiprix(chemin)
     if limite is not None:
         lignes = lignes[:limite]
@@ -790,6 +794,227 @@ def importer_bordereau_depuis_fichier(chemin: Path, auteur=None, limite: int | N
         "fichiers": 1,
         **resultat,
     }
+
+
+def importer_bordereau_depuis_excel(
+    chemin: Path,
+    auteur=None,
+    limite: int | None = None,
+) -> dict[str, int]:
+    """
+    Importe un bordereau de prix depuis un fichier Excel (.xlsx/.xls).
+
+    Logique intelligente :
+    - Détecte automatiquement les colonnes (code, désignation, unité, prix)
+    - Si une entrée similaire existe déjà : moyenne pondérée des prix (fiabilité++)
+    - Si absente : crée l'entrée et décompose le prix par étude inversée
+    """
+    import openpyxl
+    from decimal import InvalidOperation
+
+    # Colonnes possibles par type de données attendu
+    SYNONYMES_CODE = {"code", "réf", "ref", "référence", "n°", "numero", "num", "article"}
+    SYNONYMES_DESIGNATION = {"désignation", "designation", "libellé", "libelle", "description", "intitulé", "intitule", "prestation", "ouvrage"}
+    SYNONYMES_UNITE = {"unité", "unite", "u", "ut", "un"}
+    SYNONYMES_PRIX = {"prix", "pu", "pv", "p.u", "p.v", "pu ht", "pv ht", "prix unitaire", "prix vente", "montant unitaire", "tarif"}
+    SYNONYMES_DS = {"ds", "déboursé", "debourse", "coût", "cout", "coût unitaire", "cout unitaire", "ds ht"}
+    SYNONYMES_FAMILLE = {"famille", "lot", "corps d'état", "corps etat", "chapitre", "section", "catégorie", "categorie"}
+
+    try:
+        wb = openpyxl.load_workbook(chemin, read_only=True, data_only=True)
+        ws = wb.active
+    except Exception as exc:
+        raise RuntimeError(f"Impossible de lire le fichier Excel : {exc}") from exc
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return {"fichiers": 1, "lignes": 0, "creees": 0, "mises_a_jour": 0}
+
+    # Détecter la ligne d'en-tête (première ligne non vide avec du texte)
+    entete_idx = None
+    for i, row in enumerate(rows):
+        vals = [str(c or "").strip().lower() for c in row]
+        n_texte = sum(1 for v in vals if v and not _est_nombre(v))
+        if n_texte >= 2:
+            entete_idx = i
+            break
+
+    if entete_idx is None:
+        return {"fichiers": 1, "lignes": 0, "creees": 0, "mises_a_jour": 0}
+
+    entete = [str(c or "").strip().lower() for c in rows[entete_idx]]
+
+    # Affecter les colonnes
+    def _trouver_col(synonymes: set) -> int | None:
+        for idx, h in enumerate(entete):
+            if any(syn in h for syn in synonymes):
+                return idx
+        return None
+
+    col_code = _trouver_col(SYNONYMES_CODE)
+    col_desig = _trouver_col(SYNONYMES_DESIGNATION)
+    col_unite = _trouver_col(SYNONYMES_UNITE)
+    col_prix = _trouver_col(SYNONYMES_PRIX)
+    col_ds = _trouver_col(SYNONYMES_DS)
+    col_famille = _trouver_col(SYNONYMES_FAMILLE)
+
+    # Sans colonne désignation on abandonne
+    if col_desig is None:
+        # Tentative heuristique : la colonne la plus longue en texte
+        longueurs = [
+            sum(len(str(rows[i][c] or "")) for i in range(entete_idx + 1, min(entete_idx + 20, len(rows))))
+            for c in range(len(entete))
+        ]
+        col_desig = longueurs.index(max(longueurs)) if longueurs else 0
+
+    # Collecter les lignes de données
+    data_rows = rows[entete_idx + 1:]
+    if limite is not None:
+        data_rows = data_rows[:limite]
+
+    creees = 0
+    maj = 0
+    total = 0
+    famille_courante = "Import Excel"
+
+    for row in data_rows:
+        if not row or all(c is None for c in row):
+            continue
+
+        def _cell(idx: int | None) -> str:
+            if idx is None or idx >= len(row):
+                return ""
+            return str(row[idx] or "").strip()
+
+        desig = _cell(col_desig)
+        if not desig or len(desig) < 3:
+            # Peut-être une ligne de titre de section
+            if col_famille is not None:
+                val_fam = _cell(col_famille)
+                if val_fam:
+                    famille_courante = val_fam
+            continue
+
+        # Ignorer les lignes qui sont clairement des sous-totaux ou titres
+        if desig.upper() == desig and len(desig) > 5:
+            famille_courante = desig
+            continue
+
+        code = _cell(col_code) or ""
+        unite = _cell(col_unite) or "ens"
+        famille = _cell(col_famille) if col_famille is not None else famille_courante
+
+        # Récupérer le prix
+        prix_str = _cell(col_prix)
+        ds_str = _cell(col_ds)
+
+        def _to_decimal(s: str) -> Decimal | None:
+            if not s:
+                return None
+            s = s.replace(" ", "").replace(",", ".").replace("€", "").strip()
+            try:
+                v = Decimal(s)
+                return v if v > 0 else None
+            except InvalidOperation:
+                return None
+
+        prix_vente = _to_decimal(prix_str)
+        ds = _to_decimal(ds_str)
+
+        if prix_vente is None and ds is None:
+            continue
+
+        total += 1
+
+        # Si on n'a que le DS, estimer le PV (Kpv moyen = 1,30)
+        if prix_vente is None and ds is not None:
+            prix_vente = (ds * Decimal("1.30")).quantize(Decimal("0.01"))
+        if ds is None and prix_vente is not None:
+            ds = (prix_vente * Decimal("0.77")).quantize(Decimal("0.01"))
+
+        # Chercher une entrée similaire par code puis par similarité textuelle
+        entree_existante = None
+        if code:
+            entree_existante = LignePrixBibliotheque.objects.filter(
+                code_source_externe=code[:80]
+            ).first()
+
+        if entree_existante is None:
+            # Similarité textuelle (mots significatifs)
+            mots_desig = {m.lower() for m in desig.replace("-", " ").split() if len(m) > 3}
+            if len(mots_desig) >= 2:
+                from django.db.models import Q
+                qs = LignePrixBibliotheque.objects.filter(
+                    Q(designation_courte__icontains=next(iter(mots_desig))) |
+                    Q(designation_longue__icontains=next(iter(mots_desig)))
+                ).values("id", "designation_courte", "designation_longue", "prix_vente_unitaire", "debourse_sec_unitaire", "fiabilite")[:50]
+
+                for candidat in qs:
+                    mots_candidat = {
+                        m.lower()
+                        for texte in [candidat["designation_courte"] or "", candidat["designation_longue"] or ""]
+                        for m in texte.replace("-", " ").split()
+                        if len(m) > 3
+                    }
+                    score = len(mots_desig & mots_candidat)
+                    if score >= max(2, len(mots_desig) // 2):
+                        try:
+                            entree_existante = LignePrixBibliotheque.objects.get(pk=candidat["id"])
+                        except LignePrixBibliotheque.DoesNotExist:
+                            pass
+                        break
+
+        if entree_existante is not None:
+            # Fusionner : moyenne pondérée des prix
+            ancien_pv = Decimal(str(entree_existante.prix_vente_unitaire or 0))
+            ancien_ds = Decimal(str(entree_existante.debourse_sec_unitaire or 0))
+            fiab = entree_existante.fiabilite or 1
+
+            if ancien_pv > 0:
+                # Moyenne pondérée (poids = fiabilité ancienne)
+                poids = min(fiab, 4)
+                nouveau_pv = ((ancien_pv * poids) + prix_vente) / (poids + 1)
+                nouveau_ds = ((ancien_ds * poids) + ds) / (poids + 1)
+                entree_existante.prix_vente_unitaire = nouveau_pv.quantize(Decimal("0.0001"))
+                entree_existante.debourse_sec_unitaire = nouveau_ds.quantize(Decimal("0.0001"))
+                entree_existante.fiabilite = min(fiab + 1, 5)
+                obs = (entree_existante.observations_economiques or "").strip()
+                entree_existante.observations_economiques = (
+                    obs + f"\nMoyenne import Excel {chemin.name} : PV={prix_vente}€ DS={ds}€"
+                ).strip()
+                entree_existante.save(update_fields=[
+                    "prix_vente_unitaire", "debourse_sec_unitaire", "fiabilite", "observations_economiques"
+                ])
+            maj += 1
+        else:
+            # Créer la ligne
+            prefixe = famille[:4].upper().replace(" ", "") or "XLS"
+            from applications.bibliotheque.services import _code_reference_lbh
+            code_interne = code if code else _code_reference_lbh(prefixe, f"{desig}|{unite}|{float(prix_vente):.2f}")
+
+            entree = LignePrixBibliotheque(
+                code=code_interne[:50],
+                code_source_externe=code[:80] if code else "",
+                origine_import="bordereau_pdf",
+                niveau="reference",
+                famille=famille[:100] or famille_courante[:100],
+                sous_famille="Import Excel",
+                designation_longue=desig,
+                designation_courte=desig[:300],
+                unite=unite[:20],
+                prix_vente_unitaire=prix_vente,
+                debourse_sec_unitaire=ds,
+                cout_matieres=(ds * Decimal("0.50")).quantize(Decimal("0.0001")),
+                observations_economiques=f"Importé depuis {chemin.name}",
+                auteur=auteur,
+                fiabilite=2,
+                statut_validation="a_valider",
+            )
+            entree.save()
+            creees += 1
+
+    wb.close()
+    return {"fichiers": 1, "lignes": total, "creees": creees, "mises_a_jour": maj}
 
 
 @transaction.atomic
