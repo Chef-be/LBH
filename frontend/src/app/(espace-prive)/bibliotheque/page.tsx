@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { BookOpen, DollarSign, Euro, FileText, Plus, UploadCloud, X } from "lucide-react";
 import { OngletPrixBibliotheque } from "@/composants/bibliotheque/OngletPrixBibliotheque";
@@ -72,7 +72,10 @@ function ModalChoixNouvelleEntree({ onFermer }: { onFermer: () => void }) {
 // ---------------------------------------------------------------------------
 
 export default function PageBibliotheque() {
-  const [onglet, setOnglet] = useState<OngletActif>("prix");
+  const searchParams = useSearchParams();
+  const [onglet, setOnglet] = useState<OngletActif>(() => {
+    return searchParams.get("onglet") === "cctp" ? "cctp" : "prix";
+  });
   const [modalImport, setModalImport] = useState(false);
   const [modalNouvelleEntree, setModalNouvelleEntree] = useState(false);
 
@@ -87,7 +90,7 @@ export default function PageBibliotheque() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Bibliothèque</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              Prix, prescriptions CCTP et articles techniques
+              Prix unitaires et articles CCTP par corps d&apos;état
             </p>
           </div>
         </div>
