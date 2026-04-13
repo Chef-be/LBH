@@ -1862,88 +1862,102 @@ def completer_sous_details_manquants(ligne_prix: LignePrixBibliotheque) -> int:
 
     Logique SDP selon Manuel de l'Étude de Prix (Cusant & Widloecher) :
     DS = Dmatx (matériaux) + Dmtl (matériel) + Dmo (main-d'œuvre) + divers
+
+    La fonction est idempotente : un seul sous-détail synthétique par type.
     """
-    types_presents = set(
-        ligne_prix.sous_details.values_list("type_ressource", flat=True)
-    )
+    from django.db import transaction
 
-    nouvelles: list[dict[str, object]] = []
+    MARQUEUR = "Composante déduite automatiquement des champs agrégés."
 
-    def _ajouter_si_absent(type_r: str, designation: str, montant: Decimal | None, unite: str = "u") -> None:
-        if not montant or montant <= 0:
-            return
-        if type_r in types_presents:
-            return
-        nouvelles.append({
-            "ordre": 100 + len(nouvelles),
-            "type_ressource": type_r,
-            "code": "",
-            "designation": designation,
-            "unite": unite,
-            "quantite": str(Decimal("1")),
-            "cout_unitaire_ht": str(montant.quantize(Decimal("0.0001"))),
-            "taux_horaire": str(Decimal("0")),
-            "nombre_ressources": str(Decimal("1")),
-            "temps_unitaire": str(Decimal("0")),
-            "observations": "Composante déduite automatiquement des champs agrégés.",
-        })
-
-    # Vérifie chaque type de ressource absent
-    _ajouter_si_absent(
-        "matiere",
-        f"Fournitures et matériaux — {ligne_prix.designation_courte[:80]}",
-        ligne_prix.cout_matieres,
-    )
-    _ajouter_si_absent(
-        "materiel",
-        f"Matériel et engins — {ligne_prix.designation_courte[:80]}",
-        ligne_prix.cout_materiel,
-    )
-    _ajouter_si_absent(
-        "consommable",
-        f"Consommables — {ligne_prix.designation_courte[:80]}",
-        getattr(ligne_prix, "cout_consommables", None),
-    )
-    _ajouter_si_absent(
-        "sous_traitance",
-        f"Sous-traitance — {ligne_prix.designation_courte[:80]}",
-        ligne_prix.cout_sous_traitance,
-    )
-    _ajouter_si_absent(
-        "transport",
-        f"Transport et logistique — {ligne_prix.designation_courte[:80]}",
-        ligne_prix.cout_transport,
-    )
-    _ajouter_si_absent(
-        "frais_divers",
-        f"Frais divers — {ligne_prix.designation_courte[:80]}",
-        ligne_prix.cout_frais_divers,
-    )
-
-    if not nouvelles:
-        return 0
-
-    # Récupère l'ordre max existant pour ne pas écraser
-    ordre_max = ligne_prix.sous_details.order_by("-ordre").values_list("ordre", flat=True).first() or 0
-    for i, sd in enumerate(nouvelles, start=1):
-        sd["ordre"] = ordre_max + i
-
-    for donnees in nouvelles:
-        objet = SousDetailPrix(
-            ligne_prix=ligne_prix,
-            ordre=int(donnees["ordre"]),
-            type_ressource=str(donnees["type_ressource"]),
-            code=str(donnees.get("code") or "")[:50],
-            designation=str(donnees.get("designation") or "")[:300],
-            unite=str(donnees.get("unite") or "")[:20],
-            quantite=Decimal(str(donnees.get("quantite") or "1")),
-            cout_unitaire_ht=Decimal(str(donnees.get("cout_unitaire_ht") or "0")),
-            taux_horaire=Decimal("0"),
-            nombre_ressources=Decimal("1"),
-            temps_unitaire=Decimal("0"),
-            observations=str(donnees.get("observations") or ""),
+    # Tout dans une transaction avec verrou pour être idempotent
+    with transaction.atomic():
+        types_presents = set(
+            ligne_prix.sous_details.select_for_update().values_list("type_ressource", flat=True)
         )
-        objet.save()
+
+        nouvelles: list[dict[str, object]] = []
+
+        def _ajouter_si_absent(type_r: str, designation: str, montant: Decimal | None, unite: str = "u") -> None:
+            if not montant or montant <= 0:
+                return
+            if type_r in types_presents:
+                return
+            # Marquer localement pour éviter les doublons dans la même passe
+            types_presents.add(type_r)
+            nouvelles.append({
+                "ordre": 100 + len(nouvelles),
+                "type_ressource": type_r,
+                "code": "",
+                "designation": designation,
+                "unite": unite,
+                "quantite": str(Decimal("1")),
+                "cout_unitaire_ht": str(montant.quantize(Decimal("0.0001"))),
+                "taux_horaire": str(Decimal("0")),
+                "nombre_ressources": str(Decimal("1")),
+                "temps_unitaire": str(Decimal("0")),
+                "observations": MARQUEUR,
+            })
+
+        # Vérifie chaque type de ressource absent
+        _ajouter_si_absent(
+            "matiere",
+            f"Fournitures et matériaux — {ligne_prix.designation_courte[:80]}",
+            ligne_prix.cout_matieres,
+        )
+        _ajouter_si_absent(
+            "materiel",
+            f"Matériel et engins — {ligne_prix.designation_courte[:80]}",
+            ligne_prix.cout_materiel,
+        )
+        _ajouter_si_absent(
+            "consommable",
+            f"Consommables — {ligne_prix.designation_courte[:80]}",
+            getattr(ligne_prix, "cout_consommables", None),
+        )
+        _ajouter_si_absent(
+            "sous_traitance",
+            f"Sous-traitance — {ligne_prix.designation_courte[:80]}",
+            ligne_prix.cout_sous_traitance,
+        )
+        _ajouter_si_absent(
+            "transport",
+            f"Transport et logistique — {ligne_prix.designation_courte[:80]}",
+            ligne_prix.cout_transport,
+        )
+        _ajouter_si_absent(
+            "frais_divers",
+            f"Frais divers — {ligne_prix.designation_courte[:80]}",
+            ligne_prix.cout_frais_divers,
+        )
+
+        if not nouvelles:
+            return 0
+
+        # Récupère l'ordre max existant pour ne pas écraser
+        ordre_max = (
+            ligne_prix.sous_details.order_by("-ordre").values_list("ordre", flat=True).first() or 0
+        )
+        for i, sd in enumerate(nouvelles, start=1):
+            sd["ordre"] = ordre_max + i
+
+        objets = [
+            SousDetailPrix(
+                ligne_prix=ligne_prix,
+                ordre=int(sd["ordre"]),
+                type_ressource=str(sd["type_ressource"]),
+                code=str(sd.get("code") or "")[:50],
+                designation=str(sd.get("designation") or "")[:300],
+                unite=str(sd.get("unite") or "")[:20],
+                quantite=Decimal(str(sd.get("quantite") or "1")),
+                cout_unitaire_ht=Decimal(str(sd.get("cout_unitaire_ht") or "0")),
+                taux_horaire=Decimal("0"),
+                nombre_ressources=Decimal("1"),
+                temps_unitaire=Decimal("0"),
+                observations=str(sd.get("observations") or ""),
+            )
+            for sd in nouvelles
+        ]
+        SousDetailPrix.objects.bulk_create(objets)
 
     return len(nouvelles)
 
