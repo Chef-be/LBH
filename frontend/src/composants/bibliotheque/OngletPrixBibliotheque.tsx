@@ -162,6 +162,37 @@ function BarresDS({ ligne }: { ligne: LigneBibliotheque }) {
 // Panneau latéral de détail
 // ---------------------------------------------------------------------------
 
+interface SousDetailPrix {
+  id: string;
+  ordre: number;
+  type_ressource: string;
+  type_libelle: string;
+  code?: string;
+  designation?: string;
+  unite?: string;
+  quantite: number | string;
+  cout_unitaire_ht: number | string | null;
+  montant_ht: number | string | null;
+  taux_horaire?: number | string | null;
+  zone_taux?: string;
+  zone_libelle?: string;
+  profil_main_oeuvre_code?: string;
+  profil_main_oeuvre_libelle?: string;
+  nombre_ressources?: number;
+  temps_unitaire?: number | string | null;
+  observations?: string;
+}
+
+const COULEURS_RESSOURCE: Record<string, string> = {
+  mo: "#6366f1",
+  materiau: "#10b981",
+  materiel: "#f59e0b",
+  consommable: "#8b5cf6",
+  sous_traitance: "#ef4444",
+  transport: "#06b6d4",
+  frais_divers: "#64748b",
+};
+
 function PanneauDetailLigne({
   ligne,
   onFermer,
@@ -183,8 +214,16 @@ function PanneauDetailLigne({
     { cle: "frais_divers", libelle: "Frais divers" },
   ];
 
+  const { data: sousDetailsData, isLoading: chargementSD } = useQuery<SousDetailPrix[]>({
+    queryKey: ["sous-details-bibliotheque", ligne.id],
+    queryFn: () => api.get<SousDetailPrix[]>(`/api/bibliotheque/${ligne.id}/sous-details/`),
+  });
+  const sousDetails: SousDetailPrix[] = Array.isArray(sousDetailsData)
+    ? (sousDetailsData as SousDetailPrix[])
+    : ((sousDetailsData as unknown as { results?: SousDetailPrix[] })?.results ?? []);
+
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col bg-white shadow-2xl">
+    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col bg-white shadow-2xl">
       {/* En-tête */}
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
         <div>
@@ -227,7 +266,7 @@ function PanneauDetailLigne({
           </dl>
         </section>
 
-        {/* Décomposition DS */}
+        {/* Décomposition DS (synthèse) */}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
             Décomposition DS
@@ -302,6 +341,87 @@ function PanneauDetailLigne({
                 </tbody>
               </table>
             </>
+          )}
+        </section>
+
+        {/* Sous-détail analytique */}
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
+            Sous-détail analytique
+          </h3>
+          {chargementSD ? (
+            <p className="text-sm text-slate-400">Chargement…</p>
+          ) : sousDetails.length === 0 ? (
+            <p className="text-sm text-slate-400">Aucun sous-détail renseigné pour cette ligne.</p>
+          ) : (
+            <div className="space-y-2">
+              {sousDetails.map((sd) => {
+                const couleur = COULEURS_RESSOURCE[sd.type_ressource] ?? "#94a3b8";
+                const montant = toNumber(sd.montant_ht);
+                const estMO = sd.type_ressource === "mo";
+                return (
+                  <div
+                    key={sd.id}
+                    className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className="mt-0.5 h-2.5 w-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: couleur }}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-700 truncate">
+                            {sd.designation || sd.code || sd.type_libelle}
+                          </p>
+                          <p className="text-xs text-slate-400">{sd.type_libelle}</p>
+                        </div>
+                      </div>
+                      <p className="text-xs font-mono font-semibold text-slate-800 flex-shrink-0">
+                        {montant > 0 ? formaterMontant(montant) : "—"}
+                      </p>
+                    </div>
+                    {estMO ? (
+                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
+                        {sd.profil_main_oeuvre_libelle && (
+                          <span>{sd.profil_main_oeuvre_code} — {sd.profil_main_oeuvre_libelle}</span>
+                        )}
+                        {sd.nombre_ressources && sd.nombre_ressources > 1 && (
+                          <span>{sd.nombre_ressources} ressource(s)</span>
+                        )}
+                        {toNumber(sd.temps_unitaire) > 0 && (
+                          <span>{toNumber(sd.temps_unitaire).toFixed(3)} h/u</span>
+                        )}
+                        {toNumber(sd.taux_horaire) > 0 && (
+                          <span>{formaterMontant(sd.taux_horaire)}/h</span>
+                        )}
+                        {sd.zone_libelle && <span>{sd.zone_libelle}</span>}
+                      </div>
+                    ) : (
+                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
+                        {sd.code && <span className="font-mono">{sd.code}</span>}
+                        {toNumber(sd.quantite) > 0 && (
+                          <span>{toNumber(sd.quantite)} {sd.unite || ""}</span>
+                        )}
+                        {toNumber(sd.cout_unitaire_ht) > 0 && (
+                          <span>{formaterMontant(sd.cout_unitaire_ht)}/{sd.unite || "u"}</span>
+                        )}
+                      </div>
+                    )}
+                    {sd.observations && (
+                      <p className="mt-1 text-xs text-slate-400 italic">{sd.observations}</p>
+                    )}
+                  </div>
+                );
+              })}
+              {/* Total */}
+              <div className="flex items-center justify-between border-t border-slate-200 pt-2 mt-2 text-sm font-semibold text-slate-800">
+                <span>Total sous-détail</span>
+                <span className="font-mono">
+                  {formaterMontant(sousDetails.reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0))}
+                </span>
+              </div>
+            </div>
           )}
         </section>
       </div>

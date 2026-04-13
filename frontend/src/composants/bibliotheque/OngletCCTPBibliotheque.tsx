@@ -18,6 +18,7 @@ import {
   Search,
   Tag,
   Trash2,
+  Wand2,
   X,
 } from "lucide-react";
 
@@ -483,10 +484,84 @@ function ModalLot({
 }
 
 // ---------------------------------------------------------------------------
+// Modal rattachement article → lot
+// ---------------------------------------------------------------------------
+
+function ModalRattacherLot({
+  article,
+  lots,
+  onFermer,
+  onSucces,
+}: {
+  article: ArticleCCTP;
+  lots: LotCCTP[];
+  onFermer: () => void;
+  onSucces: () => void;
+}) {
+  const [lotId, setLotId] = useState(article.lot || "");
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const rattacher = async () => {
+    if (!lotId) { setErreur("Sélectionnez un corps d'état."); return; }
+    setEnvoi(true);
+    setErreur(null);
+    try {
+      await api.patch(`/api/pieces-ecrites/articles/${article.id}/`, { lot: lotId });
+      onSucces();
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Mise à jour impossible.");
+      setEnvoi(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="font-semibold text-slate-900">Rattacher à un corps d&apos;état</h2>
+          <button type="button" onClick={onFermer} className="rounded-lg p-1.5 hover:bg-slate-100">
+            <X className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-slate-600 font-medium">{article.intitule}</p>
+          <div>
+            <label className="etiquette-champ">Corps d&apos;état <span className="text-red-500">*</span></label>
+            <select
+              className="champ-saisie"
+              value={lotId as string}
+              onChange={(e) => setLotId(e.target.value)}
+            >
+              <option value="">— Sélectionner —</option>
+              {lots.map((lot) => (
+                <option key={lot.id} value={lot.id}>
+                  {lot.code || lot.numero} — {lot.intitule}
+                </option>
+              ))}
+            </select>
+          </div>
+          {erreur && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erreur}</div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-6 py-4">
+          <button type="button" onClick={onFermer} className="btn-secondaire text-sm">Annuler</button>
+          <button type="button" className="btn-primaire text-sm" onClick={rattacher} disabled={envoi}>
+            {envoi ? "Enregistrement…" : "Rattacher"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sous-onglet : Articles CCTP
 // ---------------------------------------------------------------------------
 
 function SousOngletArticles() {
+  const queryClient = useQueryClient();
   const { data: lotsData } = useQuery<LotCCTP[]>({
     queryKey: ["lots-cctp-articles"],
     queryFn: () => api.get<LotCCTP[]>("/api/pieces-ecrites/lots-cctp/"),
@@ -495,6 +570,10 @@ function SousOngletArticles() {
 
   const [recherche, setRecherche] = useState("");
   const [filtreLot, setFiltreLot] = useState("");
+  const [autoClassifEnCours, setAutoClassifEnCours] = useState(false);
+  const [succes, setSucces] = useState<string | null>(null);
+  const [erreurGlobal, setErreurGlobal] = useState<string | null>(null);
+  const [articleARattacher, setArticleARattacher] = useState<ArticleCCTP | null>(null);
 
   const params = new URLSearchParams({ est_dans_bibliotheque: "true" });
   if (recherche) params.set("search", recherche);
@@ -506,9 +585,39 @@ function SousOngletArticles() {
   });
   const articles = extraireListeResultats(articlesData);
 
+  const lancerAutoClassification = async () => {
+    setAutoClassifEnCours(true);
+    setSucces(null);
+    setErreurGlobal(null);
+    try {
+      const res = await api.post<{ detail: string; classes: number; ignores: number }>(
+        "/api/pieces-ecrites/articles/auto-classifier/", {}
+      );
+      setSucces(`${res.classes} article(s) classifié(s) automatiquement. ${res.ignores > 0 ? `${res.ignores} ignoré(s).` : ""}`);
+      queryClient.invalidateQueries({ queryKey: ["bibliotheque-cctp-articles-v2"] });
+    } catch (e) {
+      setErreurGlobal(e instanceof ErreurApi ? e.detail : "Classification impossible.");
+    } finally {
+      setAutoClassifEnCours(false);
+    }
+  };
+
+  const apresRattachement = () => {
+    setArticleARattacher(null);
+    queryClient.invalidateQueries({ queryKey: ["bibliotheque-cctp-articles-v2"] });
+  };
+
   return (
     <div className="space-y-4">
-      {/* Filtres */}
+      {/* Messages globaux */}
+      {succes && (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{succes}</div>
+      )}
+      {erreurGlobal && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{erreurGlobal}</div>
+      )}
+
+      {/* Filtres et actions */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -534,10 +643,22 @@ function SousOngletArticles() {
             ))}
           </select>
         )}
-        <Link href="/bibliotheque/article/nouveau" className="btn-primaire text-sm ml-auto">
-          <Plus className="h-3.5 w-3.5" />
-          Ajouter un article
-        </Link>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondaire text-sm"
+            onClick={lancerAutoClassification}
+            disabled={autoClassifEnCours}
+            title="Rattacher automatiquement les articles sans corps d'état"
+          >
+            <Wand2 className="h-3.5 w-3.5" />
+            {autoClassifEnCours ? "Classification…" : "Auto-classifier"}
+          </button>
+          <Link href="/bibliotheque/article/nouveau" className="btn-primaire text-sm">
+            <Plus className="h-3.5 w-3.5" />
+            Ajouter un article
+          </Link>
+        </div>
       </div>
 
       {/* Tableau */}
@@ -571,7 +692,7 @@ function SousOngletArticles() {
                   <td className="py-3 pr-4 text-xs text-slate-500">
                     {article.lot_code
                       ? <span><span className="font-mono mr-1">{article.lot_code}</span>{article.lot_intitule || ""}</span>
-                      : "—"}
+                      : <span className="text-orange-500 font-medium">Non classifié</span>}
                   </td>
                   <td className="py-3 pr-4 text-xs text-slate-500">
                     {article.chapitre || "—"}
@@ -590,13 +711,26 @@ function SousOngletArticles() {
                   </td>
                   <td className="py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn-secondaire text-xs"
+                        onClick={() => setArticleARattacher(article)}
+                        title="Rattacher à un corps d'état"
+                      >
+                        <Tag className="w-3.5 h-3.5" />
+                        Rattacher
+                      </button>
+                      <Link href={`/bibliotheque/article/${article.id}`} className="btn-secondaire text-xs">
+                        <Pencil className="w-3.5 h-3.5" />
+                        Éditer
+                      </Link>
                       {article.ligne_prix_reference && (
                         <Link
                           href={`/bibliotheque/${article.ligne_prix_reference}`}
                           className="btn-secondaire text-xs"
                         >
                           <Eye className="w-3.5 h-3.5" />
-                          Ouvrir
+                          Prix
                         </Link>
                       )}
                       {article.source_url && (
@@ -617,6 +751,16 @@ function SousOngletArticles() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Modal rattachement */}
+      {articleARattacher && (
+        <ModalRattacherLot
+          article={articleARattacher}
+          lots={lots}
+          onFermer={() => setArticleARattacher(null)}
+          onSucces={apresRattachement}
+        />
       )}
     </div>
   );

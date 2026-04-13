@@ -325,6 +325,16 @@ class VueDetailArticleCCTP(generics.RetrieveUpdateDestroyAPIView):
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
+def vue_auto_classifier_articles(request):
+    """Rattache automatiquement les articles CCTP sans lot à un corps d'état selon mots-clés."""
+    from .services import auto_classifier_articles_cctp
+    lot_id = request.data.get("lot_id")  # restreindre à un lot spécifique si fourni
+    resultat = auto_classifier_articles_cctp(lot_id_cible=lot_id)
+    return Response({"detail": f"{resultat['classes']} article(s) classé(s).", **resultat})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
 def vue_valider_piece_ecrite(request, pk):
     piece = generics.get_object_or_404(PieceEcrite, pk=pk)
     piece.statut = "valide"

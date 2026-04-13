@@ -22,6 +22,7 @@ urlpatterns = [
     path("generer-cctp/", views.vue_generer_cctp_multi_lots, name="generer-cctp"),
 
     # Bibliothèque d'articles CCTP
+    path("articles/auto-classifier/", views.vue_auto_classifier_articles, name="articles-auto-classifier"),
     path("articles/", views.VueListeArticlesCCTP.as_view(), name="articles-cctp-bibliotheque"),
     path("articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="article-cctp-detail"),
 

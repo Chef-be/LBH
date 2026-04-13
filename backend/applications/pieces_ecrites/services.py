@@ -21,7 +21,7 @@ from docx.shared import Inches, Pt
 from lxml import etree, html as html_parser
 from openpyxl import Workbook, load_workbook
 
-from .models import PieceEcrite
+from .models import PieceEcrite, ArticleCCTP, LotCCTP
 from .office import assurer_gabarit_bureautique, extension_gabarit_modele
 
 
@@ -1910,3 +1910,122 @@ def analyser_cctp_depuis_document(document) -> dict[str, object]:
         "nb_articles_crees": nb_crees,
         "erreurs": erreurs,
     }
+
+
+# ---------------------------------------------------------------------------
+# Auto-classification des articles CCTP par corps d'état
+# ---------------------------------------------------------------------------
+
+_MAPPING_MOTS_CLES_LOTS: list[tuple[str, list[str]]] = [
+    ("VRD",     ["VRD", "voirie", "réseau", "canalisation", "assainissement", "trottoir",
+                 "enrobé", "pavé", "caniveau", "regard", "TP Installations", "distribution",
+                 "gestion de dechets", "gestion des déchets", "déchets dangereux", "déchets inertes",
+                 "déchets végétaux", "transport de dechets", "deversement de dechets",
+                 "trituration", "broyage des dechets", "classification des dechets"]),
+    ("TERR",    ["terrassement", "excavation", "remblai", "déblai", "nivellement",
+                 "compactage", "fouille", "sondage", "travaux archeologiques", "archéologique",
+                 "archéologie", "transport des terres", "deversement de terres"]),
+    ("GO",      ["gros œuvre", "béton", "fondation", "structure", "maçonnerie", "ancrage",
+                 "cheville", "paroi", "dalle", "poteau", "poutre", "voile", "ferraillage",
+                 "coffrage", "briques de verre", "interventions prealables",
+                 "protections temporaires", "étude des pathologies", "pathologie",
+                 "démolition", "demolitions", "déconnexion", "dératisation", "désinfection",
+                 "travaux generaux du macon", "neutralisation", "repositionnement",
+                 "echafaud", "grues a tour", "plateformes"]),
+    ("FAC",     ["façade", "bardage", "enveloppe", "parement", "isolation thermique par l'extérieur",
+                 "ITE", "ravalement", "Enveloppe et finition exterieure",
+                 "Elements complementaires de facade"]),
+    ("MRC",     ["mur-rideau", "mur rideau", "vitrage extérieur", "store extérieur"]),
+    ("MOB",     ["ossature bois", "construction bois", "CLT", "charpente bois lamellé"]),
+    ("CHMET",   ["charpente métallique", "métal", "acier", "structure acier", "portique"]),
+    ("CHCZ",    ["couverture", "toiture", "zinguerie", "tuile", "ardoise", "bac acier",
+                 "Couvertures de toitures", "noue", "faitage", "chéneau", "gouttiere",
+                 "gouttieres", "renovation energetique / toits"]),
+    ("ETAN",    ["étanchéité", "imperméabilisation", "membrane", "bitume", "EPDM",
+                 "Etancheite", "points singuliers toiture terrasse",
+                 "RTB systemes d isolation", "RTC systemes d isolation", "RTF systemes d isolation",
+                 "protections au radon", "radon", "depressurisation"]),
+    ("MENUEXT", ["menuiserie extérieure", "fenêtre", "porte-fenêtre", "vitrage",
+                 "fermeture extérieure", "volet", "portail", "store",
+                 "renovation energetique / baies", "protection solaire", "jalousies"]),
+    ("MENUINT", ["menuiserie intérieure", "cloison", "porte intérieure", "serrurerie",
+                 "huisserie", "cloison de bureau", "cloison mobile", "doublage cloison",
+                 "Cloisons", "Equipements pour cuisines", "plans de travail", "evier",
+                 "cuisines et b"]),
+    ("IPP",     ["isolation intérieure", "plâtrerie", "peinture", "enduit", "doublage",
+                 "faux-plafond", "plafond suspendu", "revêtement mural",
+                 "Isolations interieures", "Peintures", "Doublages", "Revetements de plafonds",
+                 "Amenagements et finitions"]),
+    ("RSC",     ["revêtement de sol", "carrelage", "parquet", "chape", "ragréage",
+                 "moquette", "résine", "Revetements de sols"]),
+    ("ELEC",    ["électricité", "éclairage", "courant fort", "courant faible",
+                 "télécommunication", "câblage", "tableau électrique", "prise",
+                 "Installations electriques", "Eclairage", "Installations de telecommunication",
+                 "Systemes de protection collective", "Protections contre les incendies",
+                 "Securite et sante", "audiovisuel", "sonorisation", "interphone",
+                 "haut-parleur", "interphone vidéo", "protection contre la foudre",
+                 "protections contre la foudre", "parafoudre", "paratonnerre",
+                 "Installations audiovisuelles", "alarme incendie", "detection alarme"]),
+    ("PLB",     ["plomberie", "sanitaire", "robinetterie", "lavabo", "douche", "baignoire",
+                 "WC", "évier", "colonne", "alimentation eau", "évacuation",
+                 "Equipements sanitaires", "installations de gaz", "réseau de gaz",
+                 "compteur gaz", "détection gaz", "réservoir gaz", "gaz naturel",
+                 "Installations d evacuation", "recuperation des eaux", "collecteur"]),
+    ("CVC",     ["chauffage", "ventilation", "climatisation", "CVC", "aéraulique",
+                 "pompe à chaleur", "VMC", "gaine", "ECS", "chaudière", "radiateur",
+                 "Climatisation et ventilation", "Distribution d air", "ECS et chauffage"]),
+    ("ASC",     ["ascenseur", "monte-charge", "élévateur", "monte-voitures", "monte-escaliers",
+                 "escalier mécanique", "escalators", "tapis roulant", "rampe mobile",
+                 "Appareils elevateurs"]),
+    ("PAY",     ["paysager", "espace vert", "plantation", "arbre", "gazon", "engazonnement",
+                 "clôture", "mobilier urbain"]),
+]
+
+
+def _deviner_lot_depuis_texte(texte: str, lots_par_code: dict) -> "LotCCTP | None":
+    """Retourne le premier LotCCTP dont les mots-clés apparaissent dans le texte."""
+    texte_lower = texte.lower()
+    for code, mots in _MAPPING_MOTS_CLES_LOTS:
+        for mot in mots:
+            if mot.lower() in texte_lower:
+                lot = lots_par_code.get(code)
+                if lot:
+                    return lot
+    return None
+
+
+def auto_classifier_articles_cctp(lot_id_cible: str | None = None) -> dict:
+    """
+    Parcourt les ArticleCCTP sans lot et leur attribue automatiquement un corps d'état
+    selon les mots-clés présents dans l'intitulé, le chapitre et les tags.
+    """
+    lots_qs = LotCCTP.objects.filter(est_actif=True)
+    lots_par_code = {lot.code: lot for lot in lots_qs}
+
+    articles_qs = ArticleCCTP.objects.filter(est_dans_bibliotheque=True, lot__isnull=True)
+    if lot_id_cible:
+        # Mode : forcer un lot spécifique sur tous les articles sans lot
+        lot_cible = lots_qs.filter(pk=lot_id_cible).first()
+        if lot_cible:
+            n = articles_qs.update(lot=lot_cible)
+            return {"classes": n, "ignores": 0}
+        return {"classes": 0, "ignores": 0}
+
+    classes = 0
+    ignores = 0
+    for article in articles_qs.iterator(chunk_size=500):
+        texte_complet = " ".join(filter(None, [
+            article.intitule,
+            article.chapitre,
+            " ".join(article.tags or []),
+            article.source,
+        ]))
+        lot = _deviner_lot_depuis_texte(texte_complet, lots_par_code)
+        if lot:
+            article.lot = lot
+            article.save(update_fields=["lot"])
+            classes += 1
+        else:
+            ignores += 1
+
+    return {"classes": classes, "ignores": ignores}
