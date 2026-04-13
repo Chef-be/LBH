@@ -7,6 +7,7 @@ import Link from "next/link";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
 import { BoutonActionRapide, GroupeActionsRapides, LienActionRapide } from "@/composants/ui/ActionsRapides";
+import { ApercuFichierModal } from "@/composants/ui/ApercuFichierModal";
 import { FileText, Filter, Eye, Pencil, Trash2 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +27,10 @@ interface Document {
   version: string;
   est_version_courante: boolean;
   origine: string;
+  fichier: string | null;
+  nom_fichier_origine: string;
   taille_octets: number | null;
+  type_mime: string;
   auteur_nom: string;
   date_modification: string;
 }
@@ -92,6 +96,7 @@ export function ListeDocuments({
   const [suppressionId, setSuppressionId] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [succes, setSucces] = useState<string | null>(null);
+  const [documentApercu, setDocumentApercu] = useState<Document | null>(null);
 
   const params = new URLSearchParams({ projet: projetId, ordering: "-date_modification" });
   if (filtreStatut) params.set("statut", filtreStatut);
@@ -274,11 +279,19 @@ export function ListeDocuments({
                         </td>
                         <td className="py-3 text-right">
                           <GroupeActionsRapides>
-                            <LienActionRapide
-                              href={construireLienDocument(doc.id)}
-                              titre="Ouvrir le document"
-                              icone={Eye}
-                            />
+                            {doc.fichier ? (
+                              <BoutonActionRapide
+                                titre="Prévisualiser le fichier"
+                                icone={Eye}
+                                onClick={() => setDocumentApercu(doc)}
+                              />
+                            ) : (
+                              <LienActionRapide
+                                href={construireLienDocument(doc.id)}
+                                titre="Ouvrir le document"
+                                icone={Eye}
+                              />
+                            )}
                             <LienActionRapide
                               href={construireLienDocument(doc.id)}
                               titre="Modifier le document"
@@ -302,6 +315,14 @@ export function ListeDocuments({
             ))}
         </div>
       )}
+
+      <ApercuFichierModal
+        ouvert={Boolean(documentApercu)}
+        onFermer={() => setDocumentApercu(null)}
+        url={documentApercu?.fichier}
+        typeMime={documentApercu?.type_mime}
+        nomFichier={documentApercu?.nom_fichier_origine || documentApercu?.intitule}
+      />
     </div>
   );
 }

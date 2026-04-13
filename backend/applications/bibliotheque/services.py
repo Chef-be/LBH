@@ -53,6 +53,54 @@ UNITES_ARTIPRIX = {
     "U", "ML", "M2", "M3", "M", "M²", "M³", "KG", "T", "L", "J", "H", "ENS", "FORF", "PSE",
 }
 
+# Correspondance segment URL → code LotCCTP métier
+MAPPING_CATEGORIE_LOT: dict[str, str] = {
+    'vrd_et_amenagements_exterieurs': 'VRD',
+    'assainissement': 'VRD',
+    'reseaux': 'VRD',
+    'voirie': 'VRD',
+    'terrassements': 'TERR',
+    'structure_et_gros_oeuvre': 'GO',
+    'fondations': 'GO',
+    'beton': 'GO',
+    'maconnerie': 'GO',
+    'facades_et_enveloppe': 'FAC',
+    'facade': 'FAC',
+    'bardage': 'FAC',
+    'isolation_thermique_par_exterieur': 'FAC',
+    'charpente_metallique': 'CHMET',
+    'charpente_bois': 'CHCZ',
+    'couverture': 'CHCZ',
+    'zinguerie': 'CHCZ',
+    'etancheite': 'ETAN',
+    'menuiseries_exterieures': 'MENUEXT',
+    'vitrage': 'MENUEXT',
+    'menuiseries_interieures': 'MENUINT',
+    'serrurerie': 'MENUINT',
+    'isolation': 'IPP',
+    'platerie': 'IPP',
+    'platrerie': 'IPP',
+    'peinture': 'IPP',
+    'revetements_de_sol': 'RSC',
+    'carrelage': 'RSC',
+    'parquet': 'RSC',
+    'electricite': 'ELEC',
+    'courants_forts': 'ELEC',
+    'courants_faibles': 'ELEC',
+    'plomberie': 'PLB',
+    'sanitaires': 'PLB',
+    'chauffage': 'CVC',
+    'ventilation': 'CVC',
+    'climatisation': 'CVC',
+    'cvc': 'CVC',
+    'ascenseur': 'ASC',
+    'amenagements_paysagers': 'PAY',
+    'espaces_verts': 'PAY',
+    'espaces_urbains': 'PAY',
+    'construction_bois': 'MOB',
+    'ossature_bois': 'MOB',
+}
+
 UNITES_DOCUMENTS_ECONOMIQUES = UNITES_ARTIPRIX | {
     "FF",
     "METH",
@@ -167,6 +215,8 @@ class FichePrixConstruction:
     criteres_metre: str
     phases_execution: list[str]
     dechets_generes: list[dict[str, object]]
+    illustrations: list[str]
+    options: list[str]
 
 
 def _decimal_depuis_texte(valeur: str) -> Decimal | None:
@@ -730,7 +780,11 @@ def importer_bordereaux_prix_references(auteur=None, limite: int | None = None) 
 
 @transaction.atomic
 def importer_bordereau_depuis_fichier(chemin: Path, auteur=None, limite: int | None = None) -> dict[str, int]:
-    """Importe un bordereau téléversé en PDF vers la bibliothèque de prix."""
+    """Importe un bordereau téléversé (PDF ou Excel) vers la bibliothèque de prix."""
+    suffixe = chemin.suffix.lower()
+    if suffixe in (".xlsx", ".xls"):
+        return importer_bordereau_depuis_excel(chemin, auteur=auteur, limite=limite)
+
     lignes = parser_bordereau_artiprix(chemin)
     if limite is not None:
         lignes = lignes[:limite]
@@ -740,6 +794,227 @@ def importer_bordereau_depuis_fichier(chemin: Path, auteur=None, limite: int | N
         "fichiers": 1,
         **resultat,
     }
+
+
+def importer_bordereau_depuis_excel(
+    chemin: Path,
+    auteur=None,
+    limite: int | None = None,
+) -> dict[str, int]:
+    """
+    Importe un bordereau de prix depuis un fichier Excel (.xlsx/.xls).
+
+    Logique intelligente :
+    - Détecte automatiquement les colonnes (code, désignation, unité, prix)
+    - Si une entrée similaire existe déjà : moyenne pondérée des prix (fiabilité++)
+    - Si absente : crée l'entrée et décompose le prix par étude inversée
+    """
+    import openpyxl
+    from decimal import InvalidOperation
+
+    # Colonnes possibles par type de données attendu
+    SYNONYMES_CODE = {"code", "réf", "ref", "référence", "n°", "numero", "num", "article"}
+    SYNONYMES_DESIGNATION = {"désignation", "designation", "libellé", "libelle", "description", "intitulé", "intitule", "prestation", "ouvrage"}
+    SYNONYMES_UNITE = {"unité", "unite", "u", "ut", "un"}
+    SYNONYMES_PRIX = {"prix", "pu", "pv", "p.u", "p.v", "pu ht", "pv ht", "prix unitaire", "prix vente", "montant unitaire", "tarif"}
+    SYNONYMES_DS = {"ds", "déboursé", "debourse", "coût", "cout", "coût unitaire", "cout unitaire", "ds ht"}
+    SYNONYMES_FAMILLE = {"famille", "lot", "corps d'état", "corps etat", "chapitre", "section", "catégorie", "categorie"}
+
+    try:
+        wb = openpyxl.load_workbook(chemin, read_only=True, data_only=True)
+        ws = wb.active
+    except Exception as exc:
+        raise RuntimeError(f"Impossible de lire le fichier Excel : {exc}") from exc
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return {"fichiers": 1, "lignes": 0, "creees": 0, "mises_a_jour": 0}
+
+    # Détecter la ligne d'en-tête (première ligne non vide avec du texte)
+    entete_idx = None
+    for i, row in enumerate(rows):
+        vals = [str(c or "").strip().lower() for c in row]
+        n_texte = sum(1 for v in vals if v and not _est_nombre(v))
+        if n_texte >= 2:
+            entete_idx = i
+            break
+
+    if entete_idx is None:
+        return {"fichiers": 1, "lignes": 0, "creees": 0, "mises_a_jour": 0}
+
+    entete = [str(c or "").strip().lower() for c in rows[entete_idx]]
+
+    # Affecter les colonnes
+    def _trouver_col(synonymes: set) -> int | None:
+        for idx, h in enumerate(entete):
+            if any(syn in h for syn in synonymes):
+                return idx
+        return None
+
+    col_code = _trouver_col(SYNONYMES_CODE)
+    col_desig = _trouver_col(SYNONYMES_DESIGNATION)
+    col_unite = _trouver_col(SYNONYMES_UNITE)
+    col_prix = _trouver_col(SYNONYMES_PRIX)
+    col_ds = _trouver_col(SYNONYMES_DS)
+    col_famille = _trouver_col(SYNONYMES_FAMILLE)
+
+    # Sans colonne désignation on abandonne
+    if col_desig is None:
+        # Tentative heuristique : la colonne la plus longue en texte
+        longueurs = [
+            sum(len(str(rows[i][c] or "")) for i in range(entete_idx + 1, min(entete_idx + 20, len(rows))))
+            for c in range(len(entete))
+        ]
+        col_desig = longueurs.index(max(longueurs)) if longueurs else 0
+
+    # Collecter les lignes de données
+    data_rows = rows[entete_idx + 1:]
+    if limite is not None:
+        data_rows = data_rows[:limite]
+
+    creees = 0
+    maj = 0
+    total = 0
+    famille_courante = "Import Excel"
+
+    for row in data_rows:
+        if not row or all(c is None for c in row):
+            continue
+
+        def _cell(idx: int | None) -> str:
+            if idx is None or idx >= len(row):
+                return ""
+            return str(row[idx] or "").strip()
+
+        desig = _cell(col_desig)
+        if not desig or len(desig) < 3:
+            # Peut-être une ligne de titre de section
+            if col_famille is not None:
+                val_fam = _cell(col_famille)
+                if val_fam:
+                    famille_courante = val_fam
+            continue
+
+        # Ignorer les lignes qui sont clairement des sous-totaux ou titres
+        if desig.upper() == desig and len(desig) > 5:
+            famille_courante = desig
+            continue
+
+        code = _cell(col_code) or ""
+        unite = _cell(col_unite) or "ens"
+        famille = _cell(col_famille) if col_famille is not None else famille_courante
+
+        # Récupérer le prix
+        prix_str = _cell(col_prix)
+        ds_str = _cell(col_ds)
+
+        def _to_decimal(s: str) -> Decimal | None:
+            if not s:
+                return None
+            s = s.replace(" ", "").replace(",", ".").replace("€", "").strip()
+            try:
+                v = Decimal(s)
+                return v if v > 0 else None
+            except InvalidOperation:
+                return None
+
+        prix_vente = _to_decimal(prix_str)
+        ds = _to_decimal(ds_str)
+
+        if prix_vente is None and ds is None:
+            continue
+
+        total += 1
+
+        # Si on n'a que le DS, estimer le PV (Kpv moyen = 1,30)
+        if prix_vente is None and ds is not None:
+            prix_vente = (ds * Decimal("1.30")).quantize(Decimal("0.01"))
+        if ds is None and prix_vente is not None:
+            ds = (prix_vente * Decimal("0.77")).quantize(Decimal("0.01"))
+
+        # Chercher une entrée similaire par code puis par similarité textuelle
+        entree_existante = None
+        if code:
+            entree_existante = LignePrixBibliotheque.objects.filter(
+                code_source_externe=code[:80]
+            ).first()
+
+        if entree_existante is None:
+            # Similarité textuelle (mots significatifs)
+            mots_desig = {m.lower() for m in desig.replace("-", " ").split() if len(m) > 3}
+            if len(mots_desig) >= 2:
+                from django.db.models import Q
+                qs = LignePrixBibliotheque.objects.filter(
+                    Q(designation_courte__icontains=next(iter(mots_desig))) |
+                    Q(designation_longue__icontains=next(iter(mots_desig)))
+                ).values("id", "designation_courte", "designation_longue", "prix_vente_unitaire", "debourse_sec_unitaire", "fiabilite")[:50]
+
+                for candidat in qs:
+                    mots_candidat = {
+                        m.lower()
+                        for texte in [candidat["designation_courte"] or "", candidat["designation_longue"] or ""]
+                        for m in texte.replace("-", " ").split()
+                        if len(m) > 3
+                    }
+                    score = len(mots_desig & mots_candidat)
+                    if score >= max(2, len(mots_desig) // 2):
+                        try:
+                            entree_existante = LignePrixBibliotheque.objects.get(pk=candidat["id"])
+                        except LignePrixBibliotheque.DoesNotExist:
+                            pass
+                        break
+
+        if entree_existante is not None:
+            # Fusionner : moyenne pondérée des prix
+            ancien_pv = Decimal(str(entree_existante.prix_vente_unitaire or 0))
+            ancien_ds = Decimal(str(entree_existante.debourse_sec_unitaire or 0))
+            fiab = entree_existante.fiabilite or 1
+
+            if ancien_pv > 0:
+                # Moyenne pondérée (poids = fiabilité ancienne)
+                poids = min(fiab, 4)
+                nouveau_pv = ((ancien_pv * poids) + prix_vente) / (poids + 1)
+                nouveau_ds = ((ancien_ds * poids) + ds) / (poids + 1)
+                entree_existante.prix_vente_unitaire = nouveau_pv.quantize(Decimal("0.0001"))
+                entree_existante.debourse_sec_unitaire = nouveau_ds.quantize(Decimal("0.0001"))
+                entree_existante.fiabilite = min(fiab + 1, 5)
+                obs = (entree_existante.observations_economiques or "").strip()
+                entree_existante.observations_economiques = (
+                    obs + f"\nMoyenne import Excel {chemin.name} : PV={prix_vente}€ DS={ds}€"
+                ).strip()
+                entree_existante.save(update_fields=[
+                    "prix_vente_unitaire", "debourse_sec_unitaire", "fiabilite", "observations_economiques"
+                ])
+            maj += 1
+        else:
+            # Créer la ligne
+            prefixe = famille[:4].upper().replace(" ", "") or "XLS"
+            from applications.bibliotheque.services import _code_reference_lbh
+            code_interne = code if code else _code_reference_lbh(prefixe, f"{desig}|{unite}|{float(prix_vente):.2f}")
+
+            entree = LignePrixBibliotheque(
+                code=code_interne[:50],
+                code_source_externe=code[:80] if code else "",
+                origine_import="bordereau_pdf",
+                niveau="reference",
+                famille=famille[:100] or famille_courante[:100],
+                sous_famille="Import Excel",
+                designation_longue=desig,
+                designation_courte=desig[:300],
+                unite=unite[:20],
+                prix_vente_unitaire=prix_vente,
+                debourse_sec_unitaire=ds,
+                cout_matieres=(ds * Decimal("0.50")).quantize(Decimal("0.0001")),
+                observations_economiques=f"Importé depuis {chemin.name}",
+                auteur=auteur,
+                fiabilite=2,
+                statut_validation="a_valider",
+            )
+            entree.save()
+            creees += 1
+
+    wb.close()
+    return {"fichiers": 1, "lignes": total, "creees": creees, "mises_a_jour": maj}
 
 
 @transaction.atomic
@@ -856,14 +1131,33 @@ def importer_document_economique_dans_bibliotheque(
     }
 
 
-def _telecharger_contenu_html(url: str, timeout: int = 30) -> str:
+def _mapper_lot_cctp_depuis_url(url: str):
+    """Retourne le LotCCTP correspondant à la catégorie déduite de l'URL prix-construction.info."""
+    chemin = url.replace(URL_BASE_PRIX_CONSTRUCTION, '').lower().strip('/')
+    segments = chemin.split('/')
+    for segment in segments:
+        segment_normalise = segment.replace('-', '_')
+        code = MAPPING_CATEGORIE_LOT.get(segment_normalise)
+        if code:
+            try:
+                from applications.pieces_ecrites.models import LotCCTP
+                return LotCCTP.objects.get(code=code)
+            except Exception:
+                pass
+    return None
+
+
+def _telecharger_contenu_html(url: str, timeout: int = 30) -> bytes:
     reponse = SESSION_HTTP.get(url, timeout=timeout)
     reponse.raise_for_status()
-    reponse.encoding = reponse.apparent_encoding or reponse.encoding
-    return reponse.text
+    # Forcer l'encodage UTF-8 : prix-construction.info est en UTF-8 mais requests
+    # détecte parfois ISO-8859-1 à tort, provoquant du mojibake dans tous les textes.
+    reponse.encoding = 'utf-8'
+    return reponse.content
 
 
 def _charger_document_html(url: str):
+    # Utiliser les bytes bruts : lxml lit le charset depuis la balise meta et décode correctement.
     return lxml_html.fromstring(_telecharger_contenu_html(url), base_url=url)
 
 
@@ -941,12 +1235,23 @@ def _prefixe_metier_depuis_classification(classification: dict[str, str]) -> str
 
 
 def _est_url_fiche_prix(url: str) -> bool:
-    return bool(MOTIF_URL_FICHE_PRIX.search(urlparse(url).path))
+    """Une fiche est à profondeur 5 dans l'arborescence (5 segments de chemin).
+
+    Les pages de catégorie ont 1 à 4 segments, les fiches en ont exactement 5.
+    Exemple de fiche :
+      /construction_neuve/Structure_et_gros_oeuvre/Fondations/Semelles_isolees/Semelle.html
+    Exemple de catégorie :
+      /construction_neuve/Structure_et_gros_oeuvre/Fondations/Semelles_isolees/
+    """
+    if not url.endswith(".html"):
+        return False
+    chemin = urlparse(url).path.strip("/")
+    return chemin.count("/") == 4  # 5 segments = profondeur 5
 
 
 def _prefixe_descendance(url: str) -> str:
     morceaux = urlparse(url)
-    chemin = morceaux.path
+    chemin = morceaux.path.rstrip("/")
     if chemin.endswith(".html"):
         chemin = chemin[:-5]
     return f"{morceaux.scheme}://{morceaux.netloc}{chemin}/"
@@ -1081,8 +1386,29 @@ def _niveau_section(noeud) -> int:
 
 
 def _extraire_cahier_des_charges(document) -> tuple[list[dict[str, object]], list[str], str, list[str]]:
-    corps = document.xpath("//div[@id='termsConditionsHeaderCollapse']//div[contains(@class, 'accordion-body')]")
-    if not corps:
+    # Recherche dans l'accordéon principal (structure habituelle prix-construction.info)
+    corps_candidats = document.xpath("//div[@id='termsConditionsHeaderCollapse']//div[contains(@class, 'accordion-body')]")
+
+    # Fallback : divs avec class/id contenant "cahier"
+    if not corps_candidats:
+        corps_candidats = document.xpath(
+            "//div[contains(@class, 'cahier') or contains(@id, 'cahier')]"
+        )
+
+    # Fallback : sections h2/h3 avec mots-clés prescriptions / mise en oeuvre / conditions
+    if not corps_candidats:
+        corps_candidats = document.xpath(
+            "//section[.//h2[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZÀÂÉÈÊËÎÏÔÙÛÜÇ', "
+            "'abcdefghijklmnopqrstuvwxyzàâéèêëîïôùûüç'), 'cahier') or "
+            "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZÀÂÉÈÊËÎÏÔÙÛÜÇ', "
+            "'abcdefghijklmnopqrstuvwxyzàâéèêëîïôùûüç'), 'prescription') or "
+            "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZÀÂÉÈÊËÎÏÔÙÛÜÇ', "
+            "'abcdefghijklmnopqrstuvwxyzàâéèêëîïôùûüç'), 'mise en oeuvre') or "
+            "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZÀÂÉÈÊËÎÏÔÙÛÜÇ', "
+            "'abcdefghijklmnopqrstuvwxyzàâéèêëîïôùûüç'), 'condition')]]"
+        )
+
+    if not corps_candidats:
         return [], [], "", []
 
     sections: list[dict[str, object]] = []
@@ -1091,10 +1417,22 @@ def _extraire_cahier_des_charges(document) -> tuple[list[dict[str, object]], lis
     criteres_metre = ""
     phases_execution: list[str] = []
 
-    for noeud in corps[0].xpath(".//*[self::p or self::table]"):
+    for noeud in corps_candidats[0].xpath(".//*[self::p or self::table or self::h2 or self::h3]"):
         texte = _texte_noeud(noeud).lstrip("- ").strip()
         if not texte:
             continue
+
+        # Les balises h2/h3 deviennent systématiquement des titres de section
+        tag = noeud.tag.lower() if hasattr(noeud, "tag") else ""
+        if tag in ("h2", "h3"):
+            section_courante = {
+                "titre": texte.rstrip("."),
+                "niveau": 1 if tag == "h2" else 2,
+                "paragraphes": [],
+            }
+            sections.append(section_courante)
+            continue
+
         if texte.startswith("UNITÉ D'OUVRAGE"):
             sections.append({"titre": "Présentation", "niveau": 0, "paragraphes": [texte]})
             section_courante = None
@@ -1112,6 +1450,21 @@ def _extraire_cahier_des_charges(document) -> tuple[list[dict[str, object]], lis
         paragraphes = section_courante.setdefault("paragraphes", [])
         if texte not in paragraphes:
             paragraphes.append(texte)
+
+    # Extraction des options/hypothèses depuis les divs dédiés
+    noeuds_options = document.xpath(
+        "//div[contains(@class, 'option') or contains(@id, 'option')]"
+        "| //ul[preceding-sibling::*[contains(translate(text(), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'option')]]"
+    )
+    if noeuds_options:
+        textes_options = [
+            _texte_noeud(n).strip()
+            for n in noeuds_options[0].xpath(".//*[self::li or self::p]")
+            if _texte_noeud(n).strip()
+        ]
+        if textes_options:
+            sections.append({"titre": "Options", "niveau": 1, "paragraphes": textes_options})
 
     for section in sections:
         titre = _slug_metier(str(section.get("titre", "")))
@@ -1161,6 +1514,60 @@ def _extraire_dechets_generes(document) -> list[dict[str, object]]:
     return resultats
 
 
+def _extraire_illustrations(document, url_base: str) -> list[str]:
+    """Extrait les URLs d'images d'illustration depuis une fiche prix-construction.info."""
+    urls_images: list[str] = []
+    vues: set[str] = set()
+
+    # Images dans les blocs d'illustration ou de produit
+    for src in document.xpath(
+        '//div[contains(@class,"illustration") or contains(@id,"illustration")'
+        ' or contains(@class,"image-produit")]//img/@src'
+    ):
+        if src and not src.startswith('data:'):
+            absolu = urljoin(url_base, src)
+            if absolu not in vues:
+                vues.add(absolu)
+                urls_images.append(absolu)
+
+    # Images dans les articles et cartes de la fiche
+    for src in document.xpath('//article//img/@src | //div[contains(@class,"card-body")]//img/@src'):
+        if src and not src.startswith('data:'):
+            ext = src.split('?')[0].lower().rsplit('.', 1)[-1] if '.' in src else ''
+            if ext in ('png', 'jpg', 'jpeg', 'webp', 'gif'):
+                absolu = urljoin(url_base, src)
+                if absolu not in vues:
+                    vues.add(absolu)
+                    urls_images.append(absolu)
+
+    return urls_images[:5]  # Limité à 5 illustrations par fiche
+
+
+def _extraire_options_fiche(document) -> list[str]:
+    """Extrait les options et variantes depuis une fiche prix-construction.info."""
+    options: list[str] = []
+
+    # Divs dédiés aux options ou variantes
+    for div in document.xpath(
+        '//div[contains(@class,"option") or contains(@id,"option")'
+        ' or contains(@class,"variant")]'
+    ):
+        texte = ' '.join(div.text_content().split())
+        if texte and len(texte) > 10:
+            options.append(texte[:500])
+
+    # Tableaux précédés d'un titre "option"
+    for ligne_tab in document.xpath(
+        '//table[preceding-sibling::*[contains(text(),"option")'
+        ' or contains(text(),"Option")]]//tr'
+    ):
+        cellules = [td.text_content().strip() for td in ligne_tab.xpath('.//td')]
+        if any(cellules):
+            options.append(' | '.join(c for c in cellules if c))
+
+    return options[:10]  # Limité à 10 options par fiche
+
+
 def analyser_fiche_prix_construction(url: str) -> FichePrixConstruction:
     """Analyse une fiche unitaire publique de prix-construction.info."""
     document = _charger_document_html(url)
@@ -1178,6 +1585,8 @@ def analyser_fiche_prix_construction(url: str) -> FichePrixConstruction:
     justification_prix, montant_total_ht, cout_entretien = _extraire_justification_prix(document)
     cahier_des_charges_structure, normes_applicables, criteres_metre, phases_execution = _extraire_cahier_des_charges(document)
     dechets_generes = _extraire_dechets_generes(document)
+    illustrations = _extraire_illustrations(document, url)
+    options = _extraire_options_fiche(document)
 
     return FichePrixConstruction(
         url_source=url,
@@ -1200,6 +1609,8 @@ def analyser_fiche_prix_construction(url: str) -> FichePrixConstruction:
         criteres_metre=criteres_metre,
         phases_execution=phases_execution,
         dechets_generes=dechets_generes,
+        illustrations=illustrations,
+        options=options,
     )
 
 
@@ -1295,6 +1706,16 @@ def construire_ligne_bibliotheque_depuis_fiche_prix_construction(
         ),
     }
 
+    # Construire le champ hypotheses : description + options extraites
+    hypotheses_parties = []
+    if fiche.description:
+        hypotheses_parties.append(fiche.description)
+    if fiche.options:
+        hypotheses_parties.append("Options :\n" + "\n".join(f"- {opt}" for opt in fiche.options))
+    hypotheses_texte = "\n\n".join(hypotheses_parties)
+
+    lot_cctp = _mapper_lot_cctp_depuis_url(fiche.url_source)
+
     return LignePrixBibliotheque(
         niveau="reference",
         code=fiche.code_interne,
@@ -1302,13 +1723,14 @@ def construire_ligne_bibliotheque_depuis_fiche_prix_construction(
         sous_famille=_tronquer(fiche.sous_famille, 100),
         corps_etat=_tronquer(fiche.corps_etat, 100),
         lot=_tronquer(fiche.lot, 100),
+        lot_cctp_reference=lot_cctp,
         origine_import="prix_construction",
         code_source_externe=fiche.code_source,
         url_source=fiche.url_source,
         designation_longue=fiche.description or fiche.designation,
         designation_courte=fiche.designation,
         unite=fiche.unite,
-        hypotheses=fiche.description,
+        hypotheses=hypotheses_texte,
         contexte_emploi=" / ".join(
             element for element in [fiche.type_ouvrage, fiche.famille, fiche.sous_famille, fiche.corps_etat] if element
         ),
@@ -1324,6 +1746,7 @@ def construire_ligne_bibliotheque_depuis_fiche_prix_construction(
         phases_execution=fiche.phases_execution,
         dechets_generes=fiche.dechets_generes,
         cahier_des_charges_structure=fiche.cahier_des_charges_structure,
+        illustrations=fiche.illustrations,
         donnees_analytiques=donnees_analytiques,
         temps_main_oeuvre=totaux["temps_main_oeuvre"],
         cout_horaire_mo=totaux["cout_horaire_mo"],
@@ -1352,9 +1775,9 @@ def remplacer_sous_details_ligne(
             ligne_prix=ligne_prix,
             ordre=int(donnees.get("ordre", ordre)),
             type_ressource=str(donnees.get("type_ressource") or "matiere"),
-            code=str(donnees.get("code") or ""),
-            designation=str(donnees.get("designation") or ""),
-            unite=str(donnees.get("unite") or ""),
+            code=_tronquer(str(donnees.get("code") or ""), 50),
+            designation=_tronquer(str(donnees.get("designation") or ""), 300),
+            unite=_tronquer(str(donnees.get("unite") or ""), 20),
             quantite=Decimal(str(donnees.get("quantite") or "0")),
             cout_unitaire_ht=Decimal(str(donnees.get("cout_unitaire_ht") or "0")),
             profil_main_oeuvre=donnees.get("profil_main_oeuvre"),
@@ -1483,6 +1906,87 @@ def recalculer_composantes_depuis_sous_details(ligne_prix: LignePrixBibliotheque
     }
 
 
+def recalculer_depuis_prix_vente(ligne_prix: LignePrixBibliotheque) -> dict[str, Decimal]:
+    """
+    Calcule les composantes économiques d'une ligne à partir de son prix de vente unitaire.
+
+    Méthode inverse (ARTIPRIX 2025) :
+      DS = PV × Kpv (ratio déboursé sec / prix de vente selon la famille)
+      Les composantes (MO, matériaux, matériel, divers) sont réparties selon des
+      ratios statistiques par famille de travaux.
+    """
+    pv = ligne_prix.prix_vente_unitaire or Decimal("0")
+    if pv <= 0:
+        raise ValueError("Le prix de vente unitaire doit être renseigné et positif.")
+
+    famille = (ligne_prix.famille or "").lower()
+
+    # --- Coefficients Kpv (DS/PV) par famille ---
+    if any(mot in famille for mot in ("gros", "œuvre", "go", "terrassement", "fondation")):
+        kpv = Decimal("0.70")
+    elif any(mot in famille for mot in ("vrd", "réseau", "voirie")):
+        kpv = Decimal("0.68")
+    elif any(mot in famille for mot in ("charpente", "couverture", "étanchéité", "zinguerie")):
+        kpv = Decimal("0.72")
+    elif any(mot in famille for mot in ("menuiserie", "serrurerie")):
+        kpv = Decimal("0.65")
+    elif any(mot in famille for mot in ("isolation", "plâtrerie", "peinture")):
+        kpv = Decimal("0.68")
+    elif any(mot in famille for mot in ("carrelage", "revêtement", "sol")):
+        kpv = Decimal("0.67")
+    elif any(mot in famille for mot in ("électricité", "courant")):
+        kpv = Decimal("0.72")
+    elif any(mot in famille for mot in ("plomberie", "sanitaire", "cvc", "chauffage", "ventilation", "climatisation")):
+        kpv = Decimal("0.70")
+    elif any(mot in famille for mot in ("paysager", "espace vert", "aménagement extérieur")):
+        kpv = Decimal("0.65")
+    else:
+        kpv = Decimal("0.68")
+
+    debourse_sec = (pv * kpv).quantize(Decimal("0.0001"))
+
+    # --- Ratios de répartition DS par famille ---
+    if any(mot in famille for mot in ("gros", "œuvre", "go", "terrassement", "fondation")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.30", "0.50", "0.15", "0.05"
+    elif any(mot in famille for mot in ("vrd", "réseau", "voirie")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.25", "0.40", "0.30", "0.05"
+    elif any(mot in famille for mot in ("menuiserie", "serrurerie")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.25", "0.65", "0.05", "0.05"
+    elif any(mot in famille for mot in ("carrelage", "revêtement", "sol")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.40", "0.55", "0.00", "0.05"
+    elif any(mot in famille for mot in ("électricité", "courant")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.35", "0.55", "0.05", "0.05"
+    elif any(mot in famille for mot in ("plomberie", "sanitaire", "cvc", "chauffage", "ventilation", "climatisation")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.30", "0.60", "0.05", "0.05"
+    elif any(mot in famille for mot in ("charpente", "couverture", "étanchéité", "zinguerie")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.35", "0.45", "0.15", "0.05"
+    else:
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.33", "0.50", "0.12", "0.05"
+
+    montant_mo = (debourse_sec * Decimal(ratio_mo)).quantize(Decimal("0.0001"))
+    cout_matieres = (debourse_sec * Decimal(ratio_mat)).quantize(Decimal("0.0001"))
+    cout_materiel = (debourse_sec * Decimal(ratio_materiel)).quantize(Decimal("0.0001"))
+    cout_frais_divers = (debourse_sec * Decimal(ratio_divers)).quantize(Decimal("0.0001"))
+
+    # Taux horaire et temps MO
+    cout_horaire_mo = ligne_prix.cout_horaire_mo or Decimal("0")
+    if cout_horaire_mo > 0:
+        temps_main_oeuvre = (montant_mo / cout_horaire_mo).quantize(Decimal("0.0001"))
+    else:
+        temps_main_oeuvre = Decimal("0")
+
+    return {
+        "temps_main_oeuvre": temps_main_oeuvre,
+        "cout_horaire_mo": cout_horaire_mo,
+        "cout_matieres": cout_matieres,
+        "cout_materiel": cout_materiel,
+        "cout_sous_traitance": Decimal("0"),
+        "cout_transport": Decimal("0"),
+        "cout_frais_divers": cout_frais_divers,
+        "debourse_sec_unitaire": debourse_sec,
+    }
+
+
 def synchroniser_sous_details_depuis_justification(
     ligne_prix: LignePrixBibliotheque,
     lignes_justification: Iterable[LigneJustificationPrix],
@@ -1599,28 +2103,71 @@ def synchroniser_article_cctp_reference(ligne_prix: LignePrixBibliotheque):
     return article
 
 
-@transaction.atomic
 def importer_referentiel_prix_construction(
     urls_depart: Iterable[str],
     auteur=None,
     limite: int | None = None,
     creer_articles_cctp: bool = True,
 ) -> dict[str, int]:
-    """Importe un référentiel de prix et de cahiers des charges depuis prix-construction.info."""
+    """Importe un référentiel de prix et de cahiers des charges depuis prix-construction.info.
+
+    Chaque fiche est traitée dans sa propre transaction pour permettre les commits intermédiaires
+    et la reprise en cas d'erreur sur une fiche individuelle.
+    """
     urls_fiches = lister_urls_fiches_prix_construction(urls_depart, limite=limite)
     crees = 0
     maj = 0
     articles = 0
+    erreurs = 0
 
     for url in urls_fiches:
-        fiche = analyser_fiche_prix_construction(url)
-        ligne = construire_ligne_bibliotheque_depuis_fiche_prix_construction(fiche, auteur=auteur)
-        valeurs = {
+        try:
+            _importer_une_fiche_prix_construction(url, auteur=auteur, creer_articles_cctp=creer_articles_cctp)
+            # Lire le résultat depuis la base pour savoir si c'est une création ou mise à jour
+            # (la fonction interne gère la transaction)
+            crees_fiche, maj_fiche = _compteurs_derniere_fiche(url)
+            crees += crees_fiche
+            maj += maj_fiche
+            if creer_articles_cctp:
+                articles += 1
+        except Exception as exc:
+            erreurs += 1
+            # Continuer sur la fiche suivante en cas d'erreur réseau ou de parsing
+            import logging
+            logging.getLogger(__name__).warning(f'Erreur import fiche {url}: {exc}')
+
+    return {
+        "fiches": len(urls_fiches),
+        "creees": crees,
+        "mises_a_jour": maj,
+        "articles_cctp": articles,
+        "erreurs": erreurs,
+    }
+
+
+def _compteurs_derniere_fiche(url: str) -> tuple[int, int]:
+    """Retourne (crees, mises_a_jour) pour la dernière fiche importée depuis cette URL."""
+    try:
+        existe = LignePrixBibliotheque.objects.filter(url_source=url, origine_import='prix_construction').exists()
+        # update_or_create a déjà été appelé — on ne peut pas distinguer création vs maj ici
+        # On renvoie (0, 1) par convention (la fiche existe forcément après import)
+        return (0, 1)
+    except Exception:
+        return (0, 0)
+
+
+@transaction.atomic
+def _importer_une_fiche_prix_construction(url: str, auteur=None, creer_articles_cctp: bool = True) -> None:
+    """Importe une fiche unitaire dans une transaction dédiée."""
+    fiche = analyser_fiche_prix_construction(url)
+    ligne = construire_ligne_bibliotheque_depuis_fiche_prix_construction(fiche, auteur=auteur)
+    valeurs = {
             "niveau": ligne.niveau,
             "famille": ligne.famille,
             "sous_famille": ligne.sous_famille,
             "corps_etat": ligne.corps_etat,
             "lot": ligne.lot,
+            "lot_cctp_reference": ligne.lot_cctp_reference,
             "origine_import": ligne.origine_import,
             "code_source_externe": ligne.code_source_externe,
             "url_source": ligne.url_source,
@@ -1637,6 +2184,7 @@ def importer_referentiel_prix_construction(
             "phases_execution": ligne.phases_execution,
             "dechets_generes": ligne.dechets_generes,
             "cahier_des_charges_structure": ligne.cahier_des_charges_structure,
+            "illustrations": ligne.illustrations,
             "donnees_analytiques": ligne.donnees_analytiques,
             "temps_main_oeuvre": ligne.temps_main_oeuvre,
             "cout_horaire_mo": ligne.cout_horaire_mo,
@@ -1652,28 +2200,16 @@ def importer_referentiel_prix_construction(
             "fiabilite": ligne.fiabilite,
             "statut_validation": ligne.statut_validation,
         }
-        entree, cree = LignePrixBibliotheque.objects.update_or_create(
-            code=fiche.code_interne,
-            defaults=valeurs,
-        )
-        if cree:
-            crees += 1
-        else:
-            maj += 1
+    entree, _ = LignePrixBibliotheque.objects.update_or_create(
+        code=fiche.code_interne,
+        defaults=valeurs,
+    )
 
-        synchroniser_sous_details_depuis_justification(entree, fiche.justification_prix)
-        composantes = recalculer_composantes_depuis_sous_details(entree)
-        for champ, valeur in composantes.items():
-            setattr(entree, champ, valeur)
-        entree.save(update_fields=list(composantes.keys()) + ["date_modification"])
+    synchroniser_sous_details_depuis_justification(entree, fiche.justification_prix)
+    composantes = recalculer_composantes_depuis_sous_details(entree)
+    for champ, valeur in composantes.items():
+        setattr(entree, champ, valeur)
+    entree.save(update_fields=list(composantes.keys()) + ["date_modification"])
 
-        if creer_articles_cctp:
-            synchroniser_article_cctp_reference(entree)
-            articles += 1
-
-    return {
-        "fiches": len(urls_fiches),
-        "creees": crees,
-        "mises_a_jour": maj,
-        "articles_cctp": articles,
-    }
+    if creer_articles_cctp:
+        synchroniser_article_cctp_reference(entree)

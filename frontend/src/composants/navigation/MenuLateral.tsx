@@ -8,9 +8,8 @@ import { clsx } from "clsx";
 import { useConfiguration } from "@/contextes/FournisseurConfiguration";
 import { api, extraireListeResultats } from "@/crochets/useApi";
 import {
-  LayoutDashboard, FolderKanban, FileText, Calculator,
-  BookOpen, TrendingUp, Hammer, Building2, FileEdit,
-  Megaphone, HardHat, Settings, Activity, Globe, Users, Mail,
+  LayoutDashboard, FolderKanban, BookOpen,
+  Activity, Globe, Users, Mail, Shield,
   ChevronLeft, Menu,
 } from "lucide-react";
 import { obtenirMarqueAffichee, obtenirNomPlateforme } from "@/lib/site-public";
@@ -37,17 +36,9 @@ const GROUPES_MENU: GroupeMenu[] = [
     ],
   },
   {
-    titre: "Études",
+    titre: "Bibliothèques",
     entrees: [
-      { libelle: "Documents", chemin: "/documents", icone: FileText, codeModule: "GESTION_DOCUMENTAIRE" },
-      { libelle: "Métrés", chemin: "/metres", icone: Calculator, codeModule: "METRES_QUANTITATIFS" },
-      { libelle: "Économie", chemin: "/economie", icone: TrendingUp, codeModule: "ECONOMIE_CONSTRUCTION" },
-      { libelle: "Bibliothèque de prix", chemin: "/bibliotheque", icone: BookOpen, codeModule: "BIBLIOTHEQUE_PRIX" },
-      { libelle: "Voirie", chemin: "/voirie", icone: Hammer, codeModule: "DIMENSIONNEMENT_VOIRIE" },
-      { libelle: "Bâtiment", chemin: "/batiment", icone: Building2, codeModule: "PRESIZING_BATIMENT" },
-      { libelle: "Pièces écrites", chemin: "/pieces-ecrites", icone: FileEdit, codeModule: "PIECES_ECRITES" },
-      { libelle: "Appels d'offres", chemin: "/appels-offres", icone: Megaphone, codeModule: "APPELS_OFFRES" },
-      { libelle: "Exécution", chemin: "/execution", icone: HardHat, codeModule: "SUIVI_EXECUTION" },
+      { libelle: "Bibliothèque", chemin: "/bibliotheque", icone: BookOpen, codeModule: "BIBLIOTHEQUE_PRIX" },
     ],
   },
   {
@@ -61,12 +52,10 @@ const GROUPES_MENU: GroupeMenu[] = [
 const GROUPE_ADMIN: GroupeMenu = {
   titre: "Administration",
   entrees: [
-    { libelle: "Site public", chemin: "/", icone: Globe, nouvelOnglet: true },
-    { libelle: "Contenus du site", chemin: "/administration", icone: Settings },
-    { libelle: "Modèles de documents", chemin: "/administration/modeles-documents", icone: FileEdit },
+    { libelle: "Administration", chemin: "/administration", icone: Shield },
     { libelle: "Utilisateurs", chemin: "/utilisateurs", icone: Users },
     { libelle: "Supervision", chemin: "/supervision", icone: Activity },
-    { libelle: "Paramètres", chemin: "/parametres", icone: Settings },
+    { libelle: "Site public", chemin: "/", icone: Globe, nouvelOnglet: true },
   ],
 };
 

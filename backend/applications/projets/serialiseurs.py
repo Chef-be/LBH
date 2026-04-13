@@ -3,8 +3,17 @@ Sérialiseurs pour l'application Projets — Plateforme LBH.
 """
 
 from rest_framework import serializers
-from .models import Projet, Lot, Intervenant
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet
 from .services import construire_processus_recommande
+from .referentiels import (
+    clientele_depuis_famille,
+    contexte_projet_pour_projet,
+    mode_variation_pour_projet,
+    normaliser_contexte_persistant,
+    normaliser_mode_variation_persistant,
+    objectif_depuis_contexte,
+    phase_depuis_contexte,
+)
 
 
 class LotSerialiseur(serializers.ModelSerializer):
@@ -82,6 +91,10 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
     objectif_mission_libelle = serializers.CharField(source="get_objectif_mission_display", read_only=True)
     processus_recommande = serializers.SerializerMethodField()
     dossiers_ged = serializers.SerializerMethodField()
+    contexte_projet = serializers.SerializerMethodField()
+    mode_variation_prix = serializers.SerializerMethodField()
+    contexte_projet_saisie = serializers.JSONField(write_only=True, required=False)
+    mode_variation_prix_saisie = serializers.JSONField(write_only=True, required=False)
 
     def get_type_libelle(self, obj):
         if obj.type_projet == "autre" and obj.type_projet_autre:
@@ -93,6 +106,46 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
 
     def get_dossiers_ged(self, obj):
         return construire_processus_recommande(obj).get("dossiers_ged", [])
+
+    def get_contexte_projet(self, obj):
+        return contexte_projet_pour_projet(obj)
+
+    def get_mode_variation_prix(self, obj):
+        return mode_variation_pour_projet(obj)
+
+    def _appliquer_contexte_avance(self, projet, contexte_saisi, mode_variation_saisi):
+        qualification = dict(projet.qualification_wizard or {})
+
+        if contexte_saisi is not None:
+            contexte_normalise = normaliser_contexte_persistant(contexte_saisi)
+            qualification["contexte_projet"] = contexte_normalise
+            projet.clientele_cible = clientele_depuis_famille(contexte_normalise["famille_client"])
+            projet.objectif_mission = objectif_depuis_contexte(
+                famille_client=contexte_normalise["famille_client"],
+                mission_principale=contexte_normalise["phase_intervention"] or contexte_normalise["mission_principale"],
+                contexte_contractuel=contexte_normalise["contexte_contractuel"],
+            )
+            projet.phase_actuelle = phase_depuis_contexte(
+                contexte_normalise["phase_intervention"],
+                contexte_normalise["mission_principale"],
+            )
+            if not projet.description and contexte_normalise["partie_contractante"]:
+                projet.description = f"Partie contractante : {contexte_normalise['partie_contractante']}"
+
+        if mode_variation_saisi is not None:
+            qualification["mode_variation_prix"] = normaliser_mode_variation_persistant(mode_variation_saisi)
+
+        projet.qualification_wizard = qualification
+        projet.save(
+            update_fields=[
+                "qualification_wizard",
+                "clientele_cible",
+                "objectif_mission",
+                "phase_actuelle",
+                "description",
+                "date_modification",
+            ]
+        )
 
     def validate(self, attrs):
         type_projet = attrs.get("type_projet", getattr(self.instance, "type_projet", ""))
@@ -109,7 +162,26 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
         if type_projet != "autre":
             attrs["type_projet_autre"] = ""
 
+        if self.instance is None and attrs.get("organisation", serializers.empty) is serializers.empty:
+            attrs["organisation"] = None
+
         return attrs
+
+    def create(self, validated_data):
+        contexte_saisi = validated_data.pop("contexte_projet_saisie", None)
+        mode_variation_saisi = validated_data.pop("mode_variation_prix_saisie", None)
+        projet = super().create(validated_data)
+        if contexte_saisi is not None or mode_variation_saisi is not None:
+            self._appliquer_contexte_avance(projet, contexte_saisi, mode_variation_saisi)
+        return projet
+
+    def update(self, instance, validated_data):
+        contexte_saisi = validated_data.pop("contexte_projet_saisie", None)
+        mode_variation_saisi = validated_data.pop("mode_variation_prix_saisie", None)
+        projet = super().update(instance, validated_data)
+        if contexte_saisi is not None or mode_variation_saisi is not None:
+            self._appliquer_contexte_avance(projet, contexte_saisi, mode_variation_saisi)
+        return projet
 
     class Meta:
         model = Projet
@@ -129,12 +201,17 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
             "description", "observations", "qualification_wizard",
             "processus_recommande",
             "dossiers_ged",
+            "contexte_projet",
+            "mode_variation_prix",
+            "contexte_projet_saisie",
+            "mode_variation_prix_saisie",
             "publier_sur_site",
             "lots", "intervenants",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "reference", "date_creation", "date_modification"]
+        read_only_fields = ["id", "date_creation", "date_modification"]
         extra_kwargs = {
+            "organisation": {"required": False, "allow_null": True},
             "responsable": {"required": False, "allow_null": True},
             "maitre_ouvrage": {"required": False, "allow_null": True},
             "maitre_oeuvre": {"required": False, "allow_null": True},
@@ -146,3 +223,20 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
             "montant_marche": {"required": False, "allow_null": True},
             "honoraires_prevus": {"required": False, "allow_null": True},
         }
+
+
+class PreanalyseSourcesProjetSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = PreanalyseSourcesProjet
+        fields = [
+            "id",
+            "statut",
+            "progression",
+            "message",
+            "nombre_fichiers",
+            "resultat",
+            "erreur",
+            "date_creation",
+            "date_modification",
+            "date_fin",
+        ]

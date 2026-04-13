@@ -21,8 +21,8 @@ try:
     conn = psycopg2.connect(
         host=os.environ.get('BDD_HOTE') or f'{prefixe}-postgresql',
         port=int(os.environ.get('BDD_PORT', '5432')),
-        dbname=os.environ.get('BDD_NOM') or f'plateforme_{prefixe.replace("-", "_")}',
-        user=os.environ.get('BDD_UTILISATEUR') or f'{prefixe.replace("-", "_")}_appli',
+        dbname=os.environ.get('BDD_NOM') or ('plateforme_' + prefixe.replace('-', '_')),
+        user=os.environ.get('BDD_UTILISATEUR') or (prefixe.replace('-', '_') + '_appli'),
         password=os.environ.get('BDD_MOT_DE_PASSE', ''),
         connect_timeout=5
     )

@@ -1106,3 +1106,61 @@ def vue_simuler_plan_activite(request):
             lignes_simulation.append(ligne)
 
     return Response(simuler_plan_activite({"lignes": lignes_simulation}))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_decomposer_prix_inverse(request):
+    """
+    Décompose intelligemment un prix de vente connu.
+    Body: {prix_vente_unitaire, lot_type, methode, taux_personnalises?}
+    """
+    from .services import calculer_decomposition_inverse
+
+    pv = request.data.get("prix_vente_unitaire")
+    if not pv:
+        return Response({"erreur": "prix_vente_unitaire est requis."}, status=400)
+
+    try:
+        resultat = calculer_decomposition_inverse(
+            prix_vente_unitaire=pv,
+            lot_type=request.data.get("lot_type", ""),
+            methode=request.data.get("methode", "ratios_artiprix"),
+            taux_personnalises=request.data.get("taux_personnalises"),
+        )
+        return Response(resultat)
+    except Exception as exc:
+        return Response({"erreur": str(exc)}, status=400)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_missions_par_type_client(request):
+    """Retourne les missions économiques disponibles par type de client."""
+    type_client = request.query_params.get("type_client", "")
+    missions_map = {
+        "moa_public": [
+            {"code": "estimation_tce", "libelle": "Estimation TCE", "description": "Estimation toutes corps d'état en avant-projet"},
+            {"code": "dpgf_lots", "libelle": "DPGF par lot", "description": "Décomposition du Prix Global et Forfaitaire par lot"},
+            {"code": "dqe_consultation", "libelle": "DQE de consultation", "description": "Détail Quantitatif Estimatif pour la consultation"},
+            {"code": "analyse_offres", "libelle": "Analyse d'offres", "description": "Analyse comparative des offres reçues"},
+            {"code": "suivi_dgd", "libelle": "Suivi DGD", "description": "Décompte Général Définitif et liquidation"},
+            {"code": "revision_prix", "libelle": "Révision de prix", "description": "Calcul de la révision de prix par formule paramétrique"},
+            {"code": "controle_situation", "libelle": "Contrôle situations", "description": "Contrôle et visa des situations de travaux"},
+        ],
+        "moe": [
+            {"code": "honoraires_moe", "libelle": "Honoraires MOE", "description": "Calcul des honoraires selon la mission et le montant travaux"},
+            {"code": "planning_mission", "libelle": "Planning de mission", "description": "Jalons, livrables et délais de la mission"},
+            {"code": "rapport_avancement", "libelle": "Rapport d'avancement", "description": "Synthèse mensuelle de l'avancement"},
+            {"code": "mission_opc", "libelle": "Mission OPC", "description": "Ordonnancement, Pilotage et Coordination du chantier"},
+        ],
+        "entreprise_btp": [
+            {"code": "etude_prix_analytique", "libelle": "Étude de prix analytique", "description": "Déboursé sec → Prix de vente par ressource"},
+            {"code": "reponse_ao", "libelle": "Réponse AO", "description": "BPU, DQE et mémoire technique pour réponse à AO"},
+            {"code": "marge_lot", "libelle": "Analyse de marge", "description": "Marges par ligne, lot et affaire"},
+            {"code": "situation_travaux", "libelle": "Situations de travaux", "description": "Établissement et suivi des situations mensuelles"},
+        ],
+    }
+    if type_client and type_client in missions_map:
+        return Response(missions_map[type_client])
+    return Response(missions_map)

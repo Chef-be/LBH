@@ -7,12 +7,12 @@ from django.core.files.base import ContentFile
 from django.http import FileResponse, HttpResponse
 from django.urls import reverse
 from rest_framework import generics, permissions, status, filters
-from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, parser_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .models import ModeleDocument, PieceEcrite, ArticleCCTP
+from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, PrescriptionCCTP
 from .office import (
     assurer_gabarit_bureautique,
     construire_url_editeur_collabora,
@@ -28,12 +28,16 @@ from .office import (
     verifier_jeton_wopi_modele,
 )
 from .services import (
+    analyser_cctp_depuis_document,
     construire_donnees_fusion_piece,
     exporter_piece_ecrite,
+    exporter_articles_dpgf,
+    exporter_articles_bpu,
     generer_piece_depuis_modele,
     importer_fichier_word_en_html,
     proposer_article_cctp_assiste,
     regenerer_piece_ecrite,
+    renumeroter_articles_cctp,
     televerser_image_editeur,
 )
 from .serialiseurs import (
@@ -41,6 +45,9 @@ from .serialiseurs import (
     PieceEcriteListeSerialiseur,
     PieceEcriteDetailSerialiseur,
     ArticleCCTPSerialiseur,
+    LotCCTPSerialiseur,
+    PrescriptionCCTPSerialiseur,
+    GenerateurCCTPCreationSerialiseur,
 )
 
 
@@ -109,9 +116,12 @@ def vue_modele_document_session_bureautique(request, pk):
     assurer_gabarit_bureautique(modele)
 
     jeton = creer_jeton_wopi_modele(modele, request.user)
-    wopi_src = request.build_absolute_uri(
-        reverse("modele-document-wopi-fichier", kwargs={"pk": modele.pk})
-    )
+    # WOPISrc : URL que Collabora appellera pour lire/écrire le fichier.
+    # On utilise WOPI_BASE_URL (URL interne backend joignable par Collabora).
+    wopi_base = getattr(settings, "WOPI_BASE_URL", "").rstrip("/")
+    chemin_wopi = reverse("modele-document-wopi-fichier", kwargs={"pk": modele.pk})
+    # rstrip("/") : Collabora ajoute "/contents" au WOPISrc, le slash final provoquerait "//contents"
+    wopi_src = (f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)).rstrip("/")
     extension = extension_gabarit_modele(modele)
     url_editeur = construire_url_editeur_collabora(wopi_src, jeton, extension)
 
@@ -129,18 +139,24 @@ def vue_modele_document_session_bureautique(request, pk):
 
 
 @api_view(["GET", "POST"])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def vue_modele_document_wopi_fichier(request, pk):
     modele = generics.get_object_or_404(ModeleDocument, pk=pk)
     contexte = _verifier_acces_wopi_modele(request, modele)
 
     if request.method == "GET":
-        contenu = lire_contenu_gabarit(modele)
+        # CheckFileInfo — retourne les métadonnées sans lire le contenu du fichier
+        assurer_gabarit_bureautique(modele)
+        try:
+            taille = modele.gabarit.size if modele.gabarit else 0
+        except Exception:
+            taille = 0
         return Response(
             {
                 "BaseFileName": nom_affichage_gabarit(modele),
                 "OwnerId": str(modele.pk),
-                "Size": len(contenu),
+                "Size": taille,
                 "Version": str(int(modele.date_modification.timestamp())) if modele.date_modification else "1",
                 "UserId": contexte["utilisateur_id"],
                 "UserFriendlyName": f"Administrateur {getattr(settings, 'NOM_PLATEFORME', 'LBH Economiste')}",
@@ -192,6 +208,7 @@ def vue_modele_document_wopi_fichier(request, pk):
 
 
 @api_view(["GET", "POST"])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def vue_modele_document_wopi_contenu(request, pk):
     modele = generics.get_object_or_404(ModeleDocument, pk=pk)
@@ -270,14 +287,21 @@ class VueDetailPieceEcrite(generics.RetrieveUpdateDestroyAPIView):
 class VueListeArticlesCCTP(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ArticleCCTPSerialiseur
-    filter_backends = [filters.SearchFilter]
-    search_fields = ["intitule", "corps_article", "chapitre"]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["intitule", "corps_article", "chapitre", "code_reference"]
+    ordering_fields = ["chapitre", "numero_article", "lot__code", "date_modification"]
+    ordering = ["chapitre", "numero_article"]
 
     def get_queryset(self):
         piece_id = self.kwargs.get("piece_id")
         if piece_id:
-            return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id)
-        return ArticleCCTP.objects.filter(est_dans_bibliotheque=True)
+            qs = ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot")
+        else:
+            qs = ArticleCCTP.objects.filter(est_dans_bibliotheque=True).select_related("lot")
+        lot_id = self.request.query_params.get("lot")
+        if lot_id:
+            qs = qs.filter(lot_id=lot_id)
+        return qs
 
     def perform_create(self, serializer):
         piece_id = self.kwargs.get("piece_id")
@@ -295,8 +319,8 @@ class VueDetailArticleCCTP(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         piece_id = self.kwargs.get("piece_id")
         if piece_id:
-            return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id)
-        return ArticleCCTP.objects.all()
+            return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot")
+        return ArticleCCTP.objects.select_related("lot").all()
 
 
 @api_view(["POST"])
@@ -421,3 +445,183 @@ def vue_importer_fichier_word_editeur(request):
         return Response({"detail": f"Import Word impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(resultat)
+
+
+class VueLotCCTPListeCreation(generics.ListCreateAPIView):
+    """Liste et création des lots CCTP."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LotCCTPSerialiseur
+
+    def get_queryset(self):
+        inclure_inactifs = self.request.query_params.get("inclure_inactifs") == "1"
+        qs = LotCCTP.objects.prefetch_related("chapitres__prescriptions")
+        if not inclure_inactifs:
+            qs = qs.filter(est_actif=True)
+        return qs
+
+    def perform_create(self, serializer):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Seul un super-administrateur peut créer un lot CCTP.")
+        serializer.save()
+
+
+class VueLotCCTPDetail(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, modification et suppression d'un lot CCTP."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LotCCTPSerialiseur
+    queryset = LotCCTP.objects.prefetch_related("chapitres__prescriptions")
+
+    def perform_update(self, serializer):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Seul un super-administrateur peut modifier un lot CCTP.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Seul un super-administrateur peut supprimer un lot CCTP.")
+        instance.delete()
+
+
+class VueListeLotsTypesCCTP(generics.ListAPIView):
+    """Liste tous les lots CCTP disponibles avec leurs chapitres."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LotCCTPSerialiseur
+
+    def get_queryset(self):
+        return LotCCTP.objects.filter(est_actif=True).prefetch_related("chapitres__prescriptions")
+
+
+class VueListePrescriptionsLot(generics.ListAPIView):
+    """Liste les prescriptions d'un lot donné."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PrescriptionCCTPSerialiseur
+
+    def get_queryset(self):
+        lot_numero = self.kwargs.get("lot_numero")
+        qs = PrescriptionCCTP.objects.filter(est_actif=True)
+        if lot_numero:
+            qs = qs.filter(lot__code=lot_numero)
+        type_p = self.request.query_params.get("type")
+        if type_p:
+            qs = qs.filter(type_prescription=type_p)
+        return qs.select_related("lot", "chapitre")
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_generer_cctp_multi_lots(request):
+    """
+    Génère un CCTP Word complet depuis la sélection de lots et prescriptions.
+    Body: {projet_id, intitule, lots: [...], prescriptions_exclues: [...], variables: {...}}
+    """
+    from applications.projets.models import Projet
+    from .services import generer_cctp_depuis_bibliotheque
+
+    serialiseur = GenerateurCCTPCreationSerialiseur(data=request.data, context={"request": request})
+    if not serialiseur.is_valid():
+        return Response(serialiseur.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    donnees = serialiseur.validated_data
+    try:
+        projet = Projet.objects.get(pk=donnees["projet_id"])
+    except Projet.DoesNotExist:
+        return Response({"erreur": "Projet introuvable."}, status=404)
+
+    piece = generer_cctp_depuis_bibliotheque(
+        projet=projet,
+        intitule=donnees["intitule"],
+        lots_numeros=donnees.get("lots", []),
+        prescriptions_exclues_ids=donnees.get("prescriptions_exclues", []),
+        variables=donnees.get("variables", {}),
+        utilisateur=request.user,
+    )
+    return Response(PieceEcriteDetailSerialiseur(piece, context={"request": request}).data, status=201)
+
+
+# ---------------------------------------------------------------------------
+# A4 — Renumérotation automatique des articles CCTP
+# ---------------------------------------------------------------------------
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_renumeroter_articles(request, pk):
+    """Renumérotation automatique des articles CCTP selon la norme Widloecher & Cusant."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    nb = renumeroter_articles_cctp(piece)
+    return Response({"detail": f"{nb} article(s) renuméroté(s).", "nb_modifies": nb})
+
+
+# ---------------------------------------------------------------------------
+# A5 — Export DPGF / BPU
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_exporter_dpgf(request, pk):
+    """Exporte les articles CCTP au format DPGF (.xlsx)."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    from django.utils.text import slugify as _slugify
+    contenu = exporter_articles_dpgf(piece)
+    nom_fichier = f"DPGF_{_slugify(piece.intitule) or piece.pk}_{timezone.localtime():%Y%m%d}.xlsx"
+    reponse = FileResponse(
+        BytesIO(contenu),
+        as_attachment=True,
+        filename=nom_fichier,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    reponse["Content-Length"] = str(len(contenu))
+    return reponse
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_exporter_bpu(request, pk):
+    """Exporte les articles CCTP au format BPU (.xlsx)."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    from django.utils.text import slugify as _slugify
+    contenu = exporter_articles_bpu(piece)
+    nom_fichier = f"BPU_{_slugify(piece.intitule) or piece.pk}_{timezone.localtime():%Y%m%d}.xlsx"
+    reponse = FileResponse(
+        BytesIO(contenu),
+        as_attachment=True,
+        filename=nom_fichier,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    reponse["Content-Length"] = str(len(contenu))
+    return reponse
+
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_analyser_document_cctp(request, document_id):
+    """Analyse un document existant et extrait des articles CCTP en bibliothèque."""
+    from applications.documents.models import Document
+    document = generics.get_object_or_404(Document, pk=document_id)
+    resultat = analyser_cctp_depuis_document(document)
+    return Response(
+        {
+            "detail": (
+                f"{resultat['nb_articles_crees']} article(s) CCTP créé(s) "
+                f"sur {resultat['nb_articles']} section(s) détectée(s)."
+            ),
+            **resultat,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_variables_piece(request, pk):
+    """Retourne le dictionnaire complet des variables de fusion disponibles pour une pièce."""
+    from .services import construire_donnees_fusion_piece
+    piece = generics.get_object_or_404(PieceEcrite, pk=pk)
+    donnees = construire_donnees_fusion_piece(piece)
+    # Supprimer contenu_principal (trop volumineux)
+    donnees.pop("contenu_principal", None)
+    variables = [
+        {"nom": nom, "valeur": valeur, "vide": not valeur}
+        for nom, valeur in sorted(donnees.items())
+    ]
+    return Response({"variables": variables, "total": len(variables)})

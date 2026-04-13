@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, FileStack } from "lucide-react";
 import { ListePiecesEcritesProjet } from "@/composants/pieces-ecrites/ListePiecesEcritesProjet";
 
 export const metadata: Metadata = {
@@ -24,12 +24,20 @@ export default async function PagePiecesEcritesProjet({ params }: { params: Prom
             CCTP, mémoires techniques, rapports, notices
           </p>
         </div>
-        <Link
-          href={`/projets/${id}/pieces-ecrites/nouvelle`}
-          className="btn-primaire text-xs flex items-center gap-1 shrink-0"
-        >
-          <Plus size={12} /> Nouvelle pièce
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href={`/projets/${id}/pieces-ecrites/nouveau-cctp`}
+            className="btn-secondaire text-xs flex items-center gap-1"
+          >
+            <FileStack size={12} /> Créer un CCTP
+          </Link>
+          <Link
+            href={`/projets/${id}/pieces-ecrites/nouvelle`}
+            className="btn-primaire text-xs flex items-center gap-1"
+          >
+            <Plus size={12} /> Nouvelle pièce
+          </Link>
+        </div>
       </div>
       <ListePiecesEcritesProjet projetId={id} />
     </div>

@@ -22,7 +22,8 @@ application_celery = Celery("plateforme_lbh")
 application_celery.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Découverte automatique des tâches dans toutes les applications Django installées
-application_celery.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+# Le projet utilise "taches" au lieu du nom par défaut "tasks"
+application_celery.autodiscover_tasks(lambda: settings.INSTALLED_APPS, related_name="taches")
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,11 @@ application_celery.conf.beat_schedule = {
     "recalculer-indicateurs-projets": {
         "task": "applications.projets.taches.recalculer_indicateurs",
         "schedule": crontab(hour=1, minute=0),
+    },
+    # Liaison automatique lignes de prix ↔ articles CCTP — chaque jour à 03h30
+    "lier-auto-prix-articles": {
+        "task": "bibliotheque.lier_auto_prix_articles",
+        "schedule": crontab(hour=3, minute=30),
     },
 }
 

@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from rest_framework import serializers
-from .models import Metre, LigneMetre
+from .models import Metre, LigneMetre, FondPlan, ZoneMesure, ExtractionCAO
 from .services import analyser_detail_calcul
 
 
@@ -109,3 +109,56 @@ class MetreDetailSerialiseur(serializers.ModelSerializer):
 
     def get_montant_total_ht(self, obj):
         return float(obj.montant_total_ht)
+
+
+class FondPlanSerialiseur(serializers.ModelSerializer):
+    format_libelle = serializers.CharField(source="get_format_fichier_display", read_only=True)
+    nb_zones = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FondPlan
+        fields = [
+            "id", "metre", "intitule", "format_fichier", "format_libelle",
+            "fichier", "echelle", "reference_calibration",
+            "numero_page", "largeur_px", "hauteur_px", "miniature",
+            "nb_zones", "date_creation",
+        ]
+        read_only_fields = ["id", "date_creation", "nb_zones", "format_libelle"]
+
+    def get_nb_zones(self, obj):
+        return obj.zones.count()
+
+
+class ZoneMesureSerialiseur(serializers.ModelSerializer):
+    type_libelle = serializers.CharField(source="get_type_mesure_display", read_only=True)
+
+    class Meta:
+        model = ZoneMesure
+        fields = [
+            "id", "fond_plan", "ligne_metre", "designation", "type_mesure", "type_libelle",
+            "points_px", "deductions",
+            "valeur_brute", "valeur_deduction", "valeur_nette", "unite",
+            "couleur", "ordre", "date_modification",
+        ]
+        read_only_fields = [
+            "id", "ligne_metre", "valeur_brute", "valeur_deduction", "valeur_nette",
+            "date_modification", "type_libelle",
+        ]
+
+
+class ExtractionCAOSerialiseur(serializers.ModelSerializer):
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+
+    class Meta:
+        model = ExtractionCAO
+        fields = [
+            "id", "metre", "fond_plan", "statut", "statut_libelle",
+            "resultat_brut", "propositions",
+            "nb_calques", "nb_entites", "nb_propositions",
+            "message_erreur", "date_extraction", "date_creation",
+        ]
+        read_only_fields = [
+            "id", "statut_libelle", "resultat_brut", "propositions",
+            "nb_calques", "nb_entites", "nb_propositions",
+            "message_erreur", "date_extraction", "date_creation",
+        ]

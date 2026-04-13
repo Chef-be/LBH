@@ -1,11 +1,13 @@
 """Vues API pour le site vitrine public — Plateforme LBH."""
 
 import logging
+import mimetypes
 
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes, throttle_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 
@@ -135,6 +137,57 @@ def vue_televerser_media_site(request):
     sous_repertoire = "carrousel" if usage == "carrousel" else "divers"
     url = ConfigurationSite.televerser_media_site(fichier, sous_repertoire=sous_repertoire)
     return Response({"url": request.build_absolute_uri(url), "chemin": url})
+
+
+# ---------------------------------------------------------------------------
+# Proxy médias — logo, favicon (retournent les fichiers depuis le stockage objet)
+# Ces endpoints permettent au navigateur d'accéder aux fichiers sans passer
+# par l'URL interne MinIO (lbh-minio:9000) non joignable publiquement.
+# ---------------------------------------------------------------------------
+
+def _servir_champ_image(champ, etiquette_cache="logo"):
+    """Lit un champ ImageField depuis le stockage et retourne une HttpResponse."""
+    if not champ:
+        return HttpResponse(status=404)
+    try:
+        with champ.open("rb") as fichier:
+            contenu = fichier.read()
+        type_contenu = mimetypes.guess_type(champ.name)[0] or "application/octet-stream"
+        reponse = HttpResponse(contenu, content_type=type_contenu)
+        reponse["Cache-Control"] = "public, max-age=3600"
+        return reponse
+    except Exception:
+        return HttpResponse(status=404)
+
+
+@api_view(["GET"])
+@throttle_classes([])
+@permission_classes([permissions.AllowAny])
+def vue_logo(request):
+    """Sert le logo principal du site depuis le stockage objet."""
+    config = ConfigurationSite.obtenir()
+    return _servir_champ_image(config.logo if config else None)
+
+
+@api_view(["GET"])
+@throttle_classes([])
+@permission_classes([permissions.AllowAny])
+def vue_logo_pied_de_page(request):
+    """Sert le logo pied de page (fallback sur logo principal)."""
+    config = ConfigurationSite.obtenir()
+    if config:
+        champ = config.logo_pied_de_page or config.logo
+        return _servir_champ_image(champ)
+    return HttpResponse(status=404)
+
+
+@api_view(["GET"])
+@throttle_classes([])
+@permission_classes([permissions.AllowAny])
+def vue_favicon(request):
+    """Sert le favicon depuis le stockage objet."""
+    config = ConfigurationSite.obtenir()
+    return _servir_champ_image(config.favicon if config else None)
 
 
 # ---------------------------------------------------------------------------

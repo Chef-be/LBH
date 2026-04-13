@@ -9,9 +9,17 @@ urlpatterns = [
     path("modeles/<uuid:pk>/", views.VueDetailModeleDocument.as_view(), name="modele-document-detail"),
     path("modeles/<uuid:pk>/session-bureautique/", views.vue_modele_document_session_bureautique, name="modele-document-session-bureautique"),
     path("wopi/modeles/<uuid:pk>/", views.vue_modele_document_wopi_fichier, name="modele-document-wopi-fichier"),
+    path("wopi/modeles/<uuid:pk>", views.vue_modele_document_wopi_fichier),  # sans slash final (CheckFileInfo depuis Collabora)
     path("wopi/modeles/<uuid:pk>/contents", views.vue_modele_document_wopi_contenu, name="modele-document-wopi-contenu"),
     path("editeur/televersement-image/", views.vue_televerser_image_editeur, name="pieces-ecrites-editeur-televersement-image"),
     path("editeur/importer-word/", views.vue_importer_fichier_word_editeur, name="pieces-ecrites-editeur-importer-word"),
+
+    # Bibliothèque de prescriptions CCTP — lots et générateur
+    path("lots/", views.VueListeLotsTypesCCTP.as_view(), name="lots-cctp"),
+    path("lots/<str:lot_numero>/prescriptions/", views.VueListePrescriptionsLot.as_view(), name="prescriptions-lot"),
+    path("lots-cctp/", views.VueLotCCTPListeCreation.as_view(), name="lots-cctp-liste"),
+    path("lots-cctp/<uuid:pk>/", views.VueLotCCTPDetail.as_view(), name="lots-cctp-detail"),
+    path("generer-cctp/", views.vue_generer_cctp_multi_lots, name="generer-cctp"),
 
     # Bibliothèque d'articles CCTP
     path("articles/", views.VueListeArticlesCCTP.as_view(), name="articles-cctp-bibliotheque"),
@@ -25,6 +33,15 @@ urlpatterns = [
     path("<uuid:pk>/proposition-cctp/", views.vue_proposition_article_cctp, name="piece-ecrite-proposition-cctp"),
     path("<uuid:pk>/generer-modele/", views.vue_generer_piece_depuis_modele, name="piece-ecrite-generer-modele"),
     path("<uuid:pk>/export/<str:format_sortie>/", views.vue_exporter_piece_ecrite, name="piece-ecrite-export"),
+    path("<uuid:pk>/renumeroter/", views.vue_renumeroter_articles, name="piece-ecrite-renumeroter"),
+    path("<uuid:pk>/exporter-dpgf/", views.vue_exporter_dpgf, name="piece-ecrite-exporter-dpgf"),
+    path("<uuid:pk>/exporter-bpu/", views.vue_exporter_bpu, name="piece-ecrite-exporter-bpu"),
     path("<uuid:piece_id>/articles/", views.VueListeArticlesCCTP.as_view(), name="piece-articles-liste"),
     path("<uuid:piece_id>/articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="piece-article-detail"),
+
+    # Analyse automatique depuis un document GED → extraction CCTP
+    path("analyser-document/<uuid:document_id>/", views.vue_analyser_document_cctp, name="analyser-document-cctp"),
+
+    # Variables de fusion disponibles pour une pièce
+    path("<uuid:pk>/variables/", views.vue_variables_piece, name="piece-ecrite-variables"),
 ]

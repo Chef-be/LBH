@@ -12,6 +12,11 @@ urlpatterns = [
     path("configuration/rgpd/", views.vue_configuration_rgpd, name="site-configuration-rgpd"),
     path("configuration/televersement-media/", views.vue_televerser_media_site, name="site-configuration-televersement-media"),
 
+    # Médias publics — logo, favicon (proxy vers le stockage objet)
+    path("logo/", views.vue_logo, name="site-logo"),
+    path("logo-pied-de-page/", views.vue_logo_pied_de_page, name="site-logo-pied-de-page"),
+    path("favicon/", views.vue_favicon, name="site-favicon"),
+
     # Statistiques (GET public)
     path("statistiques/", views.VueListeStatistiques.as_view(), name="statistiques-liste"),
     path("statistiques/<uuid:pk>/", views.VueDetailStatistique.as_view(), name="statistique-detail"),

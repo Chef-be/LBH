@@ -3,8 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, ErreurApi } from "@/crochets/useApi";
+import { useQuery } from "@tanstack/react-query";
+import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
 import { ArrowLeft, Save, Plus, Trash2, AlertCircle, X } from "lucide-react";
+
+interface LotCCTPResume {
+  id: string;
+  code?: string;
+  numero?: string;
+  intitule: string;
+}
 
 const NIVEAUX = [
   { val: "reference", lib: "Référence (général)" },
@@ -45,6 +53,12 @@ const VIDE_SOUS_DETAIL: SousDetail = {
 export default function PageNouvelleLigneBibliotheque() {
   const router = useRouter();
   const [chargement, setChargement] = useState(false);
+
+  const { data: lotsData } = useQuery<LotCCTPResume[]>({
+    queryKey: ["lots-cctp-autocomplete"],
+    queryFn: () => api.get<LotCCTPResume[]>("/api/pieces-ecrites/lots-cctp/"),
+  });
+  const lots = extraireListeResultats(lotsData as unknown as LotCCTPResume[] | { results: LotCCTPResume[] } | null | undefined);
   const [erreur, setErreur] = useState<string | null>(null);
   const [erreurs, setErreurs] = useState<Record<string, string>>({});
   const [sousDetails, setSousDetails] = useState<SousDetail[]>([]);
@@ -240,8 +254,21 @@ export default function PageNouvelleLigneBibliotheque() {
           </div>
           <div>
             <label className="libelle-champ">Lot</label>
-            <input type="text" className="champ-saisie w-full" placeholder="Lot 7 — VRD"
-              value={form.lot} onChange={e => maj("lot", e.target.value)} />
+            <input
+              type="text"
+              list="lots-autocomplete"
+              className="champ-saisie w-full"
+              placeholder="ex. VRD"
+              value={form.lot}
+              onChange={e => maj("lot", e.target.value)}
+            />
+            <datalist id="lots-autocomplete">
+              {lots.map((lot) => (
+                <option key={lot.id} value={lot.code || lot.numero || lot.intitule}>
+                  {lot.intitule}
+                </option>
+              ))}
+            </datalist>
           </div>
         </div>
 

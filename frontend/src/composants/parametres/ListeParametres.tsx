@@ -1,13 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { clsx } from "clsx";
-import { BriefcaseBusiness, Check, History, Lock, Search, Settings2, SlidersHorizontal, X } from "lucide-react";
+import { Check, History, Lock, Search, Settings2, SlidersHorizontal, ToggleLeft, ToggleRight, X } from "lucide-react";
 
 import { api, ErreurApi } from "@/crochets/useApi";
-import { GestionMessagerie } from "@/composants/parametres/GestionMessagerie";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Parametre {
   cle: string;
@@ -22,6 +24,15 @@ interface Parametre {
   modifie_par_nom: string | null;
 }
 
+interface FonctionnaliteActivable {
+  code: string;
+  libelle: string;
+  description: string;
+  module: string;
+  est_active: boolean;
+  est_verrouillee: boolean;
+}
+
 interface JournalModification {
   id: string;
   cle_parametre: string;
@@ -31,26 +42,45 @@ interface JournalModification {
   date_modification: string;
 }
 
-type Onglet = "resume" | "parametres" | "messagerie" | "journal";
+type Onglet = "modules" | "parametres" | "journal";
 
 const ONGLETS: { id: Onglet; libelle: string; description: string }[] = [
-  { id: "resume", libelle: "Vue générale", description: "Synthèse des réglages et accès rapides." },
-  { id: "parametres", libelle: "Réglages système", description: "Paramètres métier et techniques éditables." },
-  { id: "messagerie", libelle: "Messagerie", description: "SMTP, IMAP et accès au webmail." },
+  { id: "modules", libelle: "Modules & Fonctionnalités", description: "Activer ou désactiver les briques fonctionnelles." },
+  { id: "parametres", libelle: "Réglages métier", description: "Paramètres techniques et valeurs métier." },
   { id: "journal", libelle: "Historique", description: "Traçabilité des dernières modifications." },
 ];
+
+// Groupes de modules (icônes thématiques)
+const ORDRE_MODULES: Record<string, number> = {
+  general: 1,
+  economie: 2,
+  batiment: 3,
+  voirie: 4,
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function formaterDate(iso: string | null | undefined) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR");
 }
 
-function badgeType(type: string) {
-  if (type === "decimal" || type === "entier") return "badge-info";
-  if (type === "booleen") return "badge-succes";
-  if (type === "json" || type === "liste") return "badge-alerte";
-  return "badge-neutre";
+function badgeModule(module: string) {
+  const map: Record<string, string> = {
+    general: "bg-slate-100 text-slate-600",
+    economie: "bg-primaire-100 text-primaire-700",
+    batiment: "bg-orange-100 text-orange-700",
+    voirie: "bg-emerald-100 text-emerald-700",
+    messagerie: "bg-blue-100 text-blue-700",
+  };
+  return map[module] ?? "bg-slate-100 text-slate-500";
 }
+
+// ---------------------------------------------------------------------------
+// Carte de paramètre (éditable)
+// ---------------------------------------------------------------------------
 
 function CarteParametre({ parametre }: { parametre: Parametre }) {
   const queryClient = useQueryClient();
@@ -67,52 +97,41 @@ function CarteParametre({ parametre }: { parametre: Parametre }) {
       setErreur("");
     },
     onError: (erreurCourante) => {
-      if (erreurCourante instanceof ErreurApi) {
-        setErreur(erreurCourante.detail);
-      } else {
-        setErreur("Enregistrement impossible.");
-      }
+      setErreur(erreurCourante instanceof ErreurApi ? erreurCourante.detail : "Enregistrement impossible.");
     },
   });
 
-  function annuler() {
-    setValeur(parametre.valeur);
-    setEdition(false);
-    setErreur("");
-  }
-
   return (
-    <div className="rounded-3xl border p-5 space-y-4" style={{ borderColor: "var(--bordure)", background: "var(--fond-carte)" }}>
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
       <div className="flex items-start justify-between gap-3">
-        <div className="space-y-2">
+        <div className="space-y-1.5 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="badge-neutre">{parametre.module}</span>
-            <span className={badgeType(parametre.type_valeur)}>{parametre.type_valeur}</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${badgeModule(parametre.module)}`}>{parametre.module}</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">{parametre.type_valeur}</span>
             {parametre.est_verrouille && (
-              <span className="badge-danger inline-flex items-center gap-1">
-                <Lock size={12} />
-                Verrouillé
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-600">
+                <Lock size={10} /> Verrouillé
               </span>
             )}
           </div>
-          <div>
-            <p className="font-semibold" style={{ color: "var(--texte)" }}>{parametre.libelle}</p>
-            <p className="mt-1 text-xs font-mono" style={{ color: "var(--texte-3)" }}>{parametre.cle}</p>
-          </div>
+          <p className="text-sm font-semibold text-slate-800">{parametre.libelle}</p>
+          <p className="font-mono text-[11px] text-slate-400">{parametre.cle}</p>
         </div>
         {!parametre.est_verrouille && !edition && (
-          <button onClick={() => setEdition(true)} className="btn-secondaire text-xs">Modifier</button>
+          <button onClick={() => setEdition(true)} className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-primaire-300 hover:text-primaire-700">
+            Modifier
+          </button>
         )}
       </div>
 
       {parametre.description && (
-        <p className="text-sm" style={{ color: "var(--texte-2)" }}>{parametre.description}</p>
+        <p className="text-xs text-slate-500">{parametre.description}</p>
       )}
 
-      <div className="rounded-2xl border p-4" style={{ borderColor: "var(--bordure)", background: "color-mix(in srgb, var(--fond-carte) 88%, var(--fond-app))" }}>
-        <p className="text-xs uppercase tracking-[0.18em]" style={{ color: "var(--texte-3)" }}>Valeur actuelle</p>
+      <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Valeur actuelle</p>
         {edition ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <input
               type={parametre.type_valeur === "decimal" || parametre.type_valeur === "entier" ? "number" : "text"}
               className="champ-saisie max-w-sm font-mono"
@@ -120,25 +139,23 @@ function CarteParametre({ parametre }: { parametre: Parametre }) {
               onChange={(e) => setValeur(e.target.value)}
               step={parametre.type_valeur === "decimal" ? "0.001" : undefined}
             />
-            <button onClick={() => mutate(valeur)} disabled={isPending} className="btn-primaire text-xs">
-              <Check size={14} />
-              Enregistrer
+            <button onClick={() => mutate(valeur)} disabled={isPending} className="btn-primaire text-xs py-1.5">
+              <Check size={13} /> Enregistrer
             </button>
-            <button onClick={annuler} className="btn-secondaire text-xs">
-              <X size={14} />
-              Annuler
+            <button onClick={() => { setValeur(parametre.valeur); setEdition(false); }} className="btn-secondaire text-xs py-1.5">
+              <X size={13} /> Annuler
             </button>
           </div>
         ) : (
-          <p className="mt-3 break-all font-mono text-sm font-semibold" style={{ color: "var(--texte)" }}>{parametre.valeur || "—"}</p>
+          <p className="mt-2 break-all font-mono text-sm font-semibold text-slate-800">{parametre.valeur || "—"}</p>
         )}
-        {erreur && <p className="mt-2 text-xs text-red-600">{erreur}</p>}
+        {erreur && <p className="mt-1.5 text-xs text-red-600">{erreur}</p>}
       </div>
 
-      <div className="flex flex-wrap justify-between gap-3 text-xs" style={{ color: "var(--texte-3)" }}>
-        <span>Défaut : {parametre.valeur_par_defaut || "—"}</span>
+      <div className="flex flex-wrap justify-between gap-2 text-[11px] text-slate-400">
+        <span>Défaut : <span className="font-mono">{parametre.valeur_par_defaut || "—"}</span></span>
         <span>
-          Modifié le {formaterDate(parametre.date_modification)}
+          Modifié {formaterDate(parametre.date_modification)}
           {parametre.modifie_par_nom ? ` par ${parametre.modifie_par_nom}` : ""}
         </span>
       </div>
@@ -146,15 +163,86 @@ function CarteParametre({ parametre }: { parametre: Parametre }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Carte de fonctionnalité (toggle)
+// ---------------------------------------------------------------------------
+
+function CarteFonctionnalite({ fonctionnalite }: { fonctionnalite: FonctionnaliteActivable }) {
+  const queryClient = useQueryClient();
+  const [optimiste, setOptimiste] = useState<boolean | null>(null);
+
+  const estActive = optimiste !== null ? optimiste : fonctionnalite.est_active;
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: (activer: boolean) =>
+      api.patch(`/api/parametres/fonctionnalites/${fonctionnalite.code}/`, { est_active: activer }),
+    onMutate: (activer) => setOptimiste(activer),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["fonctionnalites"] });
+      setOptimiste(null);
+    },
+    onError: () => {
+      setOptimiste(null);
+    },
+  });
+
+  return (
+    <div className={`rounded-2xl border p-4 transition-all ${estActive ? "border-primaire-200 bg-primaire-50" : "border-slate-200 bg-white"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className={`text-sm font-semibold ${estActive ? "text-primaire-800" : "text-slate-700"}`}>
+            {fonctionnalite.libelle}
+          </p>
+          {fonctionnalite.description && (
+            <p className="mt-1 text-xs text-slate-500 leading-relaxed">{fonctionnalite.description}</p>
+          )}
+          <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${badgeModule(fonctionnalite.module)}`}>
+            {fonctionnalite.module}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => !fonctionnalite.est_verrouillee && mutate(!estActive)}
+          disabled={isPending || fonctionnalite.est_verrouillee}
+          className={`shrink-0 transition-colors ${fonctionnalite.est_verrouillee ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+          title={fonctionnalite.est_verrouillee ? "Module verrouillé" : estActive ? "Désactiver" : "Activer"}
+        >
+          {estActive
+            ? <ToggleRight className="h-8 w-8 text-primaire-500" />
+            : <ToggleLeft className="h-8 w-8 text-slate-300" />
+          }
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Composant principal
+// ---------------------------------------------------------------------------
+
 export function ListeParametres() {
-  const [onglet, setOnglet] = useState<Onglet>("resume");
+  const [onglet, setOnglet] = useState<Onglet>("modules");
   const [recherche, setRecherche] = useState("");
   const [moduleActif, setModuleActif] = useState("tous");
 
-  const { data: parametres = [], isLoading, isError } = useQuery<Parametre[]>({
+  const { data: parametres = [], isLoading: chargementParametres } = useQuery<Parametre[]>({
     queryKey: ["parametres"],
     queryFn: () => api.get<Parametre[]>("/api/parametres/"),
     select: (data) => (Array.isArray(data) ? data : ((data as { results?: Parametre[] }).results ?? [])),
+  });
+
+  const { data: fonctionnalites = [], isLoading: chargementFonctionnalites } = useQuery<FonctionnaliteActivable[]>({
+    queryKey: ["fonctionnalites"],
+    queryFn: () => api.get<FonctionnaliteActivable[]>("/api/parametres/fonctionnalites/"),
+    select: (data) => {
+      const liste = Array.isArray(data) ? data : ((data as { results?: FonctionnaliteActivable[] }).results ?? []);
+      return liste.sort((a, b) => {
+        const oa = ORDRE_MODULES[a.module] ?? 99;
+        const ob = ORDRE_MODULES[b.module] ?? 99;
+        return oa !== ob ? oa - ob : a.libelle.localeCompare(b.libelle);
+      });
+    },
   });
 
   const { data: journal = [] } = useQuery<JournalModification[]>({
@@ -163,199 +251,170 @@ export function ListeParametres() {
     select: (data) => (Array.isArray(data) ? data : ((data as { results?: JournalModification[] }).results ?? [])),
   });
 
+  // Paramètres : exclure le module messagerie (géré dans /administration/configuration)
+  const parametresFiltres = useMemo(() => {
+    return parametres
+      .filter((p) => p.module !== "messagerie")
+      .filter((p) => {
+        const correspondModule = moduleActif === "tous" || p.module === moduleActif;
+        const terme = recherche.trim().toLowerCase();
+        const correspondRecherche =
+          terme === "" ||
+          p.libelle.toLowerCase().includes(terme) ||
+          p.cle.toLowerCase().includes(terme) ||
+          p.description.toLowerCase().includes(terme);
+        return correspondModule && correspondRecherche;
+      });
+  }, [moduleActif, parametres, recherche]);
+
   const modules = useMemo(
-    () => Array.from(new Set(parametres.map((parametre) => parametre.module))).sort((a, b) => a.localeCompare(b)),
+    () => Array.from(new Set(parametres.filter((p) => p.module !== "messagerie").map((p) => p.module))).sort(),
     [parametres]
   );
 
-  const parametresFiltres = useMemo(() => {
-    return parametres.filter((parametre) => {
-      const correspondModule = moduleActif === "tous" || parametre.module === moduleActif;
-      const terme = recherche.trim().toLowerCase();
-      const correspondRecherche =
-        terme === "" ||
-        parametre.libelle.toLowerCase().includes(terme) ||
-        parametre.cle.toLowerCase().includes(terme) ||
-        parametre.description.toLowerCase().includes(terme);
-      return correspondModule && correspondRecherche;
-    });
-  }, [moduleActif, parametres, recherche]);
+  const nbActives = fonctionnalites.filter((f) => f.est_active).length;
+  const nbTotal = fonctionnalites.length;
+  const chargement = chargementParametres || chargementFonctionnalites;
 
-  const resumeModules = useMemo(() => {
-    return modules.map((moduleCourant) => ({
-      module: moduleCourant,
-      total: parametres.filter((parametre) => parametre.module === moduleCourant).length,
-    }));
-  }, [modules, parametres]);
-
-  if (isLoading) {
-    return <div className="py-16 text-center text-sm" style={{ color: "var(--texte-2)" }}>Chargement des paramètres…</div>;
-  }
-
-  if (isError) {
-    return <div className="py-16 text-center text-sm text-red-600">Erreur lors du chargement des paramètres.</div>;
+  if (chargement) {
+    return <div className="py-16 text-center text-sm text-slate-400">Chargement des paramètres…</div>;
   }
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border p-2" style={{ borderColor: "var(--bordure)", background: "var(--fond-carte)" }}>
-        <nav className="grid gap-2 md:grid-cols-4">
-          {ONGLETS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setOnglet(item.id)}
-              className={clsx("rounded-2xl px-4 py-4 text-left transition-all", onglet === item.id && "shadow-sm")}
-              style={{
-                background: onglet === item.id ? "var(--c-leger)" : "transparent",
-                border: `1px solid ${onglet === item.id ? "color-mix(in srgb, var(--c-base) 25%, var(--bordure))" : "transparent"}`,
-              }}
-            >
-              <p className="text-sm font-semibold" style={{ color: onglet === item.id ? "var(--c-fort)" : "var(--texte)" }}>{item.libelle}</p>
-              <p className="mt-1 text-xs" style={{ color: "var(--texte-2)" }}>{item.description}</p>
-            </button>
-          ))}
-        </nav>
+      {/* Navigation onglets */}
+      <div className="flex gap-1 rounded-2xl border border-slate-200 bg-slate-50 p-1.5">
+        {ONGLETS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setOnglet(item.id)}
+            className={`flex-1 rounded-xl px-4 py-3 text-left transition-all ${
+              onglet === item.id
+                ? "bg-white shadow-sm"
+                : "hover:bg-white/60"
+            }`}
+          >
+            <p className={`text-sm font-semibold ${onglet === item.id ? "text-primaire-700" : "text-slate-700"}`}>
+              {item.libelle}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400">{item.description}</p>
+          </button>
+        ))}
       </div>
 
-      {onglet === "resume" && (
+      {/* ------------------------------------------------------------------ */}
+      {/* Onglet Modules & Fonctionnalités                                    */}
+      {/* ------------------------------------------------------------------ */}
+      {onglet === "modules" && (
         <div className="space-y-6">
-          <div
-            className="rounded-3xl border p-6 md:p-7"
-            style={{
-              borderColor: "color-mix(in srgb, var(--c-base) 18%, var(--bordure))",
-              background:
-                "linear-gradient(135deg, color-mix(in srgb, var(--c-leger) 82%, white) 0%, color-mix(in srgb, var(--fond-carte) 88%, var(--c-leger)) 100%)",
-            }}
-          >
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <span className="badge-info">Paramètres système</span>
-                <h2 className="mt-3 flex items-center gap-2">
-                  <Settings2 size={18} />
-                  Pilotage global de la plateforme
-                </h2>
-                <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                  Les réglages métier, la messagerie et leur traçabilité sont désormais regroupés dans un espace unique.
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {[
-                  { libelle: "Paramètres", valeur: parametres.length.toString() },
-                  { libelle: "Modules", valeur: modules.length.toString() },
-                  { libelle: "Verrouillés", valeur: parametres.filter((parametre) => parametre.est_verrouille).length.toString() },
-                ].map((item) => (
-                  <div key={item.libelle} className="rounded-2xl border px-4 py-3" style={{ borderColor: "var(--bordure)", background: "var(--fond-carte)" }}>
-                    <p className="text-xs uppercase tracking-[0.18em]" style={{ color: "var(--texte-3)" }}>{item.libelle}</p>
-                    <p className="mt-2 text-lg font-semibold" style={{ color: "var(--texte)" }}>{item.valeur}</p>
-                  </div>
-                ))}
-              </div>
+          {/* Résumé */}
+          <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primaire-100">
+              <Settings2 className="h-5 w-5 text-primaire-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-800">
+                {nbActives} module{nbActives !== 1 ? "s" : ""} actif{nbActives !== 1 ? "s" : ""} sur {nbTotal}
+              </p>
+              <p className="text-xs text-slate-500">Cliquez sur le toggle pour activer ou désactiver un module sans redémarrage.</p>
+            </div>
+            <div className="ml-auto shrink-0">
+              <Link
+                href="/administration/configuration"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:border-primaire-300 hover:text-primaire-700"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Configuration messagerie
+              </Link>
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <button onClick={() => setOnglet("parametres")} className="carte text-left hover:-translate-y-0.5 transition-transform">
-              <SlidersHorizontal size={18} style={{ color: "var(--c-base)" }} />
-              <h3 className="mt-4">Réglages système</h3>
-              <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                Modifier les paramètres métier, filtrer par module et suivre les valeurs par défaut.
-              </p>
-            </button>
-            <button onClick={() => setOnglet("messagerie")} className="carte text-left hover:-translate-y-0.5 transition-transform">
-              <Settings2 size={18} style={{ color: "var(--c-base)" }} />
-              <h3 className="mt-4">Messagerie</h3>
-              <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                Centraliser SMTP, IMAP, notifications et accès au webmail utilisateur.
-              </p>
-            </button>
-            <button onClick={() => setOnglet("journal")} className="carte text-left hover:-translate-y-0.5 transition-transform">
-              <History size={18} style={{ color: "var(--c-base)" }} />
-              <h3 className="mt-4">Historique</h3>
-              <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                Visualiser les dernières évolutions et identifier qui a modifié quoi.
-              </p>
-            </button>
-            <Link href="/parametres/couts-main-oeuvre" className="carte text-left hover:-translate-y-0.5 transition-transform">
-              <BriefcaseBusiness size={18} style={{ color: "var(--c-base)" }} />
-              <h3 className="mt-4">Paramétrage main-d’œuvre</h3>
-              <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                Renseigner les profils, taux horaires et hypothèses de production exploitables dans les études de prix.
-              </p>
-            </Link>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            {resumeModules.map((item) => (
-              <div key={item.module} className="carte">
-                <p className="text-xs uppercase tracking-[0.18em]" style={{ color: "var(--texte-3)" }}>{item.module}</p>
-                <p className="mt-3 text-2xl font-semibold" style={{ color: "var(--texte)" }}>{item.total}</p>
-                <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>paramètre(s) dans ce module</p>
-              </div>
+          {/* Grille de toggles */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {fonctionnalites.map((f) => (
+              <CarteFonctionnalite key={f.code} fonctionnalite={f} />
             ))}
           </div>
         </div>
       )}
 
+      {/* ------------------------------------------------------------------ */}
+      {/* Onglet Réglages métier                                              */}
+      {/* ------------------------------------------------------------------ */}
       {onglet === "parametres" && (
         <div className="space-y-5">
-          <div className="carte">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr),220px]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="grid gap-3 lg:grid-cols-[1fr_200px]">
               <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--texte-3)" }} />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   className="champ-saisie pl-9"
-                  placeholder="Rechercher par libellé, clé ou description"
+                  placeholder="Rechercher par libellé, clé ou description…"
                   value={recherche}
                   onChange={(e) => setRecherche(e.target.value)}
                 />
               </div>
               <select className="champ-saisie" value={moduleActif} onChange={(e) => setModuleActif(e.target.value)}>
                 <option value="tous">Tous les modules</option>
-                {modules.map((moduleCourant) => (
-                  <option key={moduleCourant} value={moduleCourant}>{moduleCourant}</option>
+                {modules.map((m) => (
+                  <option key={m} value={m}>{m}</option>
                 ))}
               </select>
             </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Les paramètres de messagerie (SMTP/IMAP) sont gérés dans{" "}
+              <Link href="/administration/configuration" className="text-primaire-600 hover:underline">Administration → Configuration</Link>.
+            </p>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            {parametresFiltres.map((parametre) => (
-              <CarteParametre key={parametre.cle} parametre={parametre} />
+            {parametresFiltres.map((p) => (
+              <CarteParametre key={p.cle} parametre={p} />
             ))}
           </div>
 
           {parametresFiltres.length === 0 && (
-            <div className="carte py-14 text-center text-sm" style={{ color: "var(--texte-2)" }}>
-              Aucun paramètre ne correspond aux filtres en cours.
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-14 text-center text-sm text-slate-400">
+              Aucun paramètre ne correspond à la recherche.
             </div>
           )}
         </div>
       )}
 
-      {onglet === "messagerie" && <GestionMessagerie />}
-
+      {/* ------------------------------------------------------------------ */}
+      {/* Onglet Historique                                                   */}
+      {/* ------------------------------------------------------------------ */}
       {onglet === "journal" && (
-        <div className="space-y-4">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <History className="h-4 w-4 text-slate-400" />
+            <p className="text-sm font-semibold text-slate-700">
+              {journal.length} modification{journal.length !== 1 ? "s" : ""} enregistrée{journal.length !== 1 ? "s" : ""}
+            </p>
+          </div>
           {journal.length === 0 ? (
-            <div className="carte py-14 text-center text-sm" style={{ color: "var(--texte-2)" }}>
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-14 text-center text-sm text-slate-400">
               Aucun historique disponible pour le moment.
             </div>
           ) : (
             journal.slice(0, 50).map((entree) => (
-              <div key={entree.id} className="carte">
+              <div key={entree.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="font-semibold" style={{ color: "var(--texte)" }}>{entree.cle_parametre}</p>
-                    <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                      Ancienne valeur : <span className="font-mono">{entree.ancienne_valeur || "—"}</span>
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm font-semibold text-slate-800">{entree.cle_parametre}</p>
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      <span className="text-slate-400">Avant :</span>{" "}
+                      <span className="font-mono">{entree.ancienne_valeur || "—"}</span>
                     </p>
-                    <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-                      Nouvelle valeur : <span className="font-mono">{entree.nouvelle_valeur || "—"}</span>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      <span className="text-slate-400">Après :</span>{" "}
+                      <span className="font-mono text-emerald-700">{entree.nouvelle_valeur || "—"}</span>
                     </p>
                   </div>
-                  <div className="text-sm md:text-right" style={{ color: "var(--texte-3)" }}>
+                  <div className="shrink-0 text-xs text-slate-400 md:text-right">
                     <p>{formaterDate(entree.date_modification)}</p>
-                    <p className="mt-1">{entree.modifie_par_nom || "Modification système"}</p>
+                    <p className="mt-0.5">{entree.modifie_par_nom || "Système"}</p>
                   </div>
                 </div>
               </div>

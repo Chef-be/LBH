@@ -158,6 +158,13 @@ class ArticleCCTP(models.Model):
         verbose_name="Pièce écrite",
     )
 
+    # Lot CCTP de référence (pour les articles de bibliothèque)
+    lot = models.ForeignKey(
+        "LotCCTP", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="articles",
+        verbose_name="Lot CCTP",
+    )
+
     # Classification
     chapitre = models.CharField(max_length=200, blank=True, verbose_name="Chapitre")
     numero_article = models.CharField(max_length=20, verbose_name="Numéro d'article")
@@ -195,3 +202,189 @@ class ArticleCCTP(models.Model):
 
     def __str__(self):
         return f"{self.numero_article} — {self.intitule[:80]}"
+
+
+class LotCCTP(models.Model):
+    """
+    Lot de travaux pour un CCTP — correspond aux 18 lots types BTP.
+    Pré-alimenté depuis les descriptifs CCTP (Widloecher & Cusant 3e éd.)
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=20, unique=True, db_index=True, verbose_name="Code lot")
+    intitule = models.CharField(max_length=200, verbose_name="Intitulé")
+    description = models.TextField(blank=True, verbose_name="Description")
+    normes_principales = models.JSONField(default=list, blank=True, verbose_name="Normes et DTU principaux")
+    est_actif = models.BooleanField(default=True)
+    ordre = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "pieces_ecrites_lot_cctp"
+        verbose_name = "Lot CCTP"
+        verbose_name_plural = "Lots CCTP"
+        ordering = ["ordre", "code"]
+
+    def __str__(self):
+        return f"{self.code} — {self.intitule}"
+
+
+class ChapitrePrescrip(models.Model):
+    """Chapitre de prescription à l'intérieur d'un lot CCTP."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    lot = models.ForeignKey(LotCCTP, on_delete=models.CASCADE, related_name="chapitres")
+    numero = models.CharField(max_length=20, verbose_name="Numéro (ex: 1, 1.1, A)")
+    intitule = models.CharField(max_length=300, verbose_name="Intitulé du chapitre")
+    ordre = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "pieces_ecrites_chapitre_prescrip"
+        verbose_name = "Chapitre de prescription"
+        ordering = ["lot", "ordre", "numero"]
+
+    def __str__(self):
+        return f"{self.lot.code} / {self.numero} — {self.intitule}"
+
+
+class PrescriptionCCTP(models.Model):
+    """
+    Prescription technique réutilisable pour un CCTP.
+    Pré-alimentée depuis les descriptifs CCTP (Widloecher & Cusant 3e éd.)
+    et les guides techniques CSTB, DTU, Eurocodes.
+    """
+
+    NIVEAUX = [
+        ("obligatoire",  "Obligatoire — imposé par la norme ou le DTU"),
+        ("recommande",   "Recommandé — bonne pratique"),
+        ("alternatif",   "Alternatif — variante acceptable"),
+        ("optionnel",    "Optionnel — à adapter selon le projet"),
+    ]
+
+    TYPES = [
+        ("generalites",          "Généralités et objet du lot"),
+        ("documents_reference",  "Documents de référence (DTU, NF, Eurocode)"),
+        ("materiaux",            "Qualité et provenance des matériaux"),
+        ("mise_en_oeuvre",       "Mise en œuvre et exécution"),
+        ("controles",            "Contrôles et essais"),
+        ("tolerances",           "Tolérances d'exécution"),
+        ("garanties",            "Garanties et assurances"),
+        ("interfaces",           "Interfaces avec les autres lots"),
+        ("reception",            "Conditions de réception"),
+        ("entretien",            "Entretien et maintenance"),
+        ("securite",             "Sécurité et protection"),
+        ("environnement",        "Environnement et gestion des déchets"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chapitre = models.ForeignKey(
+        ChapitrePrescrip, on_delete=models.CASCADE,
+        related_name="prescriptions", verbose_name="Chapitre",
+    )
+    lot = models.ForeignKey(
+        LotCCTP, on_delete=models.CASCADE,
+        related_name="prescriptions", verbose_name="Lot",
+    )
+
+    code = models.CharField(max_length=30, blank=True, verbose_name="Code")
+    intitule = models.CharField(max_length=400, verbose_name="Intitulé")
+    corps = models.TextField(verbose_name="Corps de la prescription")
+
+    type_prescription = models.CharField(
+        max_length=30, choices=TYPES, default="mise_en_oeuvre",
+        verbose_name="Type",
+    )
+    niveau = models.CharField(
+        max_length=20, choices=NIVEAUX, default="recommande",
+        verbose_name="Niveau",
+    )
+
+    normes = models.JSONField(default=list, blank=True, verbose_name="Normes citées (DTU, NF, Eurocode)")
+    tags = models.JSONField(default=list, blank=True, verbose_name="Mots-clés")
+    source = models.CharField(max_length=200, blank=True, verbose_name="Source")
+
+    contient_variables = models.BooleanField(
+        default=False,
+        verbose_name="Contient des variables",
+        help_text="Cocher si le texte contient des variables entre accolades {variable}",
+    )
+
+    est_actif = models.BooleanField(default=True)
+    ordre = models.PositiveSmallIntegerField(default=0)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "pieces_ecrites_prescription_cctp"
+        verbose_name = "Prescription CCTP"
+        verbose_name_plural = "Prescriptions CCTP"
+        ordering = ["lot", "chapitre", "ordre"]
+
+    def __str__(self):
+        return f"[{self.lot.code}] {self.intitule[:80]}"
+
+
+class GenerateurCCTP(models.Model):
+    """
+    Session de génération d'un CCTP multi-lots à partir de la bibliothèque.
+    Associée à un projet, elle permet de sélectionner les lots et prescriptions
+    à inclure, puis de générer le document Word final.
+    """
+
+    STATUTS = [
+        ("configuration", "Configuration — sélection des lots"),
+        ("redaction",     "Rédaction — personnalisation des prescriptions"),
+        ("generation",    "Génération en cours"),
+        ("termine",       "Terminé — document disponible"),
+        ("erreur",        "Erreur lors de la génération"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    projet = models.ForeignKey(
+        "projets.Projet", on_delete=models.CASCADE,
+        related_name="generateurs_cctp", verbose_name="Projet",
+    )
+    intitule = models.CharField(max_length=300, verbose_name="Intitulé du CCTP")
+    statut = models.CharField(max_length=20, choices=STATUTS, default="configuration")
+
+    # Configuration
+    lots_selectionnes = models.ManyToManyField(
+        LotCCTP, related_name="generateurs",
+        blank=True, verbose_name="Lots inclus",
+    )
+    prescriptions_exclues = models.ManyToManyField(
+        PrescriptionCCTP, related_name="generateurs_exclus",
+        blank=True, verbose_name="Prescriptions exclues",
+    )
+    prescriptions_personnalisees = models.JSONField(
+        default=dict, blank=True,
+        verbose_name="Corps personnalisés par prescription",
+        help_text="Dictionnaire {uuid_prescription: texte_personnalisé}",
+    )
+    variables_fusion = models.JSONField(
+        default=dict, blank=True,
+        verbose_name="Variables de fusion",
+        help_text="{nom_projet, maitre_ouvrage, phase, date_redaction, ...}",
+    )
+
+    # Résultat
+    piece_ecrite = models.ForeignKey(
+        PieceEcrite, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="generateurs_cctp",
+        verbose_name="Pièce écrite générée",
+    )
+
+    cree_par = models.ForeignKey(
+        "comptes.Utilisateur", on_delete=models.PROTECT,
+        null=True, blank=True, verbose_name="Créé par",
+    )
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "pieces_ecrites_generateur_cctp"
+        verbose_name = "Générateur CCTP"
+        verbose_name_plural = "Générateurs CCTP"
+        ordering = ["-date_modification"]
+
+    def __str__(self):
+        return f"CCTP {self.intitule} — {self.projet.reference}"

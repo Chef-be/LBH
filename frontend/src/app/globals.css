@@ -227,6 +227,24 @@ html.theme-brun-dore {
   }
   .carte-premium:hover { box-shadow: var(--ombre-lg); }
 
+  .surface-subtile {
+    background-color: color-mix(in srgb, var(--fond-carte) 72%, var(--fond-app));
+    border: 1px solid var(--bordure);
+    color: var(--texte);
+  }
+
+  .surface-douce {
+    background-color: color-mix(in srgb, var(--fond-carte) 84%, var(--fond-app));
+    border: 1px solid color-mix(in srgb, var(--bordure) 88%, transparent);
+    color: var(--texte);
+  }
+
+  .surface-accent {
+    background-color: color-mix(in srgb, var(--fond-carte) 82%, var(--c-base) 18%);
+    border: 1px solid color-mix(in srgb, var(--bordure) 72%, var(--c-base) 28%);
+    color: var(--texte);
+  }
+
   /* ─── CHAMPS DE FORMULAIRE ────────────────────────────────────────────── */
 
   .champ-saisie {
@@ -559,26 +577,27 @@ html.theme-brun-dore {
   /* ─── MODAL ───────────────────────────────────────────────────────────── */
 
   .modal-fond {
-    @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+    @apply fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center;
     background: rgba(0,0,0,0.5);
     backdrop-filter: blur(4px);
     animation: fondu-entree 0.15s ease-out;
   }
   .modal-boite {
-    @apply w-full rounded-2xl shadow-2xl;
+    @apply flex w-full flex-col rounded-2xl shadow-2xl overflow-hidden;
     background-color: var(--fond-carte);
     border: 1px solid var(--bordure);
     animation: glissement-haut 0.2s ease-out;
-    max-height: 90vh;
-    overflow-y: auto;
+    max-height: min(90vh, calc(100vh - 2rem));
   }
   .modal-entete {
     @apply flex items-center justify-between px-6 py-4;
     border-bottom: 1px solid var(--bordure);
   }
-  .modal-corps { @apply px-6 py-5; }
+  .modal-corps {
+    @apply min-h-0 flex-1 overflow-y-auto px-6 py-5;
+  }
   .modal-pied  {
-    @apply flex justify-end gap-3 px-6 py-4;
+    @apply shrink-0 flex justify-end gap-3 px-6 py-4;
     border-top: 1px solid var(--bordure);
   }
 
@@ -627,6 +646,9 @@ html.theme-brun-dore {
 
   html.sombre .bg-slate-50,
   html.sombre .bg-slate-50\/70,
+  html.sombre .bg-slate-100,
+  html.sombre .bg-slate-100\/70,
+  html.sombre .bg-slate-200,
   html.sombre .bg-ardoise-50 {
     background-color: color-mix(in srgb, var(--fond-carte) 72%, var(--fond-app)) !important;
   }
@@ -639,8 +661,33 @@ html.theme-brun-dore {
     background-color: color-mix(in srgb, var(--fond-carte) 84%, #f59e0b 16%) !important;
   }
 
+  html.sombre .bg-amber-100 {
+    background-color: color-mix(in srgb, var(--fond-carte) 78%, #f59e0b 22%) !important;
+  }
+
   html.sombre .bg-green-50 {
     background-color: color-mix(in srgb, var(--fond-carte) 84%, #16a34a 16%) !important;
+  }
+
+  html.sombre .bg-green-100,
+  html.sombre .bg-emerald-50,
+  html.sombre .bg-emerald-100 {
+    background-color: color-mix(in srgb, var(--fond-carte) 80%, #16a34a 20%) !important;
+  }
+
+  html.sombre .bg-red-50,
+  html.sombre .bg-red-100 {
+    background-color: color-mix(in srgb, var(--fond-carte) 80%, #dc2626 20%) !important;
+  }
+
+  html.sombre .bg-blue-50,
+  html.sombre .bg-blue-100 {
+    background-color: color-mix(in srgb, var(--fond-carte) 80%, #2563eb 20%) !important;
+  }
+
+  html.sombre .bg-yellow-50,
+  html.sombre .bg-yellow-100 {
+    background-color: color-mix(in srgb, var(--fond-carte) 80%, #ca8a04 20%) !important;
   }
 
   html.sombre .bg-indigo-50 {
@@ -663,6 +710,7 @@ html.theme-brun-dore {
   html.sombre .border-slate-100,
   html.sombre .border-slate-200,
   html.sombre .border-slate-300,
+  html.sombre .border-slate-400,
   html.sombre .border-ardoise-100,
   html.sombre .border-ardoise-200 {
     border-color: var(--bordure) !important;
@@ -674,6 +722,14 @@ html.theme-brun-dore {
 
   html.sombre .border-amber-200 {
     border-color: color-mix(in srgb, var(--bordure) 74%, #f59e0b 26%) !important;
+  }
+
+  html.sombre .border-red-200 {
+    border-color: color-mix(in srgb, var(--bordure) 72%, #dc2626 28%) !important;
+  }
+
+  html.sombre .border-blue-200 {
+    border-color: color-mix(in srgb, var(--bordure) 72%, #2563eb 28%) !important;
   }
 
   html.sombre .border-green-200 {
@@ -728,9 +784,23 @@ html.theme-brun-dore {
     color: color-mix(in srgb, white 74%, #f59e0b 26%) !important;
   }
 
+  html.sombre .text-red-600,
+  html.sombre .text-red-700 {
+    color: color-mix(in srgb, white 76%, #ef4444 24%) !important;
+  }
+
   html.sombre .text-green-600,
-  html.sombre .text-green-700 {
-    color: color-mix(in srgb, white 74%, #16a34a 26%) !important;
+  html.sombre .text-green-700,
+  html.sombre .text-emerald-700,
+  html.sombre .text-emerald-800,
+  html.sombre .text-emerald-900,
+  html.sombre .text-emerald-950 {
+    color: color-mix(in srgb, white 76%, #10b981 24%) !important;
+  }
+
+  html.sombre .text-blue-600,
+  html.sombre .text-blue-700 {
+    color: color-mix(in srgb, white 76%, #3b82f6 24%) !important;
   }
 
   html.sombre .text-indigo-600,
@@ -754,8 +824,26 @@ html.theme-brun-dore {
   }
 
   html.sombre .hover\:bg-slate-50:hover,
+  html.sombre .hover\:bg-slate-100:hover,
   html.sombre .hover\:bg-primaire-50:hover {
     background-color: color-mix(in srgb, var(--fond-carte) 82%, var(--c-leger)) !important;
+  }
+
+  html.sombre .hover\:bg-red-100:hover {
+    background-color: color-mix(in srgb, var(--fond-carte) 74%, #dc2626 26%) !important;
+  }
+
+  html.sombre .hover\:text-slate-600:hover,
+  html.sombre .hover\:text-slate-700:hover,
+  html.sombre .hover\:text-primaire-600:hover,
+  html.sombre .hover\:text-primaire-700:hover {
+    color: #f8fafc !important;
+  }
+
+  html.sombre .shadow-sm,
+  html.sombre .shadow,
+  html.sombre .shadow-2xl {
+    box-shadow: var(--ombre-carte) !important;
   }
 
   html.sombre .badge-neutre {

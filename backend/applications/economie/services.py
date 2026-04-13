@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import decimal
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
@@ -708,8 +709,27 @@ def donnees_simulation_depuis_profil(profil, surcharges: dict | None = None) -> 
         "contrat_travail": surcharges.get("contrat_travail", "cdi"),
         "statut_cadre": surcharges.get("statut_cadre", profil.categorie in {"ingenieur", "conducteur"}),
         "quotite_travail": surcharges.get("quotite_travail", Decimal("1")),
+        # HS à deux taux — priorité aux surcharges, sinon valeurs du profil
+        "nb_heures_supp_25_mensuelles": surcharges.get(
+            "nb_heures_supp_25_mensuelles",
+            getattr(profil, "nb_heures_supp_25_mensuelles", Decimal("0")) or Decimal("0"),
+        ),
+        "nb_heures_supp_50_mensuelles": surcharges.get(
+            "nb_heures_supp_50_mensuelles",
+            getattr(profil, "nb_heures_supp_50_mensuelles", Decimal("0")) or Decimal("0"),
+        ),
+        # Compatibilité ascendante — mono-taux
         "heures_supplementaires_mensuelles": surcharges.get("heures_supplementaires_mensuelles", Decimal("0")),
         "majoration_heures_supplementaires": surcharges.get("majoration_heures_supplementaires", Decimal("0.25")),
+        # Panier repas — calculé depuis le profil
+        "panier_repas_mensuel": surcharges.get(
+            "panier_repas_mensuel",
+            (
+                getattr(profil, "panier_repas_journalier", Decimal("0")) or Decimal("0")
+            ) * (
+                getattr(profil, "jours_travail_mensuels_defaut", Decimal("21.67")) or Decimal("21.67")
+            ),
+        ),
         "mutuelle_employeur_mensuelle": surcharges.get(
             "mutuelle_employeur_mensuelle",
             _premiere_valeur(
@@ -769,8 +789,15 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
     contrat_travail = donnees.get("contrat_travail", "cdi")
     statut_cadre = bool(donnees.get("statut_cadre", False))
     quotite_travail = d(donnees.get("quotite_travail")) or Decimal("1")
-    heures_supplementaires = d(donnees.get("heures_supplementaires_mensuelles"))
+
+    # Heures supplémentaires — deux taux séparés (25% et 50%)
+    heures_supp_25 = d(donnees.get("nb_heures_supp_25_mensuelles")) or Decimal("0")
+    heures_supp_50 = d(donnees.get("nb_heures_supp_50_mensuelles")) or Decimal("0")
+    # Compatibilité ascendante mono-taux
+    heures_supplementaires = d(donnees.get("heures_supplementaires_mensuelles")) or Decimal("0")
     majoration_heures_supp = d(donnees.get("majoration_heures_supplementaires")) or Decimal("0.25")
+
+    panier_repas_mensuel = d(donnees.get("panier_repas_mensuel")) or Decimal("0")
     mutuelle_employeur = d(donnees.get("mutuelle_employeur_mensuelle"))
     titres_restaurant = d(donnees.get("titres_restaurant_employeur_mensuels"))
     prime_transport = d(donnees.get("prime_transport_mensuelle"))
@@ -810,7 +837,19 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
     smic_horaire = _smic_horaire(localisation)
     smic_mensuel = arrondir(smic_horaire * heures_mensuelles)
     taux_horaire_brut_reference = brut / heures_mensuelles if heures_mensuelles > 0 else Decimal("0")
-    montant_heures_supp = heures_supplementaires * taux_horaire_brut_reference * (Decimal("1") + majoration_heures_supp)
+
+    # HS à deux taux distincts (25% et 50%) — priorité sur mono-taux
+    if heures_supp_25 > 0 or heures_supp_50 > 0:
+        montant_hs_25 = heures_supp_25 * taux_horaire_brut_reference * Decimal("1.25")
+        montant_hs_50 = heures_supp_50 * taux_horaire_brut_reference * Decimal("1.50")
+        montant_heures_supp = montant_hs_25 + montant_hs_50
+        heures_supplementaires = heures_supp_25 + heures_supp_50
+    else:
+        # Compatibilité ascendante mono-taux
+        montant_heures_supp = heures_supplementaires * taux_horaire_brut_reference * (Decimal("1") + majoration_heures_supp)
+        montant_hs_25 = Decimal("0")
+        montant_hs_50 = Decimal("0")
+
     remuneration_brute = brut + primes + avantages + montant_heures_supp
     cotisations_salariales = remuneration_brute * taux_charges_salariales
     net_hors_impot = remuneration_brute - cotisations_salariales
@@ -818,7 +857,7 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
     reduction_generale = _estimer_reduction_generale(remuneration_brute, charges_patronales_brutes, smic_mensuel, appliquer_rgdu)
     charges_patronales = charges_patronales_brutes - reduction_generale
 
-    cout_social_complements = mutuelle_employeur + titres_restaurant + prime_transport
+    cout_social_complements = mutuelle_employeur + titres_restaurant + prime_transport + panier_repas_mensuel
     indemnite_precarite = remuneration_brute * Decimal("0.10") if contrat_travail == "cdd" else Decimal("0")
     cout_employeur = remuneration_brute + charges_patronales + cout_social_complements + indemnite_precarite
     couts_indirects = cout_equipement + cout_transport + cout_structure
@@ -893,6 +932,10 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
             "salaire_brut_mensuel": float(arrondir(brut)),
             "primes_mensuelles": float(arrondir(primes)),
             "avantages_mensuels": float(arrondir(avantages)),
+            "nb_heures_supp_25_mensuelles": float(arrondir(heures_supp_25, 2)),
+            "nb_heures_supp_50_mensuelles": float(arrondir(heures_supp_50, 2)),
+            "montant_hs_25": float(arrondir(montant_hs_25)),
+            "montant_hs_50": float(arrondir(montant_hs_50)),
             "heures_supplementaires_mensuelles": float(arrondir(heures_supplementaires, 2)),
             "montant_heures_supplementaires": float(arrondir(montant_heures_supp)),
             "remuneration_brute_mensuelle": float(arrondir(remuneration_brute)),
@@ -901,6 +944,7 @@ def calculer_simulation_main_oeuvre(donnees: dict) -> dict:
             "charges_patronales_brutes": float(arrondir(charges_patronales_brutes)),
             "reduction_generale_estimee": float(arrondir(reduction_generale)),
             "charges_patronales": float(arrondir(charges_patronales)),
+            "panier_repas_mensuel": float(arrondir(panier_repas_mensuel)),
             "mutuelle_employeur_mensuelle": float(arrondir(mutuelle_employeur)),
             "titres_restaurant_employeur_mensuels": float(arrondir(titres_restaurant)),
             "prime_transport_mensuelle": float(arrondir(prime_transport)),
@@ -1114,5 +1158,126 @@ def generer_pdf_simulation_main_oeuvre(simulation: dict) -> bytes:
         if resultat.returncode != 0 or not chemin_pdf.exists():
             detail = (resultat.stderr or resultat.stdout or "").strip()
             raise RuntimeError(detail or "Échec de conversion PDF via LibreOffice.")
-
         return chemin_pdf.read_bytes()
+
+
+# Ratios ARTIPRIX 2025 par lot — part DS dans PV et composition DS
+# Source : bordereaux ARTIPRIX GO+SO 2025 + manuel étude de prix BTP
+RATIOS_ARTIPRIX_PAR_LOT = {
+    "7.1":  {"kpv": 1.45, "mo": 0.45, "matieres": 0.30, "materiel": 0.15, "st": 0.10},  # VRD
+    "7.2":  {"kpv": 1.40, "mo": 0.30, "matieres": 0.20, "materiel": 0.40, "st": 0.10},  # Terrassements
+    "7.3":  {"kpv": 1.35, "mo": 0.40, "matieres": 0.45, "materiel": 0.10, "st": 0.05},  # Gros Œuvre
+    "7.4":  {"kpv": 1.38, "mo": 0.35, "matieres": 0.50, "materiel": 0.08, "st": 0.07},  # Façades
+    "7.5":  {"kpv": 1.30, "mo": 0.20, "matieres": 0.30, "materiel": 0.05, "st": 0.45},  # Murs-rideaux
+    "7.6":  {"kpv": 1.38, "mo": 0.35, "matieres": 0.50, "materiel": 0.08, "st": 0.07},  # MOB
+    "7.7":  {"kpv": 1.32, "mo": 0.25, "matieres": 0.40, "materiel": 0.10, "st": 0.25},  # Charpente métal
+    "7.8":  {"kpv": 1.40, "mo": 0.40, "matieres": 0.45, "materiel": 0.08, "st": 0.07},  # Couverture
+    "7.9":  {"kpv": 1.42, "mo": 0.45, "matieres": 0.45, "materiel": 0.05, "st": 0.05},  # Étanchéité
+    "7.10": {"kpv": 1.30, "mo": 0.25, "matieres": 0.45, "materiel": 0.05, "st": 0.25},  # Menuis. ext.
+    "7.11": {"kpv": 1.35, "mo": 0.40, "matieres": 0.45, "materiel": 0.05, "st": 0.10},  # Menuis. int.
+    "7.12": {"kpv": 1.40, "mo": 0.55, "matieres": 0.35, "materiel": 0.05, "st": 0.05},  # Plâtrerie/peint.
+    "7.13": {"kpv": 1.38, "mo": 0.50, "matieres": 0.40, "materiel": 0.05, "st": 0.05},  # Carrelage
+    "7.14": {"kpv": 1.35, "mo": 0.40, "matieres": 0.35, "materiel": 0.05, "st": 0.20},  # Électricité
+    "7.15": {"kpv": 1.38, "mo": 0.40, "matieres": 0.40, "materiel": 0.05, "st": 0.15},  # Plomberie
+    "7.16": {"kpv": 1.32, "mo": 0.30, "matieres": 0.30, "materiel": 0.05, "st": 0.35},  # CVC
+    "7.17": {"kpv": 1.20, "mo": 0.10, "matieres": 0.05, "materiel": 0.02, "st": 0.83},  # Ascenseur
+    "7.18": {"kpv": 1.42, "mo": 0.45, "matieres": 0.35, "materiel": 0.12, "st": 0.08},  # Paysager
+}
+RATIOS_DEFAUT = {"kpv": 1.38, "mo": 0.40, "matieres": 0.40, "materiel": 0.10, "st": 0.10}
+
+# Taux standards BTP (conventions collectives)
+TAUX_STANDARDS = {
+    "frais_chantier": decimal.Decimal("0.12"),
+    "frais_generaux":  decimal.Decimal("0.10"),
+    "aleas_benefices": decimal.Decimal("0.08"),
+}
+
+
+def calculer_decomposition_inverse(
+    prix_vente_unitaire,
+    lot_type: str = "",
+    methode: str = "ratios_artiprix",
+    taux_personnalises: dict | None = None,
+) -> dict:
+    """
+    À partir d'un prix de vente unitaire connu, décompose intelligemment :
+    DS (déboursé sec), CD (coût direct), CR (coût de revient), marges, Kpv.
+
+    Retourne un dictionnaire avec tous les éléments décomposés.
+    """
+    pv = decimal.Decimal(str(prix_vente_unitaire))
+    ratios = RATIOS_ARTIPRIX_PAR_LOT.get(lot_type, RATIOS_DEFAUT)
+
+    if methode == "ratios_artiprix" and not taux_personnalises:
+        kpv = decimal.Decimal(str(ratios["kpv"]))
+        taux_fc = TAUX_STANDARDS["frais_chantier"]
+        taux_fg = TAUX_STANDARDS["frais_generaux"]
+        taux_ba = TAUX_STANDARDS["aleas_benefices"]
+    elif taux_personnalises:
+        taux_fc = decimal.Decimal(str(taux_personnalises.get("frais_chantier", 0.12)))
+        taux_fg = decimal.Decimal(str(taux_personnalises.get("frais_generaux", 0.10)))
+        taux_ba = decimal.Decimal(str(taux_personnalises.get("aleas_benefices", 0.08)))
+        kpv = 1 / (1 - taux_fc - taux_fg - taux_ba)
+    else:
+        kpv = decimal.Decimal(str(ratios["kpv"]))
+        taux_fc = TAUX_STANDARDS["frais_chantier"]
+        taux_fg = TAUX_STANDARDS["frais_generaux"]
+        taux_ba = TAUX_STANDARDS["aleas_benefices"]
+
+    # DS = PV / Kpv
+    ds = (pv / kpv).quantize(decimal.Decimal("0.0001"))
+
+    # CD = DS × (1 + taux_fc)
+    cd = (ds * (1 + taux_fc)).quantize(decimal.Decimal("0.0001"))
+
+    # CR = CD × (1 + taux_fg)
+    cr = (cd * (1 + taux_fg)).quantize(decimal.Decimal("0.0001"))
+
+    # Marge = PV - CR
+    marge = pv - cr
+    taux_marge = (marge / pv * 100).quantize(decimal.Decimal("0.01")) if pv > 0 else decimal.Decimal("0")
+
+    # Composition du DS
+    part_mo = decimal.Decimal(str(ratios["mo"]))
+    part_mat = decimal.Decimal(str(ratios["matieres"]))
+    part_matos = decimal.Decimal(str(ratios["materiel"]))
+    part_st = decimal.Decimal(str(ratios["st"]))
+
+    return {
+        "prix_vente_unitaire": float(pv),
+        "debourse_sec_unitaire": float(ds),
+        "cout_direct_unitaire": float(cd),
+        "cout_revient_unitaire": float(cr),
+        "marge_unitaire": float(marge),
+        "taux_marge_pct": float(taux_marge),
+        "coefficients": {
+            "kpv": float(kpv),
+            "k_fc": float(taux_fc),
+            "k_fg": float(taux_fg),
+            "k_ba": float(taux_ba),
+        },
+        "composition_ds": {
+            "main_oeuvre_unitaire": float(ds * part_mo),
+            "matieres_unitaire": float(ds * part_mat),
+            "materiel_unitaire": float(ds * part_matos),
+            "sous_traitance_unitaire": float(ds * part_st),
+            "taux_mo_pct": float(part_mo * 100),
+            "taux_matieres_pct": float(part_mat * 100),
+            "taux_materiel_pct": float(part_matos * 100),
+            "taux_st_pct": float(part_st * 100),
+        },
+        "source_ratios": {
+            "methode": methode,
+            "lot_type": lot_type,
+            "ratios_utilises": ratios,
+        },
+        "graphique_pyramide": [
+            {"label": "Main-d'œuvre", "valeur": float(ds * part_mo), "couleur": "#3b82f6"},
+            {"label": "Matières", "valeur": float(ds * part_mat), "couleur": "#10b981"},
+            {"label": "Matériel", "valeur": float(ds * part_matos), "couleur": "#f59e0b"},
+            {"label": "Sous-traitance", "valeur": float(ds * part_st), "couleur": "#8b5cf6"},
+            {"label": "Frais de chantier", "valeur": float(ds * taux_fc), "couleur": "#ef4444"},
+            {"label": "Frais généraux", "valeur": float(cd * taux_fg), "couleur": "#f97316"},
+            {"label": "Marge et aléas", "valeur": float(marge), "couleur": "#06b6d4"},
+        ],
+    }

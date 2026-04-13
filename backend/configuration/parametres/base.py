@@ -19,7 +19,12 @@ NOM_PLATEFORME = config("NOM_PLATEFORME", default="LBH Economiste")
 PREFIXE_CONTENEURS = config("PREFIXE_CONTENEURS", default="lbh")
 PREFIXE_CONTENEURS_SQL = PREFIXE_CONTENEURS.replace("-", "_") or "lbh"
 URL_BASE = config("URL_BASE", default="")
-COLLABORA_PUBLIC_URL = config("COLLABORA_PUBLIC_URL", default="https://office.lbh-economiste.com")
+COLLABORA_PUBLIC_URL = config("COLLABORA_PUBLIC_URL", default="https://lbh-economiste.com/collabora")
+COLLABORA_URL = config("COLLABORA_URL", default="http://lbh-collabora:9980")
+# URL de base utilisée pour construire les WOPISrc que Collabora rappelle.
+# Doit être joignable depuis le conteneur lbh-collabora (URL interne backend ou publique).
+WOPI_BASE_URL = config("WOPI_BASE_URL", default="http://lbh-backend:8000")
+WOPI_SECRET = config("WOPI_SECRET", default="")
 
 # ============================================================
 # SÉCURITÉ
@@ -177,6 +182,7 @@ CELERY_TASK_ROUTES = {
     "applications.economie.taches.*": {"queue": "calculs"},
     "applications.pieces_ecrites.taches.*": {"queue": "documents"},
     "applications.parametres.taches.*": {"queue": "principale"},
+    "bibliotheque.*": {"queue": "calculs"},
 }
 
 # ============================================================
@@ -184,6 +190,16 @@ CELERY_TASK_ROUTES = {
 # ============================================================
 DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+
+# Django 4.2+ — STORAGES prend la priorité sur DEFAULT_FILE_STORAGE
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 AWS_ACCESS_KEY_ID = config("MINIO_ACCES_CLE", default="")
 AWS_SECRET_ACCESS_KEY = config("MINIO_SECRET_CLE", default="")

@@ -142,3 +142,181 @@ class LigneMetre(models.Model):
         if self.prix_unitaire_ht is not None:
             return self.quantite * self.prix_unitaire_ht
         return None
+
+
+class FondPlan(models.Model):
+    """
+    Fond de plan téléversé pour le métré visuel.
+    Peut être un PDF (page de plan), une image (JPG/PNG) ou un DXF vectoriel.
+    """
+
+    FORMATS = [
+        ("pdf",   "PDF — plan numérique"),
+        ("image", "Image — JPG, PNG, TIFF"),
+        ("dxf",   "DXF — plan vectoriel CAO"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    metre = models.ForeignKey(
+        Metre, on_delete=models.CASCADE,
+        related_name="fonds_plan", verbose_name="Métré associé",
+    )
+    intitule = models.CharField(max_length=200, verbose_name="Intitulé du plan (ex: Niveau 0, Façade Sud)")
+    format_fichier = models.CharField(max_length=10, choices=FORMATS, verbose_name="Format")
+    fichier = models.FileField(
+        upload_to="metres/fonds-plan/%Y/%m/",
+        verbose_name="Fichier du fond de plan",
+    )
+
+    # Calibration (échelle)
+    echelle = models.DecimalField(
+        max_digits=10, decimal_places=6, null=True, blank=True,
+        verbose_name="Échelle (px par mètre)",
+        help_text="Calculée automatiquement lors de la calibration depuis le fond de plan",
+    )
+    reference_calibration = models.JSONField(
+        default=dict, blank=True,
+        verbose_name="Points de calibration",
+        help_text="{point_a: [x,y], point_b: [x,y], distance_metres: float}",
+    )
+
+    # Pour les PDFs multipages
+    numero_page = models.PositiveSmallIntegerField(default=1, verbose_name="Page du PDF")
+    largeur_px = models.PositiveIntegerField(null=True, blank=True)
+    hauteur_px = models.PositiveIntegerField(null=True, blank=True)
+
+    # Image pré-rendue (pour affichage rapide dans le canvas)
+    miniature = models.FileField(
+        upload_to="metres/miniatures/%Y/%m/",
+        null=True, blank=True, verbose_name="Miniature (PNG)",
+    )
+
+    date_creation = models.DateTimeField(auto_now_add=True)
+    cree_par = models.ForeignKey(
+        "comptes.Utilisateur", on_delete=models.SET_NULL,
+        null=True, blank=True,
+    )
+
+    class Meta:
+        db_table = "metres_fond_plan"
+        verbose_name = "Fond de plan"
+        verbose_name_plural = "Fonds de plan"
+        ordering = ["metre", "intitule"]
+
+    def __str__(self):
+        return f"{self.intitule} — {self.metre}"
+
+
+class ZoneMesure(models.Model):
+    """
+    Zone mesurée visuellement sur un fond de plan.
+    Peut être une surface (polygone), une longueur (polyligne) ou un comptage (point).
+    Génère automatiquement une ligne de métré.
+    """
+
+    TYPES = [
+        ("surface",  "Surface — polygone fermé"),
+        ("longueur", "Longueur — polyligne"),
+        ("comptage", "Comptage — point / objet"),
+        ("perimetre", "Périmètre — contour d'une zone"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    fond_plan = models.ForeignKey(
+        FondPlan, on_delete=models.CASCADE,
+        related_name="zones", verbose_name="Fond de plan",
+    )
+    ligne_metre = models.OneToOneField(
+        LigneMetre, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="zone_mesure",
+        verbose_name="Ligne de métré associée",
+    )
+
+    designation = models.CharField(max_length=300, verbose_name="Désignation de la zone")
+    type_mesure = models.CharField(max_length=20, choices=TYPES, verbose_name="Type de mesure")
+
+    # Géométrie en coordonnées pixel (JSON)
+    points_px = models.JSONField(
+        default=list,
+        verbose_name="Points de la géométrie (px)",
+        help_text="Liste de [x, y] en pixels sur le fond de plan",
+    )
+
+    # Déductions (ouvertures, réservations)
+    deductions = models.JSONField(
+        default=list, blank=True,
+        verbose_name="Déductions",
+        help_text="Liste de zones à soustraire : [{designation, points_px, surface_m2}]",
+    )
+
+    # Résultat calculé
+    valeur_brute = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True,
+        verbose_name="Valeur brute (m², ml ou unité)",
+    )
+    valeur_deduction = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True,
+        verbose_name="Total des déductions",
+    )
+    valeur_nette = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True,
+        verbose_name="Valeur nette (après déductions)",
+    )
+    unite = models.CharField(max_length=10, default="m²")
+
+    couleur = models.CharField(max_length=7, default="#3b82f6", verbose_name="Couleur d'affichage (#hex)")
+    ordre = models.PositiveSmallIntegerField(default=0)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "metres_zone_mesure"
+        verbose_name = "Zone mesurée"
+        verbose_name_plural = "Zones mesurées"
+        ordering = ["fond_plan", "ordre"]
+
+    def __str__(self):
+        return f"{self.type_mesure} — {self.designation[:60]}"
+
+
+class ExtractionCAO(models.Model):
+    """
+    Résultat de l'extraction automatique depuis un fichier DXF/DWG.
+    Propose des lignes de métré à partir des calques et géométries du plan.
+    """
+
+    STATUTS = [
+        ("en_attente",   "En attente de traitement"),
+        ("en_cours",     "Extraction en cours"),
+        ("propose",      "Propositions disponibles"),
+        ("valide",       "Propositions validées"),
+        ("erreur",       "Erreur lors de l'extraction"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    metre = models.ForeignKey(Metre, on_delete=models.CASCADE, related_name="extractions_cao")
+    fond_plan = models.ForeignKey(FondPlan, on_delete=models.SET_NULL, null=True, blank=True)
+    statut = models.CharField(max_length=20, choices=STATUTS, default="en_attente")
+
+    # Résultats bruts du service analyse-cao
+    resultat_brut = models.JSONField(default=dict, blank=True, verbose_name="Résultat brut du service CAO")
+
+    # Propositions de lignes de métré
+    propositions = models.JSONField(
+        default=list, blank=True,
+        verbose_name="Lignes de métré proposées",
+        help_text="[{designation, quantite, unite, calque, surface_m2, longueur_m}]",
+    )
+
+    # Statistiques
+    nb_calques = models.PositiveIntegerField(default=0)
+    nb_entites = models.PositiveIntegerField(default=0)
+    nb_propositions = models.PositiveIntegerField(default=0)
+
+    message_erreur = models.TextField(blank=True)
+    date_extraction = models.DateTimeField(null=True, blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "metres_extraction_cao"
+        verbose_name = "Extraction CAO"
+        ordering = ["-date_creation"]

@@ -3,7 +3,7 @@
 import json
 
 from rest_framework import serializers
-from .models import ModeleDocument, PieceEcrite, ArticleCCTP
+from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, ChapitrePrescrip, PrescriptionCCTP, GenerateurCCTP
 
 
 class ModeleDocumentSerialiseur(serializers.ModelSerializer):
@@ -60,18 +60,23 @@ class ModeleDocumentSerialiseur(serializers.ModelSerializer):
 
 
 class ArticleCCTPSerialiseur(serializers.ModelSerializer):
+    lot_code = serializers.CharField(source="lot.code", read_only=True, allow_null=True)
+    lot_intitule = serializers.CharField(source="lot.intitule", read_only=True, allow_null=True)
+
     class Meta:
         model = ArticleCCTP
         fields = [
-            "id", "piece_ecrite", "chapitre", "numero_article",
-            "code_reference", "intitule", "corps_article",
+            "id", "piece_ecrite", "lot", "lot_code", "lot_intitule",
+            "chapitre", "numero_article", "code_reference",
+            "intitule", "corps_article",
             "source", "source_url", "ligne_prix_reference",
             "normes_applicables", "est_dans_bibliotheque", "tags",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "date_creation", "date_modification"]
+        read_only_fields = ["id", "lot_code", "lot_intitule", "date_creation", "date_modification"]
         extra_kwargs = {
             "piece_ecrite": {"required": False, "allow_null": True},
+            "lot": {"required": False, "allow_null": True},
         }
 
 
@@ -129,3 +134,70 @@ class PieceEcriteDetailSerialiseur(serializers.ModelSerializer):
         if obj.redacteur:
             return f"{obj.redacteur.prenom} {obj.redacteur.nom}"
         return None
+
+
+class PrescriptionCCTPSerialiseur(serializers.ModelSerializer):
+    type_libelle = serializers.CharField(source="get_type_prescription_display", read_only=True)
+    niveau_libelle = serializers.CharField(source="get_niveau_display", read_only=True)
+    lot_code = serializers.CharField(source="lot.code", read_only=True)
+    chapitre_intitule = serializers.CharField(source="chapitre.intitule", read_only=True)
+
+    class Meta:
+        model = PrescriptionCCTP
+        fields = [
+            "id", "lot", "lot_code", "chapitre", "chapitre_intitule",
+            "code", "intitule", "corps",
+            "type_prescription", "type_libelle",
+            "niveau", "niveau_libelle",
+            "normes", "tags", "source",
+            "contient_variables", "est_actif", "ordre",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class ChapitrePrescripSerialiseur(serializers.ModelSerializer):
+    prescriptions = PrescriptionCCTPSerialiseur(many=True, read_only=True)
+
+    class Meta:
+        model = ChapitrePrescrip
+        fields = ["id", "lot", "numero", "intitule", "ordre", "prescriptions"]
+        read_only_fields = ["id"]
+
+
+class LotCCTPSerialiseur(serializers.ModelSerializer):
+    chapitres = ChapitrePrescripSerialiseur(many=True, read_only=True)
+    nb_prescriptions = serializers.SerializerMethodField()
+    nb_articles = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LotCCTP
+        fields = [
+            "id", "code", "intitule", "description",
+            "normes_principales", "est_actif", "ordre",
+            "nb_prescriptions", "nb_articles", "chapitres",
+        ]
+        read_only_fields = ["id"]
+
+    def get_nb_prescriptions(self, obj):
+        return obj.prescriptions.filter(est_actif=True).count()
+
+    def get_nb_articles(self, obj):
+        return obj.articles.filter(est_dans_bibliotheque=True).count()
+
+
+class GenerateurCCTPCreationSerialiseur(serializers.Serializer):
+    projet_id = serializers.UUIDField()
+    intitule = serializers.CharField(max_length=300)
+    lots = serializers.ListField(
+        child=serializers.CharField(max_length=20),
+        required=False, default=list,
+    )
+    prescriptions_exclues = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False, default=list,
+    )
+    variables = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False, default=dict,
+    )

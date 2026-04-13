@@ -88,11 +88,45 @@ class LignePrixBibliotheque(models.Model):
     cout_horaire_mo = models.DecimalField(max_digits=10, decimal_places=4, default=0)
     cout_matieres = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     cout_materiel = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    cout_consommables = models.DecimalField(
+        max_digits=12, decimal_places=4, default=0,
+        verbose_name="Consommables et fournitures accessoires (€/u HT)",
+    )
     cout_sous_traitance = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     cout_transport = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     cout_frais_divers = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     debourse_sec_unitaire = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     prix_vente_unitaire = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+
+    # Liens CCTP
+    prescriptions_liees = models.ManyToManyField(
+        "pieces_ecrites.PrescriptionCCTP",
+        blank=True, related_name="lignes_prix",
+        verbose_name="Prescriptions CCTP liées",
+    )
+    lot_cctp_reference = models.ForeignKey(
+        "pieces_ecrites.LotCCTP",
+        on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="lignes_prix",
+        verbose_name="Lot CCTP de référence",
+    )
+
+    # Illustrations (URLs d'images extraites lors de l'import)
+    illustrations = models.JSONField(
+        default=list, blank=True, verbose_name="Illustrations",
+        help_text="Liste d'URLs d'images illustrant la prestation",
+    )
+
+    # Caractéristiques techniques
+    caracteristiques_techniques = models.JSONField(
+        default=dict, blank=True,
+        verbose_name="Caractéristiques techniques",
+        help_text="Ex: {resistance: 'C25/30', granulometrie: '0/20', norme: 'NF EN 206'}",
+    )
+    conditions_mise_en_oeuvre = models.TextField(
+        blank=True,
+        verbose_name="Conditions de mise en œuvre",
+    )
 
     # Traçabilité
     source = models.CharField(max_length=200, blank=True, verbose_name="Source")

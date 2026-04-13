@@ -148,8 +148,20 @@ def supprimer_verrou_modele(modele: ModeleDocument):
 
 
 def _discovery_urlsrc(extension: str) -> str:
-    url_base = getattr(settings, "COLLABORA_PUBLIC_URL", "https://office.lbh-economiste.com").rstrip("/")
-    with urllib_request.urlopen(f"{url_base}/hosting/discovery", timeout=10) as reponse:
+    """
+    Interroge la discovery WOPI via l'URL interne Docker, puis remplace le préfixe
+    interne (https://lbh-collabora:9980) par l'URL publique accessible depuis le navigateur.
+    Le résultat est mis en cache Redis 5 minutes pour éviter un appel HTTP à chaque ouverture.
+    """
+    cle_cache = f"collabora:discovery:urlsrc:{extension}"
+    resultat_cache = cache.get(cle_cache)
+    if resultat_cache:
+        return resultat_cache
+
+    url_interne = getattr(settings, "COLLABORA_URL", "http://lbh-collabora:9980").rstrip("/")
+    url_publique = getattr(settings, "COLLABORA_PUBLIC_URL", "https://lbh-economiste.com/collabora").rstrip("/")
+
+    with urllib_request.urlopen(f"{url_interne}/hosting/discovery", timeout=10) as reponse:
         contenu = reponse.read()
 
     racine = ElementTree.fromstring(contenu)
@@ -157,22 +169,31 @@ def _discovery_urlsrc(extension: str) -> str:
     for action in racine.findall(".//action"):
         ext = action.attrib.get("ext")
         nom = action.attrib.get("name")
-        urlsrc = action.attrib.get("urlsrc")
-        if ext == extension and urlsrc:
-            if nom == "edit":
-                return urlsrc
-            candidats.append(urlsrc)
+        urlsrc_brut = action.attrib.get("urlsrc", "")
+        if not (ext == extension and urlsrc_brut):
+            continue
+        # Remplacer le préfixe interne par l'URL publique Nginx
+        # ex : https://lbh-collabora:9980/browser/... → https://lbh-economiste.com/collabora/browser/...
+        urlsrc = urlsrc_brut.replace("https://lbh-collabora:9980", url_publique)
+        urlsrc = urlsrc.replace("http://lbh-collabora:9980", url_publique)
+        if nom == "edit":
+            cache.set(cle_cache, urlsrc, 300)
+            return urlsrc
+        candidats.append(urlsrc)
     if candidats:
+        cache.set(cle_cache, candidats[0], 300)
         return candidats[0]
     raise RuntimeError(f"Aucune action Collabora disponible pour l'extension {extension}.")
 
 
 def construire_url_editeur_collabora(wopi_src: str, access_token: str, extension: str) -> str:
+    # access_token est inclus dans l'URL afin que le JS de cool.html puisse le lire et
+    # l'insérer dans le chemin WebSocket (/cool/{WOPISrc+token}/ws).
+    # Il est AUSSI transmis dans le corps du formulaire HTML (POST) pour que Collabora
+    # l'utilise lors des appels GetFile/PutFile (le token dans l'URL ne suffit pas pour ces appels).
     urlsrc = _discovery_urlsrc(extension.lstrip("."))
-    parametres = (
-        f"WOPISrc={urllib_parse.quote(wopi_src, safe='')}"
-        "&lang=fr"
-    )
+    token_encode = urllib_parse.quote(access_token, safe="") if access_token else ""
+    parametres = f"WOPISrc={urllib_parse.quote(wopi_src, safe='')}&lang=fr&access_token={token_encode}&access_token_ttl=28800000"
     return f"{urlsrc}{parametres}"
 
 

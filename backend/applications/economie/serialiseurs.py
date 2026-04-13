@@ -336,6 +336,7 @@ class ProfilMainOeuvreSerialiseur(serializers.ModelSerializer):
         fields = [
             "id", "code", "libelle", "categorie", "categorie_libelle",
             "secteur_activite", "secteur_activite_libelle",
+            "corps_etat",
             "metier", "specialite", "niveau_classification", "fonction_equipe",
             "description_emploi", "source_officielle",
             "localisation", "localisation_libelle",
@@ -344,6 +345,8 @@ class ProfilMainOeuvreSerialiseur(serializers.ModelSerializer):
             "salaire_brut_minimum_conventionnel",
             "salaire_brut_mensuel_defaut", "primes_mensuelles_defaut", "avantages_mensuels_defaut",
             "heures_contractuelles_mensuelles", "heures_par_jour",
+            "nb_heures_supp_25_mensuelles", "nb_heures_supp_50_mensuelles",
+            "panier_repas_journalier", "jours_travail_mensuels_defaut",
             "heures_contractuelles_mensuelles_defaut", "heures_par_jour_defaut",
             "taux_charges_salariales", "taux_charges_patronales",
             "taux_absenteisme", "taux_temps_improductif",

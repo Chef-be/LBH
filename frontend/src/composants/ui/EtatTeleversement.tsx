@@ -25,26 +25,35 @@ export function EtatTeleversement({
   libelle?: string;
 }) {
   if (!progression) return null;
+  const afficherStatistiques = progression.debitOctetsSeconde > 0 && progression.total > 0;
 
   return (
-    <div className="rounded-xl border border-primaire-200 bg-primaire-50/80 p-3">
-      <div className="flex items-center justify-between gap-3 text-sm mb-2">
-        <span className="font-medium text-primaire-900">{libelle}</span>
-        <span className="font-semibold text-primaire-700">{progression.pourcentage}%</span>
+    <div className="surface-accent rounded-xl p-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+        <span className="font-medium" style={{ color: "var(--texte)" }}>{libelle}</span>
+        <span className="font-semibold" style={{ color: "var(--c-fort)" }}>{progression.pourcentage}%</span>
       </div>
-      <div className="h-2 rounded-full bg-white/80 overflow-hidden border border-primaire-100">
+      <div
+        className="h-2 overflow-hidden rounded-full border"
+        style={{
+          backgroundColor: "color-mix(in srgb, var(--fond-carte) 88%, var(--fond-app))",
+          borderColor: "color-mix(in srgb, var(--bordure) 82%, transparent)",
+        }}
+      >
         <div
           className="h-full rounded-full bg-primaire-600 transition-[width] duration-150"
           style={{ width: `${progression.pourcentage}%` }}
         />
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-primaire-800">
-        <span>{formaterTaille(progression.debitOctetsSeconde)}</span>
-        <span>Temps estimé : {formaterDuree(progression.tempsRestantSecondes)}</span>
-        <span>
-          {(progression.charge / (1024 * 1024)).toFixed(1)} / {(progression.total / (1024 * 1024)).toFixed(1)} Mo
-        </span>
-      </div>
+      {afficherStatistiques ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: "var(--texte-2)" }}>
+          <span>{formaterTaille(progression.debitOctetsSeconde)}</span>
+          <span>Temps estimé : {formaterDuree(progression.tempsRestantSecondes)}</span>
+          <span>
+            {(progression.charge / (1024 * 1024)).toFixed(1)} / {(progression.total / (1024 * 1024)).toFixed(1)} Mo
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -52,4 +52,8 @@ urlpatterns = [
     path("simulateur-main-oeuvre/export/pdf/", views.vue_exporter_simulation_main_oeuvre_pdf, name="simulateur-main-oeuvre-export-pdf"),
     path("simulateur-main-oeuvre/affecter/", views.vue_creer_affectation_depuis_simulation, name="simulateur-main-oeuvre-affecter"),
     path("pilotage-activite/simuler/", views.vue_simuler_plan_activite, name="pilotage-activite-simuler"),
+
+    # Décomposition inverse de prix et missions par type de client
+    path("decomposer-prix/", views.vue_decomposer_prix_inverse, name="decomposer-prix-inverse"),
+    path("missions/", views.vue_missions_par_type_client, name="missions-par-type-client"),
 ]

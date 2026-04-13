@@ -31,9 +31,38 @@ interface Offre {
   points_faibles: string;
   ecart_estimation_pct: number | null;
   notes_criteres: Record<string, number>;
+  analyse_detaillee?: {
+    criteres?: Array<{
+      code: string;
+      libelle: string;
+      type_critere: string;
+      ponderation_pct: number;
+      note_brute: number;
+      note_ponderee: number;
+      trace?: {
+        methode?: string;
+        formule?: string;
+      };
+    }>;
+    ecart_moyenne_offres_pct?: number | null;
+  };
   note_globale: number | null;
   observations: string;
   date_reception: string;
+}
+
+interface SyntheseAnalyse {
+  methode_prix: string;
+  offre_min_ht: number;
+  offre_moyenne_ht: number;
+  estimation_reference_ht: number | null;
+  resultats: Array<{
+    offre_id: string;
+    entreprise: string;
+    montant_analyse_ht: number;
+    note_globale: number;
+    rang: number;
+  }>;
 }
 
 interface AppelOffres {
@@ -52,6 +81,10 @@ interface AppelOffres {
   date_attribution: string | null;
   montant_estime_ht: number | null;
   criteres_jugement: Critere[];
+  parametres_analyse?: {
+    methode_prix?: string;
+  };
+  synthese_analyse?: SyntheseAnalyse;
   pieces_consultation: string[];
   points_vigilance: string[];
   analyse_contractuelle: string;
@@ -103,6 +136,15 @@ const STYLES_CONFORMITE: Record<string, string> = {
   reserve: "badge-alerte",
   non_conforme: "badge-danger",
 };
+
+const METHODES_PRIX: Array<{ value: string; label: string }> = [
+  { value: "proportionnelle_moins_disante", label: "Proportionnelle à la moins-disante" },
+  { value: "lineaire_ecart_moins_disante", label: "Linéaire à la moins-disante" },
+  { value: "lineaire_ecart_estimation", label: "Linéaire à l'estimation" },
+  { value: "ecart_moyenne_offres", label: "Écart à la moyenne des offres" },
+  { value: "bareme_parametrable", label: "Barème paramétrable" },
+  { value: "formule_personnalisee", label: "Formule personnalisée" },
+];
 
 function fmt(val: number | null): string {
   if (val === null || val === undefined) return "—";
@@ -382,6 +424,7 @@ export default function PageDetailAO({
   const [offreEdit, setOffreEdit] = useState<Offre | null>(null);
   const [analyse, setAnalyse] = useState(false);
   const [sauvegardeCadre, setSauvegardeCadre] = useState(false);
+  const [methodePrix, setMethodePrix] = useState("proportionnelle_moins_disante");
 
   const charger = useCallback(async () => {
     try {
@@ -390,6 +433,7 @@ export default function PageDetailAO({
         api.get<Organisation[]>("/api/organisations/"),
       ]);
       setAo(data);
+      setMethodePrix(data.parametres_analyse?.methode_prix || "proportionnelle_moins_disante");
       setOrganisations(extraireListeResultats(orgs));
       setCadreConsultation(initialiserCadreConsultation(data));
     } catch {
@@ -411,8 +455,8 @@ export default function PageDetailAO({
   const analyserOffres = async () => {
     setAnalyse(true);
     try {
-      await api.post(`/api/appels-offres/${aoId}/analyser/`, {});
-      flash("Notes globales calculées depuis les critères.");
+      await api.post(`/api/appels-offres/${aoId}/analyser/`, { methode_prix: methodePrix });
+      flash("Analyse des offres recalculée.");
       charger();
     } catch (e) {
       setErreur(e instanceof ErreurApi ? e.detail : "Erreur d'analyse.");
@@ -516,10 +560,21 @@ export default function PageDetailAO({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {ao.offres.length >= 2 && (
-              <button onClick={analyserOffres} disabled={analyse} className="btn-secondaire disabled:opacity-60">
-                <BarChart3 className="w-4 h-4" />
-                {analyse ? "Analyse…" : "Analyser"}
-              </button>
+              <>
+                <select
+                  className="champ-saisie min-w-[17rem] bg-white text-sm"
+                  value={methodePrix}
+                  onChange={(e) => setMethodePrix(e.target.value)}
+                >
+                  {METHODES_PRIX.map((methode) => (
+                    <option key={methode.value} value={methode.value}>{methode.label}</option>
+                  ))}
+                </select>
+                <button onClick={analyserOffres} disabled={analyse} className="btn-secondaire disabled:opacity-60">
+                  <BarChart3 className="w-4 h-4" />
+                  {analyse ? "Analyse…" : "Analyser"}
+                </button>
+              </>
             )}
             {peutSaisir && (
               <button onClick={() => { setOffreEdit(null); setModal(true); }} className="btn-primaire">
@@ -562,6 +617,45 @@ export default function PageDetailAO({
           </div>
         </div>
       )}
+
+      {ao.synthese_analyse?.resultats?.length ? (
+        <div className="carte p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="font-semibold text-slate-800">Synthèse d&apos;analyse</h3>
+              <p className="text-sm text-slate-500 mt-1">
+                Méthode prix : {METHODES_PRIX.find((methode) => methode.value === ao.synthese_analyse?.methode_prix)?.label || ao.synthese_analyse?.methode_prix}
+              </p>
+            </div>
+            <div className="text-right text-sm text-slate-500">
+              <div>Offre moyenne : <span className="font-mono text-slate-700">{fmt(ao.synthese_analyse.offre_moyenne_ht)}</span></div>
+              <div>Offre basse : <span className="font-mono text-slate-700">{fmt(ao.synthese_analyse.offre_min_ht)}</span></div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-slate-500">Rang</th>
+                  <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-slate-500">Entreprise</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500">Montant</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500">Note</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {ao.synthese_analyse.resultats.map((resultat) => (
+                  <tr key={resultat.offre_id}>
+                    <td className="px-4 py-3 font-semibold text-slate-700">{resultat.rang}</td>
+                    <td className="px-4 py-3 text-slate-700">{resultat.entreprise}</td>
+                    <td className="px-4 py-3 text-right font-mono text-slate-700">{fmt(resultat.montant_analyse_ht)}</td>
+                    <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">{resultat.note_globale.toFixed(2)}/100</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="carte p-6 space-y-5">
         <div className="flex items-start justify-between gap-4">

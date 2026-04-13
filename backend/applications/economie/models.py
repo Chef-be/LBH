@@ -798,6 +798,11 @@ class ProfilMainOeuvre(models.Model):
         default="batiment",
         verbose_name="Secteur d'activité",
     )
+    corps_etat = models.CharField(
+        max_length=120, blank=True,
+        verbose_name="Corps d'état",
+        help_text="Corps d'état BTP auquel ce profil est rattaché (ex : Gros Œuvre, Menuiseries, Électricité…).",
+    )
     metier = models.CharField(max_length=120, blank=True, verbose_name="Métier")
     specialite = models.CharField(max_length=120, blank=True, verbose_name="Spécialité")
     niveau_classification = models.CharField(max_length=120, blank=True, verbose_name="Niveau / position")
@@ -827,6 +832,31 @@ class ProfilMainOeuvre(models.Model):
         max_digits=8, decimal_places=2, default=decimal.Decimal("151.67")
     )
     heures_par_jour = models.DecimalField(max_digits=5, decimal_places=2, default=decimal.Decimal("7.00"))
+
+    # Heures supplémentaires mensuelles par taux de majoration
+    # Base conventionnelle BTP : 39h/semaine = 35h légal + 4h HS25% × 52/12 = 17,33 h/mois
+    nb_heures_supp_25_mensuelles = models.DecimalField(
+        max_digits=6, decimal_places=2, default=decimal.Decimal("17.33"),
+        verbose_name="HS majorées à 25 % (h/mois)",
+        help_text="Nombre d'heures supplémentaires mensuelles majorées à 25 % (base 39h/semaine BTP).",
+    )
+    nb_heures_supp_50_mensuelles = models.DecimalField(
+        max_digits=6, decimal_places=2, default=decimal.Decimal("0.00"),
+        verbose_name="HS majorées à 50 % (h/mois)",
+        help_text="Nombre d'heures supplémentaires mensuelles majorées à 50 % (dimanches, fériés).",
+    )
+
+    # Compléments employeur mensuels
+    panier_repas_journalier = models.DecimalField(
+        max_digits=8, decimal_places=2, default=decimal.Decimal("9.00"),
+        verbose_name="Panier repas journalier (€)",
+        help_text="Montant journalier du panier repas (zone BTP, base conventionnelle).",
+    )
+    jours_travail_mensuels_defaut = models.DecimalField(
+        max_digits=5, decimal_places=2, default=decimal.Decimal("21.67"),
+        verbose_name="Jours de travail mensuels",
+        help_text="Nombre moyen de jours travaillés par mois (base 260 j / 12).",
+    )
 
     taux_charges_salariales = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.2200"))
     taux_charges_patronales = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.4200"))
@@ -910,3 +940,145 @@ class AffectationProfilProjet(models.Model):
 
     def __str__(self):
         return f"{self.profil.libelle} — {self.projet.reference}"
+
+
+class TypeClientEconomie(models.TextChoices):
+    MOA_PUBLIC       = "moa_public",       "Maître d'ouvrage public"
+    MOE              = "moe",              "Maître d'œuvre"
+    ENTREPRISE_BTP   = "entreprise_btp",   "Entreprise BTP"
+
+
+class MissionEconomique(models.Model):
+    """
+    Mission économique spécifique à un type de client.
+    Détermine quels modules économiques sont pertinents dans le dossier d'affaire.
+    """
+
+    CODES_MISSIONS = [
+        # MOA public
+        ("estimation_tce",       "Estimation TCE — avant-projet"),
+        ("dpgf_lots",            "DPGF — Décomposition du Prix Global par lot"),
+        ("dqe_consultation",     "DQE — Détail Quantitatif Estimatif de consultation"),
+        ("analyse_offres",       "Analyse comparative des offres reçues"),
+        ("suivi_dgd",            "DGD — Suivi et liquidation du Décompte Général Définitif"),
+        ("revision_prix",        "Révision de prix — formule paramétrique"),
+        ("controle_situation",   "Contrôle des situations de travaux"),
+        # MOE
+        ("honoraires_moe",       "Calcul des honoraires MOE"),
+        ("planning_mission",     "Planning de mission et jalons"),
+        ("rapport_avancement",   "Rapport d'avancement mensuel"),
+        ("mission_opc",          "Mission OPC — pilotage chantier"),
+        # Entreprise
+        ("etude_prix_analytique","Étude de prix analytique — DS→PV"),
+        ("reponse_ao",           "Réponse à appel d'offres — BPU/DQE"),
+        ("marge_lot",            "Analyse de marge par lot"),
+        ("situation_travaux",    "Établissement des situations de travaux"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=40, choices=CODES_MISSIONS, unique=True)
+    libelle = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    types_clients = models.JSONField(
+        default=list,
+        help_text="Liste des types de clients concernés : moa_public, moe, entreprise_btp",
+    )
+    est_actif = models.BooleanField(default=True)
+    ordre = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "economie_mission_economique"
+        verbose_name = "Mission économique"
+        ordering = ["ordre", "code"]
+
+    def __str__(self):
+        return f"{self.code} — {self.libelle}"
+
+
+class DecompositionPrixInverse(models.Model):
+    """
+    Décomposition inverse d'un prix de vente connu.
+    À partir du PV saisi, estime intelligemment DS, CD, CR, coefficients K
+    en s'appuyant sur les ratios ARTIPRIX et les conventions BTP.
+    """
+
+    METHODES = [
+        ("ratios_artiprix",   "Ratios ARTIPRIX 2025 — par lot/corps d'état"),
+        ("ratios_manuels",    "Ratios manuels — valeurs saisies"),
+        ("conventions_btp",   "Conventions collectives BTP — taux standards"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    etude = models.ForeignKey(
+        EtudeEconomique, on_delete=models.CASCADE,
+        related_name="decompositions_inverses", null=True, blank=True,
+    )
+    etude_prix = models.ForeignKey(
+        EtudePrix, on_delete=models.CASCADE,
+        related_name="decompositions_inverses", null=True, blank=True,
+    )
+
+    designation = models.CharField(max_length=300, verbose_name="Désignation de l'ouvrage")
+    lot_type = models.CharField(max_length=10, blank=True, verbose_name="Lot / Corps d'état")
+    unite = models.CharField(max_length=20, default="u")
+    quantite = models.DecimalField(max_digits=14, decimal_places=3, default=1)
+
+    # Prix connu (point de départ)
+    prix_vente_unitaire_saisi = models.DecimalField(
+        max_digits=12, decimal_places=4,
+        verbose_name="Prix de vente unitaire HT saisi (€/unité)",
+    )
+    methode = models.CharField(max_length=30, choices=METHODES, default="ratios_artiprix")
+
+    # Coefficients estimés ou saisis
+    kpv_estime = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True,
+        verbose_name="Coefficient de vente Kpv estimé",
+        help_text="PV = DS × Kpv. Kpv = 1 / (1 - taux_marge - taux_FG - taux_FC - taux_B&A)",
+    )
+    taux_mo_estime = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True,
+        verbose_name="Part MO dans DS (%)",
+    )
+    taux_matieres_estime = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True,
+        verbose_name="Part matières dans DS (%)",
+    )
+    taux_materiel_estime = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True,
+        verbose_name="Part matériel dans DS (%)",
+    )
+    taux_sous_traitance_estime = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True,
+        verbose_name="Part sous-traitance dans DS (%)",
+    )
+
+    # Résultats calculés
+    debourse_sec_unitaire_calcule = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    cout_direct_unitaire_calcule = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    cout_revient_unitaire_calcule = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    marge_unitaire_calculee = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    taux_marge_calcule = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True)
+
+    # Coefficients résultants
+    k_fc = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True, verbose_name="Kfc (frais chantier)")
+    k_fg = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True, verbose_name="Kfg (frais généraux)")
+    k_ba = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True, verbose_name="Kba (bénéfices et aléas)")
+    k_total = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True, verbose_name="Kpv total")
+
+    # Données source des ratios
+    source_ratios = models.JSONField(default=dict, blank=True, verbose_name="Source et détail des ratios utilisés")
+
+    commentaire = models.TextField(blank=True)
+    date_calcul = models.DateTimeField(auto_now=True)
+    calcule_par = models.ForeignKey(
+        "comptes.Utilisateur", on_delete=models.SET_NULL, null=True, blank=True,
+    )
+
+    class Meta:
+        db_table = "economie_decomposition_prix_inverse"
+        verbose_name = "Décomposition inverse de prix"
+        ordering = ["-date_calcul"]
+
+    def __str__(self):
+        return f"Décomposition {self.designation[:60]} — PV={self.prix_vente_unitaire_saisi} €/{self.unite}"

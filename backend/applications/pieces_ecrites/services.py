@@ -165,24 +165,52 @@ def _valeur_fusion_piece(piece: PieceEcrite, nom: str) -> str:
     projet = piece.projet
     lot = piece.lot
     utilisateur = piece.redacteur
+    # Dates d'exécution (depuis SuiviExecution si disponible)
+    date_os_demarrage = ""
+    date_fin_contractuelle = ""
+    duree_contractuelle = ""
+    montant_marche = ""
+    try:
+        suivi = projet.suivis_execution.order_by("-date_creation").first()
+        if suivi:
+            if suivi.date_os_demarrage:
+                date_os_demarrage = suivi.date_os_demarrage.strftime("%d/%m/%Y")
+            if suivi.date_fin_contractuelle:
+                date_fin_contractuelle = suivi.date_fin_contractuelle.strftime("%d/%m/%Y")
+            if suivi.duree_contractuelle_jours:
+                duree_contractuelle = f"{suivi.duree_contractuelle_jours} jours ouvrés"
+            if suivi.montant_marche_ht:
+                montant_marche = f"{float(suivi.montant_marche_ht):,.0f} € HT".replace(",", " ")
+    except Exception:
+        pass
+
     valeurs = {
         "nom_projet": projet.intitule,
         "reference_projet": projet.reference,
         "description_projet": projet.description or "",
         "commune_projet": projet.commune or "",
         "departement_projet": projet.departement or "",
+        "adresse_chantier": f"{projet.commune or ''}{' (' + projet.departement + ')' if projet.departement else ''}".strip(),
         "phase_projet": projet.get_phase_actuelle_display() if projet.phase_actuelle else "",
         "statut_projet": projet.get_statut_display(),
         "maitre_ouvrage": projet.maitre_ouvrage.nom if projet.maitre_ouvrage else "",
+        "moa": projet.maitre_ouvrage.nom if projet.maitre_ouvrage else "",
         "maitre_oeuvre": projet.maitre_oeuvre.nom if projet.maitre_oeuvre else "",
+        "moe": projet.maitre_oeuvre.nom if projet.maitre_oeuvre else "",
         "organisation": projet.organisation.nom if projet.organisation else "",
         "responsable_projet": projet.responsable.nom_complet if projet.responsable else "",
         "date_generation": timezone.localtime().strftime("%d/%m/%Y"),
         "lot_intitule": lot.intitule if lot else "",
-        "lot_numero": str(lot.numero) if lot else "",
+        "lot_numero": str(lot.code) if lot else "",
         "redacteur_nom": utilisateur.nom_complet if utilisateur else "",
         "piece_intitule": piece.intitule,
         "modele_libelle": piece.modele.libelle if piece.modele_id else "",
+        # Variables chantier / marché
+        "date_os_demarrage": date_os_demarrage,
+        "date_debut_travaux": date_os_demarrage,
+        "date_fin_contractuelle": date_fin_contractuelle,
+        "duree_contractuelle": duree_contractuelle,
+        "montant_marche": montant_marche,
     }
     return str(valeurs.get(nom, ""))
 
@@ -202,9 +230,16 @@ def construire_donnees_fusion_piece(piece: PieceEcrite) -> dict[str, str]:
     for nom in (
         "nom_projet",
         "reference_projet",
+        "description_projet",
         "commune_projet",
+        "departement_projet",
+        "adresse_chantier",
+        "phase_projet",
+        "statut_projet",
         "maitre_ouvrage",
+        "moa",
         "maitre_oeuvre",
+        "moe",
         "organisation",
         "responsable_projet",
         "date_generation",
@@ -213,6 +248,11 @@ def construire_donnees_fusion_piece(piece: PieceEcrite) -> dict[str, str]:
         "redacteur_nom",
         "piece_intitule",
         "modele_libelle",
+        "date_os_demarrage",
+        "date_debut_travaux",
+        "date_fin_contractuelle",
+        "duree_contractuelle",
+        "montant_marche",
         "contenu_principal",
     ):
         donnees.setdefault(nom, _valeur_fusion_piece(piece, nom))
@@ -721,17 +761,41 @@ def _generer_rapport_analyse(piece: PieceEcrite) -> str:
 
 
 def generer_contenu_piece_depuis_articles(piece: PieceEcrite) -> str:
-    articles = piece.articles.order_by("chapitre", "numero_article", "date_creation")
+    """Génère le contenu HTML de la pièce depuis ses articles CCTP.
+
+    Les variables de fusion ({{variable}}) présentes dans les corps d'articles
+    sont automatiquement interpolées avec les données du projet.
+    """
+    articles = piece.articles.select_related("lot").order_by(
+        "lot__ordre", "chapitre", "numero_article", "date_creation"
+    )
+    # Construire le dictionnaire de fusion une seule fois
+    donnees_fusion = construire_donnees_fusion_piece(piece)
+
     blocs = [
         f"<h1>{piece.intitule}</h1>",
         "<section>",
         f"<p><strong>Projet :</strong> {piece.projet.reference} — {piece.projet.intitule}</p>",
     ]
+    if donnees_fusion.get("maitre_ouvrage"):
+        blocs.append(f"<p><strong>Maître d'ouvrage :</strong> {donnees_fusion['maitre_ouvrage']}</p>")
+    if donnees_fusion.get("commune_projet"):
+        blocs.append(f"<p><strong>Commune :</strong> {donnees_fusion['commune_projet']}</p>")
+    if donnees_fusion.get("date_generation"):
+        blocs.append(f"<p><strong>Date :</strong> {donnees_fusion['date_generation']}</p>")
     if piece.modele_id:
         blocs.append(f"<p><strong>Modèle :</strong> {piece.modele.libelle}</p>")
     blocs.append("</section>")
 
+    lot_courant: str | None = None
     for article in articles:
+        # En-tête de lot si changement
+        lot_code = article.lot.code if article.lot_id else None
+        lot_intitule = article.lot.intitule if article.lot_id else None
+        if lot_code and lot_code != lot_courant:
+            blocs.append(f"<h2>Lot {lot_code} — {lot_intitule}</h2>")
+            lot_courant = lot_code
+
         titre = " — ".join(
             partie for partie in [
                 ".".join(partie for partie in [article.chapitre, article.numero_article] if partie),
@@ -739,8 +803,11 @@ def generer_contenu_piece_depuis_articles(piece: PieceEcrite) -> str:
             ] if partie
         )
         blocs.append("<section>")
-        blocs.append(f"<h2>{titre or 'Article'}</h2>")
-        corps = _balise_paragraphe_si_necessaire(article.corps_article)
+        blocs.append(f"<h3>{titre or 'Article'}</h3>")
+        # Corps avec interpolation des variables projet
+        corps_brut = article.corps_article or ""
+        corps_interpole = interpoler_variables_modele(corps_brut, donnees_fusion)
+        corps = _balise_paragraphe_si_necessaire(corps_interpole)
         if corps:
             blocs.append(corps)
         if article.normes_applicables:
@@ -1084,3 +1151,762 @@ def exporter_piece_ecrite(piece: PieceEcrite, format_sortie: str) -> tuple[bytes
     piece.document_ged = document_ged
     piece.save(update_fields=["fichier_genere", "document_ged", "date_generation", "date_modification"])
     return contenu, type_mime, nom_fichier
+
+
+def generer_cctp_depuis_bibliotheque(
+    projet,
+    intitule: str,
+    lots_numeros: list[str],
+    prescriptions_exclues_ids: list[str],
+    variables: dict,
+    utilisateur=None,
+) -> PieceEcrite:
+    """
+    Génère un CCTP Word complet depuis la bibliothèque de prescriptions.
+    Retourne une PieceEcrite avec le fichier Word généré dans MinIO.
+    """
+    from .models import LotCCTP, PrescriptionCCTP, ModeleDocument
+
+    # Récupérer les lots dans l'ordre
+    lots = LotCCTP.objects.filter(
+        code__in=lots_numeros, est_actif=True
+    ).prefetch_related(
+        "chapitres__prescriptions"
+    ).order_by("ordre", "code")
+
+    # Construire le document Word
+    document = DocumentWord()
+
+    # Titre principal
+    document.add_heading(intitule or "Cahier des Clauses Techniques Particulières", level=0)
+
+    # En-tête du projet
+    variables_completes = {
+        "nom_projet": getattr(projet, "intitule", ""),
+        "reference_projet": getattr(projet, "reference", ""),
+        "maitre_ouvrage": getattr(getattr(projet, "organisation", None), "raison_sociale", ""),
+        "date_generation": timezone.now().strftime("%d/%m/%Y"),
+        **variables,
+    }
+
+    entete = document.add_paragraph()
+    entete.add_run(f"Projet : {variables_completes.get('nom_projet', '')}").bold = True
+    document.add_paragraph(f"Référence : {variables_completes.get('reference_projet', '')}")
+    document.add_paragraph(f"Maître d'ouvrage : {variables_completes.get('maitre_ouvrage', '')}")
+    document.add_paragraph(f"Date d'établissement : {variables_completes.get('date_generation', '')}")
+    document.add_paragraph("")
+
+    exclues_ids = set(str(i) for i in prescriptions_exclues_ids)
+
+    for lot in lots:
+        document.add_heading(f"LOT {lot.code} — {lot.intitule.upper()}", level=1)
+
+        for chapitre in lot.chapitres.all().order_by("ordre"):
+            document.add_heading(f"{chapitre.numero} — {chapitre.intitule}", level=2)
+
+            for prescrip in chapitre.prescriptions.filter(est_actif=True).order_by("ordre"):
+                if str(prescrip.pk) in exclues_ids:
+                    continue
+
+                # Titre de l'article
+                document.add_heading(prescrip.intitule, level=3)
+
+                # Corps avec remplacement de variables
+                corps = prescrip.corps
+                for var, valeur in variables_completes.items():
+                    corps = corps.replace(f"{{{var}}}", str(valeur))
+                # Remplacer variables non résolues par leur valeur par défaut
+                corps = re.sub(r"\{([^}:]+):-([^}]*)\}", r"\2", corps)
+                corps = re.sub(r"\{([^}]+)\}", r"[\1]", corps)
+
+                document.add_paragraph(corps)
+
+                # Normes
+                if prescrip.normes:
+                    p = document.add_paragraph()
+                    p.add_run("Normes applicables : ").italic = True
+                    p.add_run(", ".join(prescrip.normes)).italic = True
+
+    # Sauvegarder le document Word en mémoire
+    flux = BytesIO()
+    document.save(flux)
+    contenu_word = flux.getvalue()
+
+    # Trouver ou créer un modèle CCTP générique
+    modele, _ = ModeleDocument.objects.get_or_create(
+        code="CCTP-GENERE",
+        defaults={
+            "libelle": "CCTP généré automatiquement",
+            "type_document": "cctp",
+            "description": "Modèle utilisé pour les CCTP générés depuis la bibliothèque de prescriptions.",
+        }
+    )
+
+    # Créer la PieceEcrite
+    piece = PieceEcrite.objects.create(
+        projet=projet,
+        modele=modele,
+        intitule=intitule,
+        statut="brouillon",
+        redacteur=utilisateur,
+    )
+    nom_fichier = f"cctp-{slugify(intitule) or 'document'}-{timezone.now():%Y%m%d}.docx"
+    piece.fichier_genere.save(
+        f"pieces_ecrites/{timezone.now():%Y/%m}/{nom_fichier}",
+        ContentFile(contenu_word),
+        save=True,
+    )
+    piece.date_generation = timezone.now()
+    piece.save()
+
+    return piece
+
+
+# ---------------------------------------------------------------------------
+# A4 — Renumérotation automatique des articles CCTP (Widloecher & Cusant)
+# ---------------------------------------------------------------------------
+
+def renumeroter_articles_cctp(piece: PieceEcrite) -> int:
+    """
+    Renumérotation automatique des articles d'une pièce CCTP selon la structure
+    Widloecher & Cusant (3e éd.) :
+      Partie I — Dispositions générales : I.1, I.2, I.3…
+      Partie II — Descriptif des ouvrages : II.{chapitre}.{rang} ou II.{rang}
+
+    Les articles sont regroupés par chapitre (champ `chapitre`).
+    Les chapitres vides ou « Dispositions générales » → Partie I.
+    Les autres chapitres → Partie II numérotés dans l'ordre d'apparition.
+
+    Retourne le nombre d'articles mis à jour.
+    """
+    from .models import ArticleCCTP
+
+    articles = list(
+        piece.articles.select_related("lot").order_by("chapitre", "numero_article", "date_creation")
+    )
+    if not articles:
+        return 0
+
+    # Séparer dispositions générales et descriptif
+    CHAPITRES_GENERAUX = {
+        "", "dispositions générales", "generalites", "généralités",
+        "objet du marché", "documents de référence", "normes applicables",
+        "prescriptions générales", "objet", "généralités et objet",
+    }
+
+    groupe_general: list[ArticleCCTP] = []
+    chapitres: dict[str, list[ArticleCCTP]] = {}
+
+    for article in articles:
+        cle = (article.chapitre or "").strip().lower()
+        if cle in CHAPITRES_GENERAUX:
+            groupe_general.append(article)
+        else:
+            chapitres.setdefault(article.chapitre or "Descriptif", []).append(article)
+
+    a_mettre_a_jour: list[ArticleCCTP] = []
+
+    # Partie I — Dispositions générales
+    for rang, article in enumerate(groupe_general, start=1):
+        nouveau_numero = f"I.{rang}"
+        if article.numero_article != nouveau_numero:
+            article.numero_article = nouveau_numero
+            a_mettre_a_jour.append(article)
+
+    # Partie II — Descriptif des ouvrages
+    for num_chap, (intitule_chapitre, liste_articles) in enumerate(chapitres.items(), start=1):
+        for rang, article in enumerate(liste_articles, start=1):
+            nouveau_numero = f"II.{num_chap}.{rang}"
+            if article.numero_article != nouveau_numero:
+                article.numero_article = nouveau_numero
+                a_mettre_a_jour.append(article)
+
+    if a_mettre_a_jour:
+        ArticleCCTP.objects.bulk_update(a_mettre_a_jour, ["numero_article"])
+
+    return len(a_mettre_a_jour)
+
+
+# ---------------------------------------------------------------------------
+# A5 — Export DPGF / BPU depuis les articles CCTP
+# ---------------------------------------------------------------------------
+
+def _styles_excel_dpgf(wb):
+    """Retourne un dict de styles nommés pour le DPGF/BPU."""
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side, numbers
+
+    fin_mince = Side(style="thin", color="C0C8D8")
+    bordure = Border(left=fin_mince, right=fin_mince, top=fin_mince, bottom=fin_mince)
+
+    return {
+        "entete": {
+            "font": Font(bold=True, color="FFFFFF", size=10),
+            "fill": PatternFill("solid", fgColor="2D4A8A"),
+            "alignment": Alignment(horizontal="center", vertical="center", wrap_text=True),
+            "border": bordure,
+        },
+        "lot": {
+            "font": Font(bold=True, color="FFFFFF", size=9),
+            "fill": PatternFill("solid", fgColor="4A6FA5"),
+            "alignment": Alignment(horizontal="left", vertical="center"),
+            "border": bordure,
+        },
+        "chapitre": {
+            "font": Font(bold=True, size=9, color="1E3A5F"),
+            "fill": PatternFill("solid", fgColor="D6E4F0"),
+            "alignment": Alignment(horizontal="left", vertical="center"),
+            "border": bordure,
+        },
+        "article": {
+            "font": Font(size=9),
+            "alignment": Alignment(horizontal="left", vertical="top", wrap_text=True),
+            "border": bordure,
+        },
+        "numero": {
+            "font": Font(size=9, bold=True, color="2D4A8A"),
+            "alignment": Alignment(horizontal="center", vertical="top"),
+            "border": bordure,
+        },
+        "montant": {
+            "font": Font(size=9),
+            "alignment": Alignment(horizontal="right", vertical="top"),
+            "border": bordure,
+            "number_format": "#,##0.00",
+        },
+        "total": {
+            "font": Font(bold=True, size=9),
+            "fill": PatternFill("solid", fgColor="EFF4FB"),
+            "alignment": Alignment(horizontal="right", vertical="center"),
+            "border": bordure,
+            "number_format": "#,##0.00",
+        },
+    }
+
+
+def _appliquer_style(cellule, style: dict):
+    from openpyxl.styles import Font, PatternFill, Alignment, Border
+    for attr, valeur in style.items():
+        if attr == "number_format":
+            cellule.number_format = valeur
+        else:
+            setattr(cellule, attr, valeur)
+
+
+def exporter_articles_dpgf(piece: PieceEcrite) -> bytes:
+    """
+    Génère un fichier DPGF (.xlsx) depuis les articles CCTP d'une pièce écrite.
+    Chaque article CCTP = une ligne DPGF avec : code, désignation, unité, quantité, PU, montant.
+    Les articles sont regroupés par lot CCTP puis par chapitre.
+    Compatible avec le BPU (désignation seule) et la DQE (avec quantités).
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    articles = list(
+        piece.articles.select_related("lot").order_by(
+            "lot__ordre", "lot__code", "chapitre", "numero_article"
+        )
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "DPGF"
+
+    styles = _styles_excel_dpgf(wb)
+
+    # Informations projet en en-tête
+    projet = piece.projet
+    ws.merge_cells("A1:F1")
+    titre = ws["A1"]
+    titre.value = f"DÉCOMPOSITION DU PRIX GLOBAL ET FORFAITAIRE — {piece.intitule.upper()}"
+    _appliquer_style(titre, {
+        "font": Font(bold=True, size=12, color="1E3A5F"),
+        "alignment": Alignment(horizontal="center", vertical="center"),
+    })
+    ws.row_dimensions[1].height = 20
+
+    ws.merge_cells("A2:F2")
+    sous_titre = ws["A2"]
+    lot_projet = piece.lot
+    sous_titre.value = (
+        f"Projet : {projet.reference} — {projet.intitule}"
+        + (f"  |  Lot : {lot_projet.numero} {lot_projet.intitule}" if lot_projet else "")
+        + f"  |  Date : {timezone.localtime().strftime('%d/%m/%Y')}"
+    )
+    _appliquer_style(sous_titre, {
+        "font": Font(size=9, color="4A6FA5"),
+        "alignment": Alignment(horizontal="center"),
+    })
+    ws.row_dimensions[2].height = 14
+
+    # En-têtes colonnes (ligne 4)
+    entetes = ["N°", "DÉSIGNATION DES OUVRAGES", "UNITÉ", "QUANTITÉ", "PRIX UNITAIRE HT (€)", "MONTANT HT (€)"]
+    largeurs = [12, 55, 10, 12, 20, 18]
+    for col, (libelle, largeur) in enumerate(zip(entetes, largeurs), start=1):
+        cellule = ws.cell(row=4, column=col, value=libelle)
+        _appliquer_style(cellule, styles["entete"])
+        ws.column_dimensions[get_column_letter(col)].width = largeur
+    ws.row_dimensions[4].height = 30
+
+    ligne = 5
+    lot_courant = None
+    chapitre_courant = None
+    premiere_ligne_lot = None
+    sommes_lots: list[tuple[int, int]] = []  # (ligne_debut, ligne_fin)
+
+    for article in articles:
+        lot_cctp = article.lot
+        lot_libelle = f"{lot_cctp.code} — {lot_cctp.intitule}" if lot_cctp else "Sans lot"
+
+        # Séparateur de lot
+        if lot_libelle != lot_courant:
+            if premiere_ligne_lot is not None:
+                # Total du lot précédent
+                ws.merge_cells(f"A{ligne}:E{ligne}")
+                ws.cell(row=ligne, column=1, value=f"Total {lot_courant}")
+                _appliquer_style(ws.cell(row=ligne, column=1), styles["total"])
+                cellule_total = ws.cell(row=ligne, column=6)
+                cellule_total.value = f"=SUM(F{premiere_ligne_lot}:F{ligne - 1})"
+                _appliquer_style(cellule_total, styles["total"])
+                sommes_lots.append((premiere_ligne_lot, ligne))
+                ligne += 1
+
+            ws.merge_cells(f"A{ligne}:F{ligne}")
+            cellule_lot = ws.cell(row=ligne, column=1, value=lot_libelle.upper())
+            _appliquer_style(cellule_lot, styles["lot"])
+            ws.row_dimensions[ligne].height = 18
+            premiere_ligne_lot = ligne + 1
+            lot_courant = lot_libelle
+            chapitre_courant = None
+            ligne += 1
+
+        # Séparateur de chapitre
+        chapitre = (article.chapitre or "").strip()
+        if chapitre and chapitre != chapitre_courant:
+            ws.merge_cells(f"A{ligne}:F{ligne}")
+            cellule_chap = ws.cell(row=ligne, column=1, value=chapitre)
+            _appliquer_style(cellule_chap, styles["chapitre"])
+            ws.row_dimensions[ligne].height = 16
+            chapitre_courant = chapitre
+            ligne += 1
+
+        # Ligne article
+        num = ws.cell(row=ligne, column=1, value=article.numero_article)
+        _appliquer_style(num, styles["numero"])
+
+        desig = ws.cell(row=ligne, column=2, value=article.intitule)
+        _appliquer_style(desig, styles["article"])
+
+        unite = ws.cell(row=ligne, column=3, value="")
+        _appliquer_style(unite, styles["article"])
+
+        qte = ws.cell(row=ligne, column=4, value=None)
+        _appliquer_style(qte, styles["montant"])
+
+        pu = ws.cell(row=ligne, column=5, value=None)
+        _appliquer_style(pu, styles["montant"])
+
+        montant = ws.cell(row=ligne, column=6, value=f"=D{ligne}*E{ligne}")
+        _appliquer_style(montant, styles["montant"])
+
+        ws.row_dimensions[ligne].height = 16
+        ligne += 1
+
+    # Total dernier lot
+    if premiere_ligne_lot is not None:
+        ws.merge_cells(f"A{ligne}:E{ligne}")
+        ws.cell(row=ligne, column=1, value=f"Total {lot_courant}")
+        _appliquer_style(ws.cell(row=ligne, column=1), styles["total"])
+        cellule_total = ws.cell(row=ligne, column=6)
+        cellule_total.value = f"=SUM(F{premiere_ligne_lot}:F{ligne - 1})"
+        _appliquer_style(cellule_total, styles["total"])
+        sommes_lots.append((premiere_ligne_lot, ligne))
+        ligne += 1
+
+    # Total général
+    if sommes_lots:
+        ligne += 1
+        ws.merge_cells(f"A{ligne}:E{ligne}")
+        total_gen = ws.cell(row=ligne, column=1, value="TOTAL GÉNÉRAL HT")
+        _appliquer_style(total_gen, {
+            "font": Font(bold=True, size=10, color="FFFFFF"),
+            "fill": PatternFill("solid", fgColor="1E3A5F"),
+            "alignment": Alignment(horizontal="right", vertical="center"),
+        })
+        formule = "+".join(f"F{r_fin}" for _, r_fin in sommes_lots)
+        cellule_tg = ws.cell(row=ligne, column=6, value=f"={formule}")
+        _appliquer_style(cellule_tg, {
+            "font": Font(bold=True, size=10, color="FFFFFF"),
+            "fill": PatternFill("solid", fgColor="1E3A5F"),
+            "alignment": Alignment(horizontal="right"),
+            "number_format": "#,##0.00",
+        })
+        ws.row_dimensions[ligne].height = 22
+
+    # Figer les volets (en-têtes)
+    ws.freeze_panes = "A5"
+
+    flux_dpgf = BytesIO()
+    wb.save(flux_dpgf)
+    return flux_dpgf.getvalue()
+
+
+def exporter_articles_bpu(piece: PieceEcrite) -> bytes:
+    """
+    Génère un fichier BPU (.xlsx) depuis les articles CCTP d'une pièce écrite.
+    Chaque article CCTP = une ligne BPU avec :
+      code, désignation complète (intitulé + corps), unité, prix unitaire.
+    Le corps de l'article est inclus en note de bas de cellule pour le cahier des charges.
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    articles = list(
+        piece.articles.select_related("lot").order_by(
+            "lot__ordre", "lot__code", "chapitre", "numero_article"
+        )
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "BPU"
+
+    styles = _styles_excel_dpgf(wb)
+
+    projet = piece.projet
+    ws.merge_cells("A1:E1")
+    titre = ws["A1"]
+    titre.value = f"BORDEREAU DES PRIX UNITAIRES — {piece.intitule.upper()}"
+    _appliquer_style(titre, {
+        "font": Font(bold=True, size=12, color="1E3A5F"),
+        "alignment": Alignment(horizontal="center", vertical="center"),
+    })
+    ws.row_dimensions[1].height = 20
+
+    ws.merge_cells("A2:E2")
+    sous_titre = ws["A2"]
+    sous_titre.value = (
+        f"Projet : {projet.reference} — {projet.intitule}"
+        f"  |  Date : {timezone.localtime().strftime('%d/%m/%Y')}"
+    )
+    _appliquer_style(sous_titre, {
+        "font": Font(size=9, color="4A6FA5"),
+        "alignment": Alignment(horizontal="center"),
+    })
+    ws.row_dimensions[2].height = 14
+
+    entetes = ["N°", "DÉSIGNATION ET CAHIER DES CHARGES", "UNITÉ", "PRIX UNITAIRE HT (€)", "OBSERVATIONS"]
+    largeurs = [12, 70, 10, 20, 25]
+    for col, (libelle, largeur) in enumerate(zip(entetes, largeurs), start=1):
+        cellule = ws.cell(row=4, column=col, value=libelle)
+        _appliquer_style(cellule, styles["entete"])
+        ws.column_dimensions[get_column_letter(col)].width = largeur
+    ws.row_dimensions[4].height = 30
+
+    ligne = 5
+    lot_courant = None
+    chapitre_courant = None
+
+    for article in articles:
+        lot_cctp = article.lot
+        lot_libelle = f"{lot_cctp.code} — {lot_cctp.intitule}" if lot_cctp else "Sans lot"
+
+        if lot_libelle != lot_courant:
+            ws.merge_cells(f"A{ligne}:E{ligne}")
+            cellule_lot = ws.cell(row=ligne, column=1, value=lot_libelle.upper())
+            _appliquer_style(cellule_lot, styles["lot"])
+            ws.row_dimensions[ligne].height = 18
+            lot_courant = lot_libelle
+            chapitre_courant = None
+            ligne += 1
+
+        chapitre = (article.chapitre or "").strip()
+        if chapitre and chapitre != chapitre_courant:
+            ws.merge_cells(f"A{ligne}:E{ligne}")
+            cellule_chap = ws.cell(row=ligne, column=1, value=chapitre)
+            _appliquer_style(cellule_chap, styles["chapitre"])
+            ws.row_dimensions[ligne].height = 16
+            chapitre_courant = chapitre
+            ligne += 1
+
+        # Pour le BPU : désignation = intitulé + corps de l'article (cahier des charges)
+        corps_texte = _html_vers_texte(article.corps_article or "")
+        designation_complete = article.intitule
+        if corps_texte:
+            designation_complete = f"{article.intitule}\n{corps_texte}"
+
+        num = ws.cell(row=ligne, column=1, value=article.numero_article)
+        _appliquer_style(num, styles["numero"])
+
+        desig = ws.cell(row=ligne, column=2, value=designation_complete)
+        _appliquer_style(desig, {**styles["article"], "alignment": Alignment(
+            horizontal="left", vertical="top", wrap_text=True
+        )})
+
+        unite = ws.cell(row=ligne, column=3, value="")
+        _appliquer_style(unite, styles["article"])
+
+        pu = ws.cell(row=ligne, column=4, value=None)
+        _appliquer_style(pu, styles["montant"])
+
+        obs = ws.cell(row=ligne, column=5, value="")
+        _appliquer_style(obs, styles["article"])
+
+        # Hauteur proportionnelle au nombre de lignes du corps
+        nb_lignes = max(1, len(designation_complete.splitlines()))
+        ws.row_dimensions[ligne].height = max(20, min(120, nb_lignes * 13))
+        ligne += 1
+
+    ws.freeze_panes = "A5"
+
+    flux = BytesIO()
+    wb.save(flux)
+    return flux.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# B1 — Analyse automatique d'un document et extraction d'articles CCTP
+# ---------------------------------------------------------------------------
+
+#: Mots-clés par lot CCTP (code lot → tuple de mots-clés normalisés)
+_MOTS_CLES_LOTS: dict[str, tuple[str, ...]] = {
+    "VRD":     ("vrd", "voirie", "reseaux", "assainissement", "eau pluviale", "eau usee",
+                "caniveau", "regard", "trottoir", "chaussee", "ecoulement", "raccordement"),
+    "TERR":    ("terrassement", "decaissement", "deblai", "remblai", "excavation",
+                "fouille", "plateforme", "nivellement", "compactage"),
+    "GO":      ("gros oeuvre", "beton", "ferraillage", "voile", "poteau", "poutre",
+                "dalle", "fondation", "radier", "semelle", "armature", "coffrage",
+                "plancher", "maconnerie", "brique", "parpaing", "agglo"),
+    "FAC":     ("facade", "bardage", "enduit", "ravalement", "ite", "isolation thermique exterieure",
+                "parement", "pierre", "composite"),
+    "MRC":     ("mur rideau", "verriere", "facade vitree", "facade structurale"),
+    "MOB":     ("ossature bois", "construction bois", "bois lamelle", "clt", "pan de bois",
+                "structure bois", "charpente bois lamelle colle"),
+    "CHMET":   ("charpente metallique", "metal", "acier", "poteau metallique",
+                "poutre metallique", "profile metallique", "heb", "ipe", "upe"),
+    "CHCZ":    ("charpente", "couverture", "zinguerie", "tuile", "ardoise", "bac acier",
+                "toiture", "faitage", "chevron", "fermette", "noue",
+                "gouttiere", "descente eaux pluviales"),
+    "ETAN":    ("etancheite", "membrane", "bitume", "soudure", "toiture terrasse",
+                "releve", "tpe", "bicouche"),
+    "MENUEXT": ("menuiserie exterieure", "fenetre", "porte fenetre", "baie", "porte d entree",
+                "double vitrage", "triple vitrage", "volet", "store", "brise soleil",
+                "chassis"),
+    "MENUINT": ("menuiserie interieure", "porte interieure", "bloc porte",
+                "serrure", "serrurerie", "quincaillerie", "baguette", "boiserie"),
+    "IPP":     ("isolation", "platerie", "platrerie", "placo", "cloison seche",
+                "doublage", "faux plafond", "laine de verre", "laine de roche",
+                "peinture", "enduit interieur"),
+    "RSC":     ("revetement de sol", "carrelage", "parquet", "resine", "chape",
+                "dalle pvc", "gres cerame", "faience", "revetement mural"),
+    "ELEC":    ("electricite", "courant fort", "courant faible", "tableau electrique",
+                "disjoncteur", "interrupteur", "cablage", "luminaire",
+                "eclairage", "alarme", "intrusion", "controle acces", "vdi"),
+    "PLB":     ("plomberie", "sanitaire", "eau froide", "eau chaude", "wc",
+                "lavabo", "douche", "baignoire", "robinetterie", "tuyauterie",
+                "collecteur", "ballon"),
+    "CVC":     ("chauffage", "ventilation", "climatisation", "cvc", "vmc",
+                "gaine", "aeraulique", "split", "pac", "pompe a chaleur",
+                "plancher chauffant", "radiateur"),
+    "ASC":     ("ascenseur", "monte charge", "elevateur",
+                "cabine", "treuil", "gaine ascenseur"),
+    "PAY":     ("paysager", "espace vert", "plante", "arbre", "gazon", "pelouse",
+                "arrosage automatique", "cloture", "portail",
+                "mobilier urbain", "eclairage exterieur"),
+}
+
+# Patterns de titres de sections dans un CCTP (numérotation hiérarchique)
+_RE_TITRE_CCTP = re.compile(
+    r"^\s*(?:"
+    r"(?P<num_romain>[IVX]{1,4})\.\s+|"
+    r"(?P<num_lettre>[A-Z])\.\s+|"
+    r"(?P<num_chap>\d+(?:\.\d+)*)\s+|"
+    r"(?P<num_article>(?:Art(?:icle)?\.?\s*\d+))\s+"
+    r")(?P<titre>[A-ZÀÂÄÉÈÊËÎÏÔÙÛÜ].{3,})$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _normaliser_texte_cctp(texte: str) -> str:
+    """Normalise un texte pour la comparaison de mots-clés."""
+    import unicodedata as _ud
+    texte = texte.lower()
+    nfkd = _ud.normalize("NFKD", texte)
+    return "".join(c for c in nfkd if not _ud.combining(c))
+
+
+def _classer_lot_cctp(texte_normalise: str) -> str | None:
+    """Retourne le code du lot CCTP dont les mots-clés correspondent le mieux."""
+    meilleur_code: str | None = None
+    meilleur_score = 0
+    for code, mots_cles in _MOTS_CLES_LOTS.items():
+        score = sum(1 for mc in mots_cles if mc in texte_normalise)
+        if score > meilleur_score:
+            meilleur_score = score
+            meilleur_code = code
+    return meilleur_code if meilleur_score >= 1 else None
+
+
+def _extraire_texte_pdf_cctp(contenu: bytes) -> str:
+    """Extrait le texte brut d'un PDF en mémoire."""
+    try:
+        import fitz  # PyMuPDF
+        with fitz.open(stream=contenu, filetype="pdf") as doc:
+            return "\n".join(page.get_text() for page in doc)
+    except Exception:
+        return ""
+
+
+def _extraire_texte_docx_cctp(contenu: bytes) -> str:
+    """Extrait le texte brut d'un DOCX."""
+    try:
+        doc_word = DocumentWord(BytesIO(contenu))
+        return "\n".join(par.text for par in doc_word.paragraphs if par.text.strip())
+    except Exception:
+        return ""
+
+
+def _extraire_texte_fichier(nom_fichier: str, contenu: bytes) -> str:
+    """Détecte le type de fichier et extrait le texte."""
+    ext = Path(nom_fichier).suffix.lower()
+    if ext == ".pdf":
+        return _extraire_texte_pdf_cctp(contenu)
+    if ext in (".docx",):
+        return _extraire_texte_docx_cctp(contenu)
+    if ext in (".txt", ".md", ".rst"):
+        for enc in ("utf-8", "latin-1", "cp1252"):
+            try:
+                return contenu.decode(enc)
+            except UnicodeDecodeError:
+                continue
+    # Tentative générique
+    texte = _extraire_texte_pdf_cctp(contenu)
+    if not texte:
+        texte = _extraire_texte_docx_cctp(contenu)
+    return texte
+
+
+def _segmenter_texte_cctp(texte: str) -> list[dict[str, str]]:
+    """Découpe un texte CCTP en sections numérotées.
+
+    Retourne une liste de dicts {numero, titre, corps}.
+    """
+    lignes = texte.splitlines()
+    sections: list[dict[str, str]] = []
+    section_courante: dict[str, str] | None = None
+
+    for ligne in lignes:
+        m = _RE_TITRE_CCTP.match(ligne)
+        if m:
+            if section_courante and section_courante.get("corps", "").strip():
+                sections.append(section_courante)
+            numero = (
+                m.group("num_romain") or m.group("num_lettre")
+                or m.group("num_chap") or m.group("num_article") or ""
+            )
+            section_courante = {
+                "numero": numero.strip(),
+                "titre": m.group("titre").strip(),
+                "corps": "",
+            }
+        elif section_courante is not None:
+            section_courante["corps"] = section_courante["corps"] + "\n" + ligne
+
+    if section_courante and section_courante.get("corps", "").strip():
+        sections.append(section_courante)
+
+    return sections
+
+
+def analyser_cctp_depuis_document(document) -> dict[str, object]:
+    """Analyse un document (PDF, DOCX, ZIP) et extrait des articles CCTP en bibliothèque.
+
+    Paramètres
+    ----------
+    document : applications.documents.models.Document
+
+    Retour
+    ------
+    dict avec clés : nb_articles (int), nb_articles_crees (int), erreurs (list[str])
+    """
+    import zipfile as _zipmodule
+    from django.core.files.storage import default_storage
+    from .models import ArticleCCTP, LotCCTP
+
+    lots_par_code = {lot.code: lot for lot in LotCCTP.objects.filter(est_actif=True)}
+    erreurs: list[str] = []
+    nb_crees = 0
+    nb_total = 0
+
+    def _traiter_contenu(nom: str, contenu: bytes) -> None:
+        nonlocal nb_crees, nb_total
+        texte = _extraire_texte_fichier(nom, contenu)
+        if not texte.strip():
+            erreurs.append(f"Aucun texte extrait de « {nom} ».")
+            return
+        sections = _segmenter_texte_cctp(texte)
+        if not sections:
+            erreurs.append(f"Aucune section CCTP reconnue dans « {nom} ».")
+            return
+        source_nom = document.nom_fichier_origine or document.intitule or nom
+        for section in sections:
+            nb_total += 1
+            titre = section["titre"][:300]
+            corps = section["corps"].strip()
+            numero = section["numero"]
+            if not titre or len(titre) < 5:
+                continue
+            texte_norme = _normaliser_texte_cctp(f"{titre} {corps[:300]}")
+            code_lot = _classer_lot_cctp(texte_norme)
+            lot = lots_par_code.get(code_lot) if code_lot else None
+            # Dédoublonnage sur intitulé exact + lot
+            if ArticleCCTP.objects.filter(
+                intitule__iexact=titre,
+                lot=lot,
+                est_dans_bibliotheque=True,
+            ).exists():
+                continue
+            ArticleCCTP.objects.create(
+                piece_ecrite=None,
+                lot=lot,
+                numero_article=numero or f"X.{nb_crees + 1}",
+                intitule=titre,
+                corps_article=f"<p>{corps[:4000]}</p>" if corps else "",
+                source=source_nom[:200],
+                est_dans_bibliotheque=True,
+                tags=["import-auto", code_lot or "non-classe"],
+            )
+            nb_crees += 1
+
+    if not document.fichier:
+        return {"nb_articles": 0, "nb_articles_crees": 0, "erreurs": ["Document sans fichier attaché."]}
+
+    try:
+        with default_storage.open(document.fichier.name, "rb") as fh:
+            contenu_fichier = fh.read()
+    except Exception as exc:
+        return {"nb_articles": 0, "nb_articles_crees": 0, "erreurs": [f"Impossible de lire le fichier : {exc}"]}
+
+    nom = document.nom_fichier_origine or Path(document.fichier.name).name
+    ext = Path(nom).suffix.lower()
+
+    if ext == ".zip":
+        try:
+            with _zipmodule.ZipFile(BytesIO(contenu_fichier)) as zf:
+                for entree in zf.infolist():
+                    if entree.is_dir():
+                        continue
+                    sous_ext = Path(entree.filename).suffix.lower()
+                    if sous_ext not in (".pdf", ".docx", ".txt", ".md"):
+                        continue
+                    _traiter_contenu(entree.filename, zf.read(entree.filename))
+        except _zipmodule.BadZipFile:
+            erreurs.append("Fichier ZIP invalide ou corrompu.")
+    else:
+        _traiter_contenu(nom, contenu_fichier)
+
+    return {
+        "nb_articles": nb_total,
+        "nb_articles_crees": nb_crees,
+        "erreurs": erreurs,
+    }

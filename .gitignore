@@ -114,3 +114,10 @@ installateur/.installation-terminee
 
 # Documentation générée automatiquement
 docs/api/generee/
+
+# Pilotage Claude Code (jamais sur GitHub)
+CLAUDE.md
+.claude/
+scripts/captures/
+scripts/node_modules/
+scripts/package-lock.json

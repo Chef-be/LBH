@@ -8,11 +8,15 @@ import { useSessionStore } from "@/crochets/useSession";
 import { EditeurTexteRiche } from "@/composants/ui/EditeurTexteRiche";
 import {
   ChevronRight, CheckCircle, AlertCircle, X, Plus,
-  Pencil, Trash2, Save, FileText, GripVertical, RefreshCw, Download, Sparkles, Clock3, ListTree,
+  Pencil, Trash2, Save, FileText, GripVertical, RefreshCw, Download, Sparkles, Clock3, ListTree, Monitor,
+  Library, Search, ChevronsRight,
 } from "lucide-react";
 
 interface ArticleCCTP {
   id: string;
+  lot?: string | null;
+  lot_code?: string | null;
+  lot_intitule?: string | null;
   chapitre: string;
   numero_article: string;
   code_reference?: string;
@@ -62,6 +66,7 @@ const STATUTS: Record<string, string> = {
 const TYPES_TABLEUR = new Set(["bpu", "dpgf", "dqe"]);
 
 const VIDE_ARTICLE = {
+  lot: "" as string,
   chapitre: "",
   numero_article: "",
   ligne_prix_reference: "",
@@ -75,6 +80,14 @@ const VIDE_ARTICLE = {
 function versTexteListe(valeur: string | string[] | null | undefined): string {
   if (Array.isArray(valeur)) return valeur.join(", ");
   return valeur || "";
+}
+
+interface SessionBureautiquePiece {
+  url_editeur: string;
+  access_token: string;
+  access_token_ttl: number;
+  nom_fichier?: string;
+  type_bureautique?: "texte" | "tableur";
 }
 
 interface PlanDocumentItem {
@@ -194,6 +207,7 @@ function ModalArticle({
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [referencesPrix, setReferencesPrix] = useState<LigneBibliothequeOption[]>([]);
+  const [lotsCCTP, setLotsCCTP] = useState<{ id: string; code: string; intitule: string }[]>([]);
   const [assistantEnCours, setAssistantEnCours] = useState(false);
   const maj = (k: keyof typeof VIDE_ARTICLE, v: string | boolean) =>
     setForm(p => ({ ...p, [k]: v }));
@@ -206,11 +220,14 @@ function ModalArticle({
         const liste = Array.isArray(reponse) ? reponse : reponse.results || [];
         setReferencesPrix(liste.slice(0, 100));
       })
-      .catch(() => {
-        if (actif) {
-          setReferencesPrix([]);
-        }
-      });
+      .catch(() => { if (actif) setReferencesPrix([]); });
+    api.get<{ results?: { id: string; code: string; intitule: string }[] } | { id: string; code: string; intitule: string }[]>("/api/pieces-ecrites/lots-cctp/")
+      .then((reponse) => {
+        if (!actif) return;
+        const liste = Array.isArray(reponse) ? reponse : (reponse.results ?? []);
+        setLotsCCTP(liste);
+      })
+      .catch(() => { if (actif) setLotsCCTP([]); });
     return () => { actif = false; };
   }, []);
 
@@ -285,15 +302,29 @@ function ModalArticle({
             </div>
           )}
 
+          <div>
+            <label className="libelle-champ">Lot CCTP</label>
+            <select
+              className="champ-saisie w-full"
+              value={form.lot}
+              onChange={e => maj("lot", e.target.value)}
+            >
+              <option value="">Sans lot</option>
+              {lotsCCTP.map((lot) => (
+                <option key={lot.id} value={lot.id}>{lot.code} — {lot.intitule}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="libelle-champ">Chapitre</label>
-              <input type="text" className="champ-saisie w-full" placeholder="1"
+              <input type="text" className="champ-saisie w-full" placeholder="ex: Dispositions générales"
                 value={form.chapitre} onChange={e => maj("chapitre", e.target.value)} />
             </div>
             <div>
               <label className="libelle-champ">N° article</label>
-              <input type="text" className="champ-saisie w-full" placeholder="1.1"
+              <input type="text" className="champ-saisie w-full" placeholder="I.1 ou II.1.3"
                 value={form.numero_article} onChange={e => maj("numero_article", e.target.value)} />
             </div>
           </div>
@@ -393,7 +424,9 @@ export default function PageDetailPieceEcrite({
   const [modal, setModal] = useState(false);
   const [articleEdit, setArticleEdit] = useState<ArticleCCTP | null>(null);
   const [suppressionId, setSuppressionId] = useState<string | null>(null);
-  const [onglet, setOnglet] = useState<"articles" | "modele" | "editeur" | "apercu">("editeur");
+  const [onglet, setOnglet] = useState<"articles" | "modele" | "editeur" | "apercu" | "collabora">("editeur");
+  const [sessionCollabora, setSessionCollabora] = useState<SessionBureautiquePiece | null>(null);
+  const [chargementCollabora, setChargementCollabora] = useState(false);
   const [contenuHtml, setContenuHtml] = useState("");
   const [enregistrementContenu, setEnregistrementContenu] = useState(false);
   const [generationEnCours, setGenerationEnCours] = useState(false);
@@ -404,6 +437,15 @@ export default function PageDetailPieceEcrite({
   const [intituleEditionPiece, setIntituleEditionPiece] = useState("");
   const [enregistrementPiece, setEnregistrementPiece] = useState(false);
   const [suppressionPieceEnCours, setSuppressionPieceEnCours] = useState(false);
+  const [panneauBibliotheque, setPanneauBibliotheque] = useState(false);
+  const [lotFiltre, setLotFiltre] = useState("");
+  const [rechercheBibliotheque, setRechercheBibliotheque] = useState("");
+  const [articlesBibliotheque, setArticlesBibliotheque] = useState<ArticleCCTP[]>([]);
+  const [chargementBibliotheque, setChargementBibliotheque] = useState(false);
+  const [importEnCours, setImportEnCours] = useState<string | null>(null);
+  const [lotsBibliotheque, setLotsBibliotheque] = useState<{ id: string; code: string; intitule: string }[]>([]);
+  const [variablesProjet, setVariablesProjet] = useState<{ nom: string; valeur: string; vide: boolean }[]>([]);
+  const [panneauVariables, setPanneauVariables] = useState(false);
   const [etatSauvegardeContenu, setEtatSauvegardeContenu] = useState<"synchro" | "modifie" | "sauvegarde" | "erreur">("synchro");
   const [derniereSauvegardeContenu, setDerniereSauvegardeContenu] = useState<string | null>(null);
   const [planDocument, setPlanDocument] = useState<PlanDocumentItem[]>([]);
@@ -416,6 +458,8 @@ export default function PageDetailPieceEcrite({
   });
   const [ancrePlanActive, setAncrePlanActive] = useState<string | null>(null);
   const contenuSynchroniseRef = useRef("");
+  const formulaireCollaboraRef = useRef<HTMLFormElement>(null);
+  const cibleIframeCollabora = `collabora-piece-${pieceId}`;
 
   const charger = useCallback(async () => {
     try {
@@ -433,6 +477,70 @@ export default function PageDetailPieceEcrite({
     setSucces(msg);
     setTimeout(() => setSucces(null), 3000);
   }, []);
+
+  const chargerBibliotheque = useCallback(async () => {
+    setChargementBibliotheque(true);
+    try {
+      const params = new URLSearchParams({ est_dans_bibliotheque: "true", page_size: "50" });
+      if (lotFiltre) params.set("lot", lotFiltre);
+      if (rechercheBibliotheque.trim()) params.set("search", rechercheBibliotheque.trim());
+      const reponse = await api.get<{ results?: ArticleCCTP[] } | ArticleCCTP[]>(
+        `/api/pieces-ecrites/articles/?${params}`
+      );
+      const liste = Array.isArray(reponse) ? reponse : (reponse.results ?? []);
+      setArticlesBibliotheque(liste);
+    } catch {
+      setArticlesBibliotheque([]);
+    } finally {
+      setChargementBibliotheque(false);
+    }
+  }, [lotFiltre, rechercheBibliotheque]);
+
+  useEffect(() => {
+    if (!panneauBibliotheque) return;
+    chargerBibliotheque();
+  }, [panneauBibliotheque, chargerBibliotheque]);
+
+  useEffect(() => {
+    api.get<{ results?: { id: string; code: string; intitule: string }[] } | { id: string; code: string; intitule: string }[]>(
+      "/api/pieces-ecrites/lots-cctp/"
+    )
+      .then((rep) => {
+        const liste = Array.isArray(rep) ? rep : (rep.results ?? []);
+        setLotsBibliotheque(liste);
+      })
+      .catch(() => setLotsBibliotheque([]));
+  }, []);
+
+  useEffect(() => {
+    if (!panneauVariables || variablesProjet.length > 0) return;
+    api.get<{ variables: { nom: string; valeur: string; vide: boolean }[] }>(`/api/pieces-ecrites/${pieceId}/variables/`)
+      .then((rep) => setVariablesProjet(rep.variables ?? []))
+      .catch(() => setVariablesProjet([]));
+  }, [panneauVariables, pieceId, variablesProjet.length]);
+
+  const importerArticleBibliotheque = async (article: ArticleCCTP) => {
+    setImportEnCours(article.id);
+    try {
+      await api.post(`/api/pieces-ecrites/${pieceId}/articles/`, {
+        piece_ecrite: pieceId,
+        lot: article.lot || "",
+        chapitre: article.chapitre || "",
+        numero_article: article.numero_article || "",
+        intitule: article.intitule,
+        corps_article: article.corps_article || "",
+        normes_applicables: versTexteListe(article.normes_applicables),
+        est_dans_bibliotheque: false,
+        tags: versTexteListe(article.tags),
+      });
+      await charger();
+      flash(`Article « ${article.intitule.slice(0, 60)} » importé.`);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'importer l'article.");
+    } finally {
+      setImportEnCours(null);
+    }
+  };
 
   const sauvegarderContenu = useCallback(async (silencieux = false) => {
     if (contenuHtml === contenuSynchroniseRef.current) {
@@ -507,6 +615,26 @@ export default function PageDetailPieceEcrite({
     window.addEventListener("beforeunload", gererAvantQuitter);
     return () => window.removeEventListener("beforeunload", gererAvantQuitter);
   }, [contenuHtml]);
+
+  // Soumettre le formulaire caché WOPI dès que la session est prête et l'onglet collabora actif
+  useEffect(() => {
+    if (!sessionCollabora || onglet !== "collabora" || !formulaireCollaboraRef.current) return;
+    formulaireCollaboraRef.current.submit();
+  }, [sessionCollabora, onglet]);
+
+  const ouvrirCollabora = async () => {
+    setChargementCollabora(true);
+    setErreur(null);
+    try {
+      const session = await api.post<SessionBureautiquePiece>(`/api/pieces-ecrites/${pieceId}/session-bureautique/`, {});
+      setSessionCollabora(session);
+      setOnglet("collabora");
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'ouvrir l'éditeur Collabora.");
+    } finally {
+      setChargementCollabora(false);
+    }
+  };
 
   const supprimerArticle = async (artId: string) => {
     try {
@@ -677,6 +805,69 @@ export default function PageDetailPieceEcrite({
     },
   }[etatSauvegardeContenu];
 
+  // Éditeur Collabora plein écran quand la session est active
+  if (onglet === "collabora" && sessionCollabora) {
+    return (
+      <div className="-m-6 flex h-[calc(100vh-56px)] flex-col overflow-hidden">
+        {/* Barre compacte */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => { setOnglet("editeur"); }}
+              className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors shrink-0"
+            >
+              <ChevronRight className="w-4 h-4 rotate-180" />
+              <span className="hidden sm:inline">Retour</span>
+            </button>
+            <div className="h-4 w-px bg-slate-200 shrink-0" />
+            <FileText className="w-4 h-4 shrink-0 text-indigo-500" />
+            <span className="truncate text-sm font-semibold text-slate-800">{piece.intitule}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">Sauvegarde auto</span>
+            <button
+              type="button"
+              onClick={ouvrirCollabora}
+              disabled={chargementCollabora}
+              className="btn-secondaire py-1.5 text-xs"
+              title="Recharger l'éditeur"
+            >
+              <RefreshCw size={13} className={chargementCollabora ? "animate-spin" : ""} />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSessionCollabora(null); setOnglet("editeur"); }}
+              className="text-slate-400 hover:text-slate-600 transition-colors"
+              title="Fermer l'éditeur"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        {/* Formulaire WOPI caché */}
+        <form
+          ref={formulaireCollaboraRef}
+          action={sessionCollabora.url_editeur}
+          method="post"
+          target={cibleIframeCollabora}
+          className="hidden"
+        >
+          <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
+          <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
+        </form>
+        {/* iframe plein écran */}
+        <iframe
+          name={cibleIframeCollabora}
+          src="about:blank"
+          title="Éditeur Collabora Online"
+          className="flex-1 w-full border-0"
+          allow="clipboard-read; clipboard-write; fullscreen"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Fil d'Ariane */}
@@ -726,6 +917,17 @@ export default function PageDetailPieceEcrite({
             <button onClick={() => setModeEditionPiece((precedent) => !precedent)} className="btn-secondaire">
               <Pencil className="w-4 h-4" />
               <span className="hidden sm:inline">{modeEditionPiece ? "Fermer" : "Modifier"}</span>
+            </button>
+            <button
+              onClick={ouvrirCollabora}
+              disabled={chargementCollabora}
+              className="btn-secondaire disabled:opacity-60"
+              title="Ouvrir dans l'éditeur bureautique Collabora"
+            >
+              {chargementCollabora
+                ? <><RefreshCw className="w-4 h-4 animate-spin" />Collabora…</>
+                : <><Monitor className="w-4 h-4" />Collabora</>
+              }
             </button>
             {pieceEstTableur ? (
               <button onClick={() => exporter("xlsx")} disabled={exportEnCours !== null} className="btn-secondaire disabled:opacity-60">
@@ -907,6 +1109,7 @@ export default function PageDetailPieceEcrite({
                 { id: "articles", libelle: `Articles (${articles.length})` },
                 ...(piece.modele ? [{ id: "modele", libelle: "Fusion modèle" as const }] : []),
                 { id: "editeur", libelle: "Rédaction" },
+                { id: "collabora", libelle: "Éditeur Collabora" },
                 { id: "apercu", libelle: "Aperçu" },
               ].map((tab) => (
                 <button
@@ -927,15 +1130,58 @@ export default function PageDetailPieceEcrite({
 
           {onglet === "articles" && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
                 <p className="font-semibold text-slate-700">
                   {articles.length} article{articles.length !== 1 ? "s" : ""}
                 </p>
-                {piece.statut !== "valide" && (
-                  <button onClick={() => { setArticleEdit(null); setModal(true); }} className="btn-primaire">
-                    <Plus className="w-4 h-4" />Ajouter un article
-                  </button>
-                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {articles.length > 0 && (
+                    <>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await api.post<{ detail: string; nb_modifies: number }>(`/api/pieces-ecrites/${pieceId}/renumeroter/`, {});
+                            setSucces(res.detail);
+                            await charger();
+                            setTimeout(() => setSucces(null), 3000);
+                          } catch { setErreur("Erreur lors de la renumérotation."); }
+                        }}
+                        className="btn-secondaire text-xs py-1.5"
+                        title="Renuméroter les articles selon la structure Widloecher & Cusant (I.n / II.n.m)"
+                      >
+                        <ListTree className="w-3.5 h-3.5" />Renuméroter
+                      </button>
+                      <a
+                        href={`/api/pieces-ecrites/${pieceId}/exporter-dpgf/`}
+                        className="btn-secondaire text-xs py-1.5"
+                        title="Exporter en DPGF Excel"
+                      >
+                        <Download className="w-3.5 h-3.5" />DPGF
+                      </a>
+                      <a
+                        href={`/api/pieces-ecrites/${pieceId}/exporter-bpu/`}
+                        className="btn-secondaire text-xs py-1.5"
+                        title="Exporter en BPU Excel (avec cahier des charges)"
+                      >
+                        <Download className="w-3.5 h-3.5" />BPU
+                      </a>
+                    </>
+                  )}
+                  {piece.statut !== "valide" && (
+                    <>
+                      <button
+                        onClick={() => setPanneauBibliotheque((o) => !o)}
+                        className={`btn-secondaire text-xs py-1.5 ${panneauBibliotheque ? "bg-violet-50 border-violet-300 text-violet-700" : ""}`}
+                        title="Importer un article depuis la bibliothèque CCTP"
+                      >
+                        <Library className="w-3.5 h-3.5" />Bibliothèque
+                      </button>
+                      <button onClick={() => { setArticleEdit(null); setModal(true); }} className="btn-primaire">
+                        <Plus className="w-4 h-4" />Ajouter un article
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {articles.length === 0 ? (
@@ -963,6 +1209,11 @@ export default function PageDetailPieceEcrite({
                             </p>
                           )}
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            {art.lot_code && (
+                              <span className="text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded">
+                                {art.lot_code}{art.lot_intitule ? ` — ${art.lot_intitule}` : ""}
+                              </span>
+                            )}
                             {art.code_reference && (
                               <span className="text-xs text-primaire-700 bg-primaire-50 px-2 py-0.5 rounded">
                                 {art.code_reference}
@@ -1016,6 +1267,101 @@ export default function PageDetailPieceEcrite({
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Panneau bibliothèque CCTP */}
+              {panneauBibliotheque && (
+                <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Library className="w-4 h-4 text-violet-600" />
+                      <h3 className="text-sm font-semibold text-violet-800">Bibliothèque CCTP</h3>
+                      <span className="text-xs text-violet-500">— cliquer sur un article pour l&apos;importer</span>
+                    </div>
+                    <button onClick={() => setPanneauBibliotheque(false)} className="p-1 rounded hover:bg-violet-100 text-violet-400">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Rechercher…"
+                        className="champ-saisie pl-8 py-1.5 text-sm"
+                        value={rechercheBibliotheque}
+                        onChange={(e) => setRechercheBibliotheque(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") chargerBibliotheque(); }}
+                      />
+                    </div>
+                    <select
+                      className="champ-saisie py-1.5 text-sm"
+                      value={lotFiltre}
+                      onChange={(e) => setLotFiltre(e.target.value)}
+                    >
+                      <option value="">Tous les lots</option>
+                      {lotsBibliotheque.map((lot) => (
+                        <option key={lot.id} value={lot.id}>{lot.code} — {lot.intitule}</option>
+                      ))}
+                    </select>
+                    <button onClick={chargerBibliotheque} className="btn-secondaire text-xs py-1.5">
+                      <RefreshCw className={`w-3.5 h-3.5 ${chargementBibliotheque ? "animate-spin" : ""}`} />
+                    </button>
+                  </div>
+
+                  <div className="max-h-[480px] overflow-y-auto space-y-2 pr-1">
+                    {chargementBibliotheque ? (
+                      <p className="py-6 text-center text-sm text-slate-400">Chargement…</p>
+                    ) : articlesBibliotheque.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-slate-400">
+                        Aucun article. Modifiez les filtres ou lancez une recherche.
+                      </p>
+                    ) : articlesBibliotheque.map((art) => (
+                      <div
+                        key={art.id}
+                        className="flex items-start gap-3 rounded-xl border border-violet-100 bg-white p-3 hover:border-violet-300 hover:bg-violet-50 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-mono text-xs text-slate-400">{art.numero_article}</span>
+                            {art.lot_code && (
+                              <span className="text-xs font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
+                                {art.lot_code}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-semibold text-slate-800 line-clamp-1">{art.intitule}</p>
+                          {art.corps_article && (
+                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">
+                              {art.corps_article.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()}
+                            </p>
+                          )}
+                          {versTexteListe(art.normes_applicables) && (
+                            <p className="text-xs text-slate-400 mt-1">
+                              {versTexteListe(art.normes_applicables).slice(0, 80)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => importerArticleBibliotheque(art)}
+                          disabled={importEnCours === art.id}
+                          className="shrink-0 flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50 transition-colors"
+                          title="Importer cet article dans la pièce écrite"
+                        >
+                          {importEnCours === art.id
+                            ? <RefreshCw className="w-3 h-3 animate-spin" />
+                            : <ChevronsRight className="w-3.5 h-3.5" />
+                          }
+                          Importer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400 text-right">
+                    {articlesBibliotheque.length} résultat{articlesBibliotheque.length !== 1 ? "s" : ""}
+                  </p>
                 </div>
               )}
             </div>
@@ -1098,6 +1444,38 @@ export default function PageDetailPieceEcrite({
                     </div>
                   </div>
                 )}
+
+                {/* Panneau variables projet disponibles */}
+                <div className="carte space-y-3">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between text-left"
+                    onClick={() => setPanneauVariables((o) => !o)}
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-700">Variables projet disponibles</p>
+                      <p className="text-xs text-slate-400">Syntaxe : {"{{nom_variable}}"} dans le texte</p>
+                    </div>
+                    <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${panneauVariables ? "rotate-90" : ""}`} />
+                  </button>
+                  {panneauVariables && (
+                    <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                      {variablesProjet.length === 0 ? (
+                        <p className="text-xs text-slate-400 py-2">Chargement…</p>
+                      ) : variablesProjet.map((variable) => (
+                        <div
+                          key={variable.nom}
+                          className={`group flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-xs transition-colors cursor-pointer hover:bg-slate-50 ${variable.vide ? "border-slate-100 opacity-60" : "border-slate-200"}`}
+                          onClick={() => navigator.clipboard?.writeText(`{{${variable.nom}}}`)}
+                          title={`Cliquer pour copier {{${variable.nom}}}`}
+                        >
+                          <span className="font-mono text-primaire-700">{"{{" + variable.nom + "}}"}</span>
+                          <span className="text-slate-500 truncate max-w-[120px]">{variable.valeur || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1143,6 +1521,72 @@ export default function PageDetailPieceEcrite({
             </div>
           )}
 
+          {onglet === "collabora" && (
+            <div className="carte p-4 md:p-6 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-700">Éditeur bureautique Collabora</p>
+                  <p className="text-sm text-slate-400">
+                    Édition native du document dans Collabora Online. Les modifications sont sauvegardées directement dans le gabarit.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {sessionCollabora && (
+                    <button
+                      type="button"
+                      onClick={() => { setSessionCollabora(null); setOnglet("editeur"); }}
+                      className="btn-secondaire"
+                    >
+                      <X className="w-4 h-4" />Fermer l&apos;éditeur
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={ouvrirCollabora}
+                    disabled={chargementCollabora}
+                    className="btn-primaire disabled:opacity-60"
+                  >
+                    {chargementCollabora
+                      ? <><RefreshCw className="w-4 h-4 animate-spin" />Ouverture…</>
+                      : <><Monitor className="w-4 h-4" />{sessionCollabora ? "Recharger" : "Ouvrir l'éditeur"}</>
+                    }
+                  </button>
+                </div>
+              </div>
+              {!sessionCollabora ? (
+                <div className="flex min-h-[400px] items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50">
+                  <div className="text-center">
+                    <Monitor className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+                    <p className="font-medium text-slate-500">Éditeur Collabora non chargé</p>
+                    <p className="mt-1 text-sm text-slate-400">Cliquez sur « Ouvrir l&apos;éditeur » pour lancer la session bureautique.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-2xl border border-slate-200" style={{ minHeight: "700px" }}>
+                  {/* Formulaire caché WOPI — l'access_token doit passer par le corps POST, pas l'URL */}
+                  <form
+                    ref={formulaireCollaboraRef}
+                    action={sessionCollabora.url_editeur}
+                    method="post"
+                    target={cibleIframeCollabora}
+                    className="hidden"
+                  >
+                    <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
+                    <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
+                  </form>
+                  <iframe
+                    name={cibleIframeCollabora}
+                    src="about:blank"
+                    title="Éditeur Collabora Online"
+                    className="h-full w-full"
+                    style={{ minHeight: "700px", border: "none" }}
+                    allow="clipboard-read; clipboard-write; fullscreen"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {onglet === "apercu" && (
             <div className="carte p-4 md:p-6">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -1177,6 +1621,7 @@ export default function PageDetailPieceEcrite({
         <ModalArticle
           pieceId={pieceId}
           initial={articleEdit ? {
+            lot: articleEdit.lot || "",
             chapitre: articleEdit.chapitre,
             numero_article: articleEdit.numero_article,
             ligne_prix_reference: articleEdit.ligne_prix_reference || "",

@@ -7,17 +7,24 @@ urlpatterns = [
     # Bibliothèque — liste et création
     path("", views.VueListeBibliotheque.as_view(), name="bibliotheque-liste"),
     path("familles/", views.vue_familles, name="bibliotheque-familles"),
+    path("lots-cctp/", views.vue_lots_cctp, name="bibliotheque-lots-cctp"),
     path("importer-bordereaux/", views.vue_importer_bordereaux_prix, name="bibliotheque-importer-bordereaux"),
     path("importer-fichiers/", views.vue_importer_bordereaux_fichiers, name="bibliotheque-importer-fichiers"),
     path("importer-prix-construction/", views.vue_importer_prix_construction, name="bibliotheque-importer-prix-construction"),
     path("recalculer-tous/", views.vue_recalculer_bibliotheque, name="bibliotheque-recalculer-tous"),
+    path("recalcul-progression/<str:tache_id>/", views.vue_progression_recalcul, name="bibliotheque-progression-recalcul"),
+    path("lier-auto/", views.vue_lier_auto_prix_articles, name="lier-auto-prix-articles"),
     path("vider/", views.vue_vider_bibliotheque, name="bibliotheque-vider"),
 
     # Bibliothèque — détail et actions
     path("<uuid:pk>/", views.VueDetailBibliotheque.as_view(), name="bibliotheque-detail"),
     path("<uuid:pk>/complet/", views.VueDetailBibliothequeAvecSousDetails.as_view(), name="bibliotheque-detail-complet"),
+    path("<uuid:pk>/detail-complet/", views.VueDetailBibliothequeComplet.as_view(), name="bibliotheque-detail-complet-v2"),
     path("<uuid:pk>/valider/", views.vue_valider_entree, name="bibliotheque-valider"),
     path("<uuid:pk>/recalculer/", views.vue_recalculer_sous_details, name="bibliotheque-recalculer"),
+    path("<uuid:pk>/prescriptions/", views.vue_prescriptions_liees, name="bibliotheque-prescriptions"),
+    path("<uuid:pk>/lier-prescriptions/", views.vue_lier_prescriptions, name="bibliotheque-lier-prescriptions"),
+    path("<uuid:pk>/caracteristiques/", views.vue_caracteristiques, name="bibliotheque-caracteristiques"),
 
     # Sous-détails de prix
     path("<uuid:ligne_pk>/sous-details/", views.VueListeSousDetailPrix.as_view(), name="sous-details-liste"),

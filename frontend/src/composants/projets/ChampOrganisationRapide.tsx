@@ -6,6 +6,13 @@ import { Plus } from "lucide-react";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { Modal } from "@/composants/ui/Modal";
 import { useNotifications } from "@/contextes/FournisseurNotifications";
+import { ChampAdresseRecherche } from "@/composants/organisations/ChampAdresseRecherche";
+import { ChampNomOrganisationAnnuaire } from "@/composants/organisations/ChampNomOrganisationAnnuaire";
+import {
+  normaliserCodeOrganisation,
+  type SuggestionAdressePublique,
+  type SuggestionEntreprisePublique,
+} from "@/lib/organisations";
 
 export interface OrganisationOption {
   id: string;
@@ -25,23 +32,6 @@ const TYPES_LIBELLES: Record<string, string> = {
   sous_traitant: "Sous-traitant",
 };
 
-function normaliserCode(nom: string, typeOrganisation: string) {
-  const prefixe = typeOrganisation
-    .replace(/[^a-z]/gi, "")
-    .slice(0, 3)
-    .toUpperCase() || "ORG";
-
-  const base = nom
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toUpperCase()
-    .slice(0, 24);
-
-  return `${prefixe}-${base || "NOUVELLE"}`;
-}
-
 function ModalOrganisationRapide({
   ouvert,
   typeOrganisation,
@@ -58,7 +48,11 @@ function ModalOrganisationRapide({
   const [formulaire, setFormulaire] = useState({
     nom: "",
     code: "",
+    siret: "",
+    adresse: "",
+    code_postal: "",
     ville: "",
+    pays: "France",
     courriel: "",
     telephone: "",
   });
@@ -72,7 +66,17 @@ function ModalOrganisationRapide({
       await queryClient.invalidateQueries({ queryKey: ["organisations"] });
       notifications.succes(`${TYPES_LIBELLES[typeOrganisation] ?? "Organisation"} ajoutée.`);
       setErreur(null);
-      setFormulaire({ nom: "", code: "", ville: "", courriel: "", telephone: "" });
+      setFormulaire({
+        nom: "",
+        code: "",
+        siret: "",
+        adresse: "",
+        code_postal: "",
+        ville: "",
+        pays: "France",
+        courriel: "",
+        telephone: "",
+      });
       setCodePersonnalise(false);
       onCreee(organisation);
       onFermer();
@@ -87,7 +91,7 @@ function ModalOrganisationRapide({
   });
 
   const codeSuggere = useMemo(
-    () => normaliserCode(formulaire.nom, typeOrganisation),
+    () => normaliserCodeOrganisation(formulaire.nom, typeOrganisation),
     [formulaire.nom, typeOrganisation]
   );
 
@@ -112,10 +116,13 @@ function ModalOrganisationRapide({
                 nom: formulaire.nom,
                 code: (codePersonnalise ? formulaire.code : codeSuggere).trim(),
                 type_organisation: typeOrganisation,
+                siret: formulaire.siret,
+                adresse: formulaire.adresse,
+                code_postal: formulaire.code_postal,
                 ville: formulaire.ville,
                 courriel: formulaire.courriel,
                 telephone: formulaire.telephone,
-                pays: "France",
+                pays: formulaire.pays || "France",
               });
             }}
           >
@@ -132,11 +139,23 @@ function ModalOrganisationRapide({
         )}
         <div>
           <label className="libelle-champ" htmlFor="orga-nom">Nom</label>
-          <input
+          <ChampNomOrganisationAnnuaire
             id="orga-nom"
             className="champ-saisie"
+            typeOrganisation={typeOrganisation}
             value={formulaire.nom}
-            onChange={(e) => setFormulaire((prev) => ({ ...prev, nom: e.target.value }))}
+            onChange={(valeur) => setFormulaire((prev) => ({ ...prev, nom: valeur }))}
+            onSelection={(suggestion: SuggestionEntreprisePublique) =>
+              setFormulaire((prev) => ({
+                ...prev,
+                nom: suggestion.nom,
+                siret: suggestion.siret || prev.siret,
+                adresse: suggestion.adresse || prev.adresse,
+                code_postal: suggestion.code_postal || prev.code_postal,
+                ville: suggestion.ville || prev.ville,
+                pays: suggestion.pays || prev.pays || "France",
+              }))
+            }
             placeholder="Nom de l'organisation"
           />
         </div>
@@ -153,7 +172,49 @@ function ModalOrganisationRapide({
             placeholder="Code interne"
           />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <div>
+            <label className="libelle-champ" htmlFor="orga-siret">SIRET</label>
+            <input
+              id="orga-siret"
+              className="champ-saisie"
+              value={formulaire.siret}
+              onChange={(e) => setFormulaire((prev) => ({ ...prev, siret: e.target.value }))}
+              placeholder="00000000000000"
+              maxLength={14}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="libelle-champ" htmlFor="orga-adresse">Adresse</label>
+          <ChampAdresseRecherche
+            id="orga-adresse"
+            className="champ-saisie"
+            value={formulaire.adresse}
+            onChange={(valeur) => setFormulaire((prev) => ({ ...prev, adresse: valeur }))}
+            onSelection={(suggestion: SuggestionAdressePublique) =>
+              setFormulaire((prev) => ({
+                ...prev,
+                adresse: suggestion.adresse || suggestion.label,
+                code_postal: suggestion.code_postal || prev.code_postal,
+                ville: suggestion.ville || prev.ville,
+                pays: "France",
+              }))
+            }
+            placeholder="1 place de la Mairie"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="libelle-champ" htmlFor="orga-code-postal">Code postal</label>
+            <input
+              id="orga-code-postal"
+              className="champ-saisie"
+              value={formulaire.code_postal}
+              onChange={(e) => setFormulaire((prev) => ({ ...prev, code_postal: e.target.value }))}
+              placeholder="00000"
+            />
+          </div>
           <div>
             <label className="libelle-champ" htmlFor="orga-ville">Ville</label>
             <input
@@ -165,15 +226,25 @@ function ModalOrganisationRapide({
             />
           </div>
           <div>
-            <label className="libelle-champ" htmlFor="orga-telephone">Téléphone</label>
+            <label className="libelle-champ" htmlFor="orga-pays">Pays</label>
             <input
-              id="orga-telephone"
+              id="orga-pays"
               className="champ-saisie"
-              value={formulaire.telephone}
-              onChange={(e) => setFormulaire((prev) => ({ ...prev, telephone: e.target.value }))}
-              placeholder="Téléphone"
+              value={formulaire.pays}
+              onChange={(e) => setFormulaire((prev) => ({ ...prev, pays: e.target.value }))}
+              placeholder="France"
             />
           </div>
+        </div>
+        <div>
+          <label className="libelle-champ" htmlFor="orga-telephone">Téléphone</label>
+          <input
+            id="orga-telephone"
+            className="champ-saisie"
+            value={formulaire.telephone}
+            onChange={(e) => setFormulaire((prev) => ({ ...prev, telephone: e.target.value }))}
+            placeholder="Téléphone"
+          />
         </div>
         <div>
           <label className="libelle-champ" htmlFor="orga-courriel">Courriel</label>

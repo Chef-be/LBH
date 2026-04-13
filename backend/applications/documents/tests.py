@@ -14,8 +14,10 @@ from applications.documents.models import DossierDocumentProjet, Document, TypeD
 from applications.documents.services import (
     appliquer_suggestions_document,
     inferer_projet_initial,
+    intitule_document_depuis_nom_fichier,
     importer_archive_documents,
     previsualiser_suggestions_document,
+    reference_document_depuis_nom_fichier,
     suggerer_type_document,
 )
 from applications.organisations.models import Organisation
@@ -63,6 +65,21 @@ class ServicesDocumentsTests(TestCase):
 
         self.assertIsNotNone(suggestion)
         self.assertEqual(suggestion["code"], "NOTE_CALCUL")
+
+    def test_document_de_contexte_word_n_est_pas_classe_comme_plan(self):
+        suggestion = suggerer_type_document(
+            nom_fichier="programme_contexte_operation_v3.docx",
+            texte="Programme de l'opération, contexte général, objectifs, planning prévisionnel et note de présentation.",
+            type_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion["code"], "RAPPORT")
+
+    def test_normalise_reference_et_intitule_depuis_nom_long(self):
+        nom = "2026-04-06_programme_contexte_operation_revision-v3-copie-signed.docx"
+        self.assertEqual(reference_document_depuis_nom_fichier(nom), "PROGRAMME-CONTEXTE-OPERATION")
+        self.assertEqual(intitule_document_depuis_nom_fichier(nom), "Programme contexte operation")
 
     def test_inferer_projet_initial_depuis_reference(self):
         projet = inferer_projet_initial(
@@ -268,6 +285,63 @@ class ApiDocumentsTests(TestCase):
 
         self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
         self.assertFalse(Document.objects.filter(pk=document.pk).exists())
+
+    @patch("applications.documents.office.urllib_request.urlopen")
+    def test_session_bureautique_retourne_configuration_collabora(self, mock_urlopen):
+        type_doc = TypeDocument.objects.get(code="AUTRE")
+        document = Document.objects.create(
+            reference="DOC-BUR-001",
+            intitule="Programme projet",
+            type_document=type_doc,
+            projet=self.projet,
+            auteur=self.utilisateur,
+            nom_fichier_origine="programme-projet.docx",
+            type_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        xml = b"""
+        <wopi-discovery>
+          <net-zone name="external-http">
+            <app name="writer">
+              <action ext="docx" name="edit" urlsrc="https://office.lbh-economiste.com/browser/abc/cool.html?" />
+            </app>
+          </net-zone>
+        </wopi-discovery>
+        """
+
+        class Reponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return xml
+
+        mock_urlopen.return_value = Reponse()
+
+        reponse = self.client.post(f"/api/documents/{document.id}/session-bureautique/", {})
+
+        self.assertEqual(reponse.status_code, 200)
+        self.assertIn("WOPISrc=", reponse.data["url_editeur"])
+        self.assertEqual(reponse.data["type_bureautique"], "texte")
+
+    def test_creer_document_bureautique_cree_un_document_word(self):
+        reponse = self.client.post(
+            "/api/documents/creer-bureautique/",
+            {
+                "projet": str(self.projet.id),
+                "format": "docx",
+                "intitule": "Compte rendu de réunion",
+                "reference": "CR-001",
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, 201)
+        document = Document.objects.get(pk=reponse.data["id"])
+        self.assertTrue(document.nom_fichier_origine.endswith(".docx"))
+        self.assertEqual(document.reference, "CR-001")
 
     def test_import_document_bibliotheque_depuis_fiche_document(self):
         type_bpu = TypeDocument.objects.create(code="BPU", libelle="Bordereau des prix unitaires", ordre_affichage=10)
