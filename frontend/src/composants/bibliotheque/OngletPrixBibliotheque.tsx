@@ -183,15 +183,59 @@ interface SousDetailPrix {
   observations?: string;
 }
 
+// Couleurs par type de ressource (SDP)
 const COULEURS_RESSOURCE: Record<string, string> = {
   mo: "#6366f1",
-  materiau: "#10b981",
+  matiere: "#10b981",
   materiel: "#f59e0b",
   consommable: "#8b5cf6",
   sous_traitance: "#ef4444",
   transport: "#06b6d4",
   frais_divers: "#64748b",
 };
+
+const LIBELLES_RESSOURCE: Record<string, string> = {
+  mo: "Main-d'œuvre",
+  matiere: "Matériaux",
+  materiel: "Matériel",
+  consommable: "Consommables",
+  sous_traitance: "Sous-traitance",
+  transport: "Transport",
+  frais_divers: "Frais divers",
+};
+
+// Plages de cohérence Kpv selon Manuel Cusant & Widloecher
+// Kpv = PV HT / DS = 1 / (1 - FC% - Fop% - FG% - B&A%)
+// Zone verte : 1.25–1.55 (standard bâtiment courant)
+// Zone orange : 1.55–2.00 (forte part de frais / marges élevées)
+// Zone rouge : > 2.00 ou < 1.10 (anomalie probable)
+function classeKpv(kpv: number): { classe: string; label: string; message: string } {
+  if (kpv <= 0) return { classe: "text-slate-400", label: "N/A", message: "PV non renseigné" };
+  if (kpv < 1.10) return { classe: "text-red-600", label: "Très bas", message: "< 1.10 : marges insuffisantes" };
+  if (kpv < 1.25) return { classe: "text-orange-500", label: "Bas", message: "1.10–1.25 : couverture faible des frais" };
+  if (kpv <= 1.55) return { classe: "text-green-600", label: "Normal", message: "1.25–1.55 : plage standard bâtiment" };
+  if (kpv <= 2.00) return { classe: "text-orange-500", label: "Élevé", message: "1.55–2.00 : vérifier FC/FG/marges" };
+  return { classe: "text-red-600", label: "Très élevé", message: "> 2.00 : anomalie probable ou prix distribution" };
+}
+
+// Plages % par type de ressource (ratios ARTIPRIX 2025 + Cusant & Widloecher)
+const PLAGES_PCT_DS: Record<string, [number, number, string]> = {
+  mo: [15, 55, "15–55 % selon corps d'état"],
+  matiere: [20, 60, "20–60 % selon fournitures"],
+  materiel: [5, 35, "5–35 % selon équipements"],
+  consommable: [0, 10, "0–10 %"],
+  sous_traitance: [0, 80, "0–80 %"],
+  transport: [0, 15, "0–15 %"],
+  frais_divers: [0, 10, "0–10 %"],
+};
+
+function classePctDS(type: string, pct: number): string {
+  const plage = PLAGES_PCT_DS[type];
+  if (!plage || pct === 0) return "text-slate-500";
+  if (pct < plage[0]) return "text-orange-500";
+  if (pct > plage[1]) return "text-orange-500";
+  return "text-green-700";
+}
 
 function PanneauDetailLigne({
   ligne,
@@ -200,21 +244,14 @@ function PanneauDetailLigne({
   ligne: LigneBibliotheque;
   onFermer: () => void;
 }) {
+  const queryClient = useQueryClient();
   const ds = toNumber(ligne.debourse_sec_unitaire);
+  const pv = toNumber(ligne.prix_vente_unitaire);
+  const kpv = ds > 0 && pv > 0 ? pv / ds : 0;
+  const infoKpv = classeKpv(kpv);
   const composantes = calculerComposantesMO(ligne);
-  const total = Object.values(composantes).reduce((a, b) => a + b, 0) || ds;
 
-  const lignesDS = [
-    { cle: "mo", libelle: "Main-d'œuvre" },
-    { cle: "matieres", libelle: "Matériaux" },
-    { cle: "materiel", libelle: "Matériel" },
-    { cle: "consommables", libelle: "Consommables" },
-    { cle: "sous_traitance", libelle: "Sous-traitance" },
-    { cle: "transport", libelle: "Transport" },
-    { cle: "frais_divers", libelle: "Frais divers" },
-  ];
-
-  const { data: sousDetailsData, isLoading: chargementSD } = useQuery<SousDetailPrix[]>({
+  const { data: sousDetailsData, isLoading: chargementSD, refetch: rechargerSD } = useQuery<SousDetailPrix[]>({
     queryKey: ["sous-details-bibliotheque", ligne.id],
     queryFn: () => api.get<SousDetailPrix[]>(`/api/bibliotheque/${ligne.id}/sous-details/`),
   });
@@ -222,208 +259,363 @@ function PanneauDetailLigne({
     ? (sousDetailsData as SousDetailPrix[])
     : ((sousDetailsData as unknown as { results?: SousDetailPrix[] })?.results ?? []);
 
+  const [completionEnCours, setCompletionEnCours] = useState(false);
+
+  const completerSousDetails = async () => {
+    setCompletionEnCours(true);
+    try {
+      await api.post(`/api/bibliotheque/${ligne.id}/completer-sous-details/`, {});
+      queryClient.invalidateQueries({ queryKey: ["sous-details-bibliotheque", ligne.id] });
+      rechargerSD();
+    } finally {
+      setCompletionEnCours(false);
+    }
+  };
+
+  // Grouper les sous-détails par type pour l'affichage SDP
+  const sdParType: Record<string, SousDetailPrix[]> = {};
+  for (const sd of sousDetails) {
+    if (!sdParType[sd.type_ressource]) sdParType[sd.type_ressource] = [];
+    sdParType[sd.type_ressource].push(sd);
+  }
+
+  // Totaux SDP réels (depuis les sous-détails)
+  const totalSDPMatx = sousDetails.filter(sd => sd.type_ressource === "matiere").reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+  const totalSDPMatl = sousDetails.filter(sd => sd.type_ressource === "materiel").reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+  const totalSDPMO = sousDetails.filter(sd => sd.type_ressource === "mo").reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+  const totalSDPDivers = sousDetails.filter(sd => !["matiere","materiel","mo"].includes(sd.type_ressource)).reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+  const totalSDP = sousDetails.reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+
+  // Types à afficher dans l'ordre SDP
+  const typesSDP = ["matiere", "materiel", "mo", "consommable", "sous_traitance", "transport", "frais_divers"];
+
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col bg-white shadow-2xl">
+    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col bg-white shadow-2xl">
       {/* En-tête */}
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-        <div>
-          <p className="text-xs font-mono text-slate-400">{ligne.code || "—"}</p>
-          <h2 className="mt-0.5 text-base font-semibold text-slate-900">{ligne.designation_courte}</h2>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-mono text-slate-400">{ligne.code || "—"} · {ligne.unite}</p>
+          <h2 className="mt-0.5 text-base font-semibold text-slate-900 truncate">{ligne.designation_courte}</h2>
+          <p className="text-xs text-slate-400 mt-0.5">{ligne.famille}{ligne.sous_famille ? ` / ${ligne.sous_famille}` : ""}</p>
         </div>
-        <button type="button" onClick={onFermer} className="rounded-lg p-1.5 hover:bg-slate-100">
+        <button type="button" onClick={onFermer} className="ml-4 rounded-lg p-1.5 hover:bg-slate-100 flex-shrink-0">
           <X className="h-4 w-4 text-slate-500" />
         </button>
       </div>
 
       {/* Corps */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Informations générales */}
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
-            Informations générales
-          </h3>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <dt className="text-slate-500">Famille</dt>
-            <dd className="font-medium text-slate-800">{ligne.famille || "—"}</dd>
-            <dt className="text-slate-500">Sous-famille</dt>
-            <dd className="text-slate-700">{ligne.sous_famille || "—"}</dd>
-            <dt className="text-slate-500">Unité</dt>
-            <dd className="font-mono text-slate-700">{ligne.unite}</dd>
-            <dt className="text-slate-500">Statut</dt>
-            <dd>
-              <span className={clsx(STYLES_STATUT[ligne.statut_validation] || "badge-neutre")}>
-                {LIBELLES_STATUT[ligne.statut_validation] || ligne.statut_validation}
-              </span>
-            </dd>
-            {ligne.lot_cctp_reference_detail && (
-              <>
-                <dt className="text-slate-500">Lot CCTP</dt>
-                <dd className="text-slate-700">
-                  {ligne.lot_cctp_reference_detail.numero} — {ligne.lot_cctp_reference_detail.intitule}
-                </dd>
-              </>
-            )}
-          </dl>
-        </section>
+      <div className="flex-1 overflow-y-auto">
 
-        {/* Décomposition DS (synthèse) */}
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
-            Décomposition DS
-          </h3>
-          {ds === 0 ? (
-            <p className="text-sm text-slate-400">Déboursé sec non renseigné.</p>
-          ) : (
-            <>
-              {/* Barre empilée globale */}
-              <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 mb-4">
-                {lignesDS.map(({ cle, libelle }) => {
-                  const valeur = composantes[cle];
-                  if (valeur <= 0) return null;
-                  const pct = Math.round((valeur / total) * 100);
-                  if (pct < 1) return null;
+        {/* ── Bloc Kpv + synthèse DS→PV ── */}
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div className="flex items-start gap-6 flex-wrap">
+            {/* DS */}
+            <div>
+              <p className="text-xs text-slate-400 uppercase tracking-wide">DS unitaire</p>
+              <p className="text-xl font-bold font-mono text-slate-800 mt-0.5">{ds > 0 ? formaterMontant(ds) : "—"}</p>
+            </div>
+            {/* PV */}
+            {pv > 0 && (
+              <div>
+                <p className="text-xs text-slate-400 uppercase tracking-wide">Prix de vente HT</p>
+                <p className="text-xl font-bold font-mono text-primaire-700 mt-0.5">{formaterMontant(pv)}</p>
+              </div>
+            )}
+            {/* Kpv */}
+            <div className="ml-auto">
+              <p className="text-xs text-slate-400 uppercase tracking-wide">Coefficient Kpv</p>
+              <div className="flex items-baseline gap-2 mt-0.5">
+                <p className={clsx("text-2xl font-bold font-mono", infoKpv.classe)}>
+                  {kpv > 0 ? kpv.toFixed(3) : "—"}
+                </p>
+                {kpv > 0 && (
+                  <span className={clsx("text-xs font-medium", infoKpv.classe)}>{infoKpv.label}</span>
+                )}
+              </div>
+              {kpv > 0 && (
+                <p className="text-xs text-slate-400 mt-0.5 max-w-[180px]">{infoKpv.message}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Barre empilée DS par composante */}
+          {ds > 0 && (
+            <div className="mt-3">
+              <div className="flex h-3 w-full overflow-hidden rounded-full bg-slate-200">
+                {typesSDP.map((type) => {
+                  const sdsType = sdParType[type] ?? [];
+                  const montantType = sdsType.reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+                  if (montantType <= 0) return null;
+                  const pct = totalSDP > 0 ? (montantType / totalSDP) * 100 : 0;
+                  if (pct < 0.5) return null;
                   return (
                     <div
-                      key={cle}
-                      style={{ width: `${pct}%`, backgroundColor: COULEURS_DS[cle] }}
-                      title={`${libelle} : ${pct}%`}
+                      key={type}
+                      style={{ width: `${pct}%`, backgroundColor: COULEURS_RESSOURCE[type] ?? "#94a3b8" }}
+                      title={`${LIBELLES_RESSOURCE[type] ?? type} : ${formaterMontant(montantType)} (${pct.toFixed(0)}%)`}
                     />
                   );
                 })}
               </div>
-
-              {/* Tableau composantes */}
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-xs text-slate-400">
-                    <th className="text-left py-1.5 font-medium">Composante</th>
-                    <th className="text-right py-1.5 font-medium">Montant HT</th>
-                    <th className="text-right py-1.5 font-medium">% DS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lignesDS.map(({ cle, libelle }) => {
-                    const valeur = composantes[cle];
-                    if (valeur <= 0) return null;
-                    const pct = total > 0 ? Math.round((valeur / total) * 100) : 0;
-                    return (
-                      <tr key={cle} className="border-b border-slate-50">
-                        <td className="py-2">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="h-2.5 w-2.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: COULEURS_DS[cle] }}
-                            />
-                            <span>{libelle}</span>
-                          </div>
-                        </td>
-                        <td className="py-2 text-right font-mono text-slate-700">
-                          {formaterMontant(valeur)}
-                        </td>
-                        <td className="py-2 text-right text-slate-500">{pct} %</td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="border-t border-slate-200 font-semibold">
-                    <td className="py-2">Déboursé sec total</td>
-                    <td className="py-2 text-right font-mono">{formaterMontant(ds)}</td>
-                    <td className="py-2 text-right">100 %</td>
-                  </tr>
-                  {toNumber(ligne.prix_vente_unitaire) > 0 && (
-                    <tr>
-                      <td className="py-1.5 text-slate-500">Prix de vente</td>
-                      <td className="py-1.5 text-right font-mono text-primaire-700">
-                        {formaterMontant(ligne.prix_vente_unitaire)}
-                      </td>
-                      <td />
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </>
-          )}
-        </section>
-
-        {/* Sous-détail analytique */}
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
-            Sous-détail analytique
-          </h3>
-          {chargementSD ? (
-            <p className="text-sm text-slate-400">Chargement…</p>
-          ) : sousDetails.length === 0 ? (
-            <p className="text-sm text-slate-400">Aucun sous-détail renseigné pour cette ligne.</p>
-          ) : (
-            <div className="space-y-2">
-              {sousDetails.map((sd) => {
-                const couleur = COULEURS_RESSOURCE[sd.type_ressource] ?? "#94a3b8";
-                const montant = toNumber(sd.montant_ht);
-                const estMO = sd.type_ressource === "mo";
-                return (
-                  <div
-                    key={sd.id}
-                    className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div
-                          className="mt-0.5 h-2.5 w-2.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: couleur }}
-                        />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-slate-700 truncate">
-                            {sd.designation || sd.code || sd.type_libelle}
-                          </p>
-                          <p className="text-xs text-slate-400">{sd.type_libelle}</p>
-                        </div>
-                      </div>
-                      <p className="text-xs font-mono font-semibold text-slate-800 flex-shrink-0">
-                        {montant > 0 ? formaterMontant(montant) : "—"}
-                      </p>
-                    </div>
-                    {estMO ? (
-                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
-                        {sd.profil_main_oeuvre_libelle && (
-                          <span>{sd.profil_main_oeuvre_code} — {sd.profil_main_oeuvre_libelle}</span>
-                        )}
-                        {sd.nombre_ressources && sd.nombre_ressources > 1 && (
-                          <span>{sd.nombre_ressources} ressource(s)</span>
-                        )}
-                        {toNumber(sd.temps_unitaire) > 0 && (
-                          <span>{toNumber(sd.temps_unitaire).toFixed(3)} h/u</span>
-                        )}
-                        {toNumber(sd.taux_horaire) > 0 && (
-                          <span>{formaterMontant(sd.taux_horaire)}/h</span>
-                        )}
-                        {sd.zone_libelle && <span>{sd.zone_libelle}</span>}
-                      </div>
-                    ) : (
-                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
-                        {sd.code && <span className="font-mono">{sd.code}</span>}
-                        {toNumber(sd.quantite) > 0 && (
-                          <span>{toNumber(sd.quantite)} {sd.unite || ""}</span>
-                        )}
-                        {toNumber(sd.cout_unitaire_ht) > 0 && (
-                          <span>{formaterMontant(sd.cout_unitaire_ht)}/{sd.unite || "u"}</span>
-                        )}
-                      </div>
-                    )}
-                    {sd.observations && (
-                      <p className="mt-1 text-xs text-slate-400 italic">{sd.observations}</p>
-                    )}
-                  </div>
-                );
-              })}
-              {/* Total */}
-              <div className="flex items-center justify-between border-t border-slate-200 pt-2 mt-2 text-sm font-semibold text-slate-800">
-                <span>Total sous-détail</span>
-                <span className="font-mono">
-                  {formaterMontant(sousDetails.reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0))}
-                </span>
+              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                {typesSDP.map((type) => {
+                  const sdsType = sdParType[type] ?? [];
+                  const montantType = sdsType.reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+                  if (montantType <= 0) return null;
+                  const pct = totalSDP > 0 ? (montantType / totalSDP) * 100 : 0;
+                  return (
+                    <span key={type} className="text-xs text-slate-500 flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: COULEURS_RESSOURCE[type] ?? "#94a3b8" }} />
+                      {(LIBELLES_RESSOURCE[type] ?? type).substring(0, 10)} {pct.toFixed(0)} %
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}
-        </section>
+        </div>
+
+        <div className="px-6 py-5 space-y-6">
+          {/* ── Tableau SDP (Sous-Détail de Prix) — logique Manuel Cusant & Widloecher ── */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Sous-Détail de Prix (SDP)
+              </h3>
+              {chargementSD ? null : (
+                <button
+                  type="button"
+                  className="text-xs text-primaire-600 hover:underline"
+                  onClick={completerSousDetails}
+                  disabled={completionEnCours}
+                >
+                  {completionEnCours ? "Complétion…" : "Compléter depuis composantes"}
+                </button>
+              )}
+            </div>
+
+            {chargementSD ? (
+              <p className="text-sm text-slate-400">Chargement…</p>
+            ) : sousDetails.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">
+                Aucun sous-détail renseigné.{" "}
+                <button type="button" className="text-primaire-600 hover:underline" onClick={completerSousDetails} disabled={completionEnCours}>
+                  Générer depuis composantes agrégées
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-slate-400">
+                      <th className="text-left py-1.5 pr-2 font-medium">Désignation</th>
+                      <th className="text-right py-1.5 pr-2 font-medium">Qe/TU</th>
+                      <th className="text-left py-1.5 pr-2 font-medium">U</th>
+                      <th className="text-right py-1.5 pr-2 font-medium">DU/DHMO</th>
+                      <th className="text-right py-1.5 pr-2 font-medium text-green-700">Dé.Matx</th>
+                      <th className="text-right py-1.5 pr-2 font-medium text-amber-600">Dé.Matl</th>
+                      <th className="text-right py-1.5 font-medium text-indigo-600">Dé.MO</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sousDetails.sort((a, b) => a.ordre - b.ordre).map((sd) => {
+                      const isMO = sd.type_ressource === "mo";
+                      const isMatl = sd.type_ressource === "materiel";
+                      const isMatx = sd.type_ressource === "matiere";
+                      const montant = toNumber(sd.montant_ht);
+                      const pct = totalSDP > 0 ? (montant / totalSDP) * 100 : 0;
+                      const couleur = COULEURS_RESSOURCE[sd.type_ressource] ?? "#94a3b8";
+                      return (
+                        <tr key={sd.id} className="border-b border-slate-50 hover:bg-slate-50">
+                          <td className="py-2 pr-2 max-w-[160px]">
+                            <div className="flex items-start gap-1.5">
+                              <div className="mt-1 h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: couleur }} />
+                              <div>
+                                <p className="font-medium text-slate-700 leading-tight">
+                                  {sd.designation || sd.code || LIBELLES_RESSOURCE[sd.type_ressource] || sd.type_ressource}
+                                </p>
+                                {sd.profil_main_oeuvre_libelle && (
+                                  <p className="text-slate-400">{sd.profil_main_oeuvre_code}</p>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-2 pr-2 text-right font-mono text-slate-600">
+                            {isMO && toNumber(sd.temps_unitaire) > 0
+                              ? toNumber(sd.temps_unitaire).toFixed(4)
+                              : toNumber(sd.quantite) > 0
+                                ? toNumber(sd.quantite).toFixed(4)
+                                : "—"}
+                          </td>
+                          <td className="py-2 pr-2 text-slate-500">{sd.unite || "—"}</td>
+                          <td className="py-2 pr-2 text-right font-mono text-slate-600">
+                            {isMO && toNumber(sd.taux_horaire) > 0
+                              ? formaterMontant(sd.taux_horaire)
+                              : toNumber(sd.cout_unitaire_ht) > 0
+                                ? formaterMontant(sd.cout_unitaire_ht)
+                                : "—"}
+                          </td>
+                          {/* Colonnes SDP : Dé.Matx / Dé.Matl / Dé.MO */}
+                          <td className="py-2 pr-2 text-right font-mono">
+                            {isMatx ? <span className="text-green-700 font-semibold">{formaterMontant(montant)}</span> : <span className="text-slate-200">—</span>}
+                          </td>
+                          <td className="py-2 pr-2 text-right font-mono">
+                            {isMatl ? <span className="text-amber-600 font-semibold">{formaterMontant(montant)}</span> : <span className="text-slate-200">—</span>}
+                          </td>
+                          <td className="py-2 text-right font-mono">
+                            {isMO ? <span className="text-indigo-600 font-semibold">{formaterMontant(montant)}</span> : <span className="text-slate-200">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {/* Ligne TOTAL DSu */}
+                    <tr className="border-t-2 border-slate-200 font-semibold text-xs">
+                      <td className="py-2 pr-2 text-slate-700" colSpan={4}>DSu = Σ Dé.Matx + Σ Dé.Matl + Σ Dé.MO</td>
+                      <td className="py-2 pr-2 text-right font-mono text-green-700">{totalSDPMatx > 0 ? formaterMontant(totalSDPMatx) : "—"}</td>
+                      <td className="py-2 pr-2 text-right font-mono text-amber-600">{totalSDPMatl > 0 ? formaterMontant(totalSDPMatl) : "—"}</td>
+                      <td className="py-2 text-right font-mono text-indigo-600">{totalSDPMO > 0 ? formaterMontant(totalSDPMO) : "—"}</td>
+                    </tr>
+                    {totalSDPDivers > 0 && (
+                      <tr className="text-xs">
+                        <td className="py-1 pr-2 text-slate-500" colSpan={4}>Frais divers / Autres</td>
+                        <td colSpan={3} className="py-1 text-right font-mono text-slate-600">{formaterMontant(totalSDPDivers)}</td>
+                      </tr>
+                    )}
+                    <tr className="bg-slate-50 font-bold text-sm">
+                      <td className="py-2 pr-2 text-slate-800" colSpan={4}>Total DSu</td>
+                      <td className="py-2 text-right font-mono text-slate-800" colSpan={3}>{formaterMontant(totalSDP)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* ── Analyse des composantes DS (plages de cohérence) ── */}
+          {sousDetails.length > 0 && totalSDP > 0 && (
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                Analyse DS — Plages de cohérence
+              </h3>
+              <div className="space-y-2">
+                {typesSDP.map((type) => {
+                  const sdsType = sdParType[type] ?? [];
+                  const montantType = sdsType.reduce((acc, sd) => acc + toNumber(sd.montant_ht), 0);
+                  if (montantType <= 0) return null;
+                  const pct = totalSDP > 0 ? (montantType / totalSDP) * 100 : 0;
+                  const classePct = classePctDS(type, pct);
+                  const plage = PLAGES_PCT_DS[type];
+                  return (
+                    <div key={type} className="flex items-center gap-3">
+                      <div className="w-24 text-xs text-slate-600 flex-shrink-0">
+                        {LIBELLES_RESSOURCE[type] ?? type}
+                      </div>
+                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(pct, 100)}%`,
+                            backgroundColor: COULEURS_RESSOURCE[type] ?? "#94a3b8",
+                            opacity: pct >= (plage?.[0] ?? 0) && pct <= (plage?.[1] ?? 100) ? 1 : 0.5,
+                          }}
+                        />
+                      </div>
+                      <div className={clsx("text-xs font-mono font-semibold w-12 text-right flex-shrink-0", classePct)}>
+                        {pct.toFixed(0)} %
+                      </div>
+                      <div className="text-xs text-slate-400 flex-shrink-0 hidden xl:block">
+                        {plage ? `[${plage[0]}–${plage[1]}%]` : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Écart DS SDP vs DS agrégé */}
+                {ds > 0 && Math.abs(totalSDP - ds) > 0.01 && (
+                  <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+                    Écart SDP/DS : Total SDP = {formaterMontant(totalSDP)}, DS agrégé = {formaterMontant(ds)}{" "}
+                    (Δ = {formaterMontant(Math.abs(totalSDP - ds))})
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ── Chaîne DS → PV HT (Kpv) ── */}
+          {ds > 0 && (
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                Chaîne DS → PV HT — Manuel Cusant & Widloecher
+              </h3>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between py-1 border-b border-slate-50">
+                  <span className="text-slate-600">DS (Déboursé Sec)</span>
+                  <span className="font-mono font-semibold text-slate-800">{formaterMontant(ds)}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
+                  <span>+ FC (Frais de Chantier, ~5–15% DS)</span>
+                  <span className="font-mono">selon opération</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
+                  <span>+ Fop (Frais d&apos;opération, ~1–2% DS)</span>
+                  <span className="font-mono">selon opération</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
+                  <span>= CD (Coût Direct = DS + FC + Fop)</span>
+                  <span className="font-mono">—</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
+                  <span>+ FG (Frais Généraux, ~8–12% PV)</span>
+                  <span className="font-mono">selon entreprise</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
+                  <span>+ B&amp;A (Bénéfice &amp; Aléas, ~4–8% PV)</span>
+                  <span className="font-mono">selon marché</span>
+                </div>
+                {pv > 0 ? (
+                  <>
+                    <div className="flex justify-between py-1.5 bg-primaire-50 rounded-lg px-2 font-semibold">
+                      <span className="text-primaire-800">= PV HT</span>
+                      <span className="font-mono text-primaire-700">{formaterMontant(pv)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1.5 px-2">
+                      <span className="text-slate-600 text-xs">Kpv = PV / DS</span>
+                      <span className={clsx("font-mono font-bold text-base", infoKpv.classe)}>
+                        {kpv.toFixed(3)}
+                        <span className="text-xs ml-1 font-normal">({infoKpv.label})</span>
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 px-2 italic">
+                      Plage normale bâtiment courant : Kpv = 1.25 – 1.55
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Prix de vente non renseigné → Kpv non calculable.</p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ── Informations techniques ── */}
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
+              Paramètres techniques
+            </h3>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+              <dt className="text-slate-400">Taux horaire MO</dt>
+              <dd className="font-mono text-slate-700">{toNumber(ligne.cout_horaire_mo) > 0 ? `${formaterMontant(ligne.cout_horaire_mo)}/h` : "—"}</dd>
+              <dt className="text-slate-400">Temps MO</dt>
+              <dd className="font-mono text-slate-700">{toNumber(ligne.temps_main_oeuvre) > 0 ? `${toNumber(ligne.temps_main_oeuvre).toFixed(4)} h` : "—"}</dd>
+              <dt className="text-slate-400">Statut</dt>
+              <dd><span className={clsx(STYLES_STATUT[ligne.statut_validation] || "badge-neutre", "text-xs")}>{LIBELLES_STATUT[ligne.statut_validation] || ligne.statut_validation}</span></dd>
+              {ligne.lot_cctp_reference_detail && (
+                <>
+                  <dt className="text-slate-400">Lot CCTP</dt>
+                  <dd className="text-slate-600">{ligne.lot_cctp_reference_detail.numero} — {ligne.lot_cctp_reference_detail.intitule}</dd>
+                </>
+              )}
+            </dl>
+          </section>
+        </div>
       </div>
 
       {/* Pied */}

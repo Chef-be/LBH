@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from .models import LignePrixBibliotheque, SousDetailPrix
 from .services import (
+    completer_sous_details_manquants,
     generer_sous_details_depuis_composantes,
     importer_bordereau_depuis_fichier,
     importer_bordereaux_prix_references,
@@ -208,6 +209,44 @@ def vue_recalculer_sous_details(request, pk):
         "cout_materiel": str(composantes.get("cout_materiel", "0")),
         "temps_main_oeuvre": str(composantes.get("temps_main_oeuvre", "0")),
         "cout_horaire_mo": str(composantes.get("cout_horaire_mo", "0")),
+    })
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_completer_sous_details(request, pk):
+    """
+    Complète les sous-détails d'une ligne en ajoutant les composantes manquantes
+    (matériaux, matériel, frais divers) depuis les champs agrégés, sans toucher
+    aux sous-détails existants.
+    """
+    entree = generics.get_object_or_404(LignePrixBibliotheque, pk=pk)
+    nb_ajoutes = completer_sous_details_manquants(entree)
+    return Response({
+        "detail": f"{nb_ajoutes} sous-détail(s) ajouté(s).",
+        "nb_ajoutes": nb_ajoutes,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_completer_tous_sous_details(request):
+    """
+    Complète les sous-détails de toute la bibliothèque.
+    Ajoute les composantes manquantes depuis les champs agrégés.
+    """
+    lignes = LignePrixBibliotheque.objects.all()
+    total_ajoutes = 0
+    lignes_traitees = 0
+    for ligne in lignes.iterator(chunk_size=500):
+        nb = completer_sous_details_manquants(ligne)
+        total_ajoutes += nb
+        if nb > 0:
+            lignes_traitees += 1
+    return Response({
+        "detail": f"{total_ajoutes} sous-détail(s) ajouté(s) sur {lignes_traitees} ligne(s).",
+        "total_ajoutes": total_ajoutes,
+        "lignes_traitees": lignes_traitees,
     })
 
 
