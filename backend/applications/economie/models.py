@@ -798,6 +798,11 @@ class ProfilMainOeuvre(models.Model):
         default="batiment",
         verbose_name="Secteur d'activité",
     )
+    corps_etat = models.CharField(
+        max_length=120, blank=True,
+        verbose_name="Corps d'état",
+        help_text="Corps d'état BTP auquel ce profil est rattaché (ex : Gros Œuvre, Menuiseries, Électricité…).",
+    )
     metier = models.CharField(max_length=120, blank=True, verbose_name="Métier")
     specialite = models.CharField(max_length=120, blank=True, verbose_name="Spécialité")
     niveau_classification = models.CharField(max_length=120, blank=True, verbose_name="Niveau / position")
@@ -829,10 +834,11 @@ class ProfilMainOeuvre(models.Model):
     heures_par_jour = models.DecimalField(max_digits=5, decimal_places=2, default=decimal.Decimal("7.00"))
 
     # Heures supplémentaires mensuelles par taux de majoration
+    # Base conventionnelle BTP : 39h/semaine = 35h légal + 4h HS25% × 52/12 = 17,33 h/mois
     nb_heures_supp_25_mensuelles = models.DecimalField(
-        max_digits=6, decimal_places=2, default=decimal.Decimal("0.00"),
+        max_digits=6, decimal_places=2, default=decimal.Decimal("17.33"),
         verbose_name="HS majorées à 25 % (h/mois)",
-        help_text="Nombre d'heures supplémentaires mensuelles majorées à 25 %.",
+        help_text="Nombre d'heures supplémentaires mensuelles majorées à 25 % (base 39h/semaine BTP).",
     )
     nb_heures_supp_50_mensuelles = models.DecimalField(
         max_digits=6, decimal_places=2, default=decimal.Decimal("0.00"),
@@ -842,9 +848,9 @@ class ProfilMainOeuvre(models.Model):
 
     # Compléments employeur mensuels
     panier_repas_journalier = models.DecimalField(
-        max_digits=8, decimal_places=2, default=decimal.Decimal("0.00"),
+        max_digits=8, decimal_places=2, default=decimal.Decimal("9.00"),
         verbose_name="Panier repas journalier (€)",
-        help_text="Montant journalier du panier ou titre-restaurant employeur.",
+        help_text="Montant journalier du panier repas (zone BTP, base conventionnelle).",
     )
     jours_travail_mensuels_defaut = models.DecimalField(
         max_digits=5, decimal_places=2, default=decimal.Decimal("21.67"),

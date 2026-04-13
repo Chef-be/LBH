@@ -336,6 +336,7 @@ class ProfilMainOeuvreSerialiseur(serializers.ModelSerializer):
         fields = [
             "id", "code", "libelle", "categorie", "categorie_libelle",
             "secteur_activite", "secteur_activite_libelle",
+            "corps_etat",
             "metier", "specialite", "niveau_classification", "fonction_equipe",
             "description_emploi", "source_officielle",
             "localisation", "localisation_libelle",

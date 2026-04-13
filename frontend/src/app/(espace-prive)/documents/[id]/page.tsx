@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use, useCallback } from "react";
+import { useState, useEffect, use, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
@@ -9,6 +9,7 @@ import {
   ArrowLeft, FileText, CheckCircle, AlertCircle, X, Clock,
   Download, GitBranch, MessageSquare, Send, ScanText,
   Shield, Eye, EyeOff, RefreshCw, ChevronRight, Pencil, Save, Trash2, LibraryBig,
+  Layers, FileSpreadsheet,
 } from "lucide-react";
 import { ApercuFichierModal } from "@/composants/ui/ApercuFichierModal";
 
@@ -134,6 +135,14 @@ export default function PageDetailDocument({
   const [importBibliothequeEnCours, setImportBibliothequeEnCours] = useState(false);
   const [typesDocuments, setTypesDocuments] = useState<TypeDocumentOption[]>([]);
   const [dossiersProjet, setDossiersProjet] = useState<DossierDocumentOption[]>([]);
+  const [sessionCollabora, setSessionCollabora] = useState<{
+    url_editeur: string; access_token: string; access_token_ttl: number;
+    nom_fichier: string; type_bureautique: string;
+  } | null>(null);
+  const [chargementCollabora, setChargementCollabora] = useState(false);
+  const [editeurOuvert, setEditeurOuvert] = useState(false);
+  const formulaireCollaboraRef = useRef<HTMLFormElement | null>(null);
+  const cibleCollabora = `collabora-doc-${id.replace(/-/g, "")}`;
 
   const baseDocumentsProjet = projetId ? `/projets/${projetId}/documents` : doc?.projet ? `/projets/${doc.projet}/documents` : null;
   const lienRetour = baseDocumentsProjet || "/documents";
@@ -305,6 +314,29 @@ export default function PageDetailDocument({
     }
   };
 
+  const ouvrirCollabora = async () => {
+    setChargementCollabora(true);
+    setErreur(null);
+    try {
+      const session = await api.post<{
+        url_editeur: string; access_token: string; access_token_ttl: number;
+        nom_fichier: string; type_bureautique: string;
+      }>(`/api/documents/${id}/session-bureautique/`, {});
+      setSessionCollabora(session);
+      setEditeurOuvert(true);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'ouvrir l'éditeur Collabora.");
+    } finally {
+      setChargementCollabora(false);
+    }
+  };
+
+  // Soumettre le formulaire caché dès que la session est prête
+  useEffect(() => {
+    if (!sessionCollabora || !formulaireCollaboraRef.current || !editeurOuvert) return;
+    formulaireCollaboraRef.current.submit();
+  }, [sessionCollabora, editeurOuvert]);
+
   const typesMimeOcr = new Set(["application/pdf", "image/png", "image/jpeg", "image/tiff", "image/bmp", "image/webp"]);
 
   if (chargement) {
@@ -386,7 +418,23 @@ export default function PageDetailDocument({
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {doc.bureautique_editable && (
+              <button
+                type="button"
+                onClick={editeurOuvert ? () => setEditeurOuvert(false) : ouvrirCollabora}
+                disabled={chargementCollabora}
+                className={`btn-secondaire ${editeurOuvert ? "border-primaire-300 text-primaire-700 bg-primaire-50" : ""}`}
+                title="Éditer dans Collabora Online"
+              >
+                {chargementCollabora
+                  ? <><RefreshCw className="w-4 h-4 animate-spin" />Connexion…</>
+                  : editeurOuvert
+                    ? <><FileText className="w-4 h-4" />Fermer l&apos;éditeur</>
+                    : <><Layers className="w-4 h-4" />Éditer dans Collabora</>
+                }
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setModeEdition((precedent) => !precedent)}
@@ -470,6 +518,43 @@ export default function PageDetailDocument({
           </div>
         </div>
       </div>
+
+      {/* Éditeur Collabora Online */}
+      {editeurOuvert && sessionCollabora && (
+        <div className="carte overflow-hidden p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              {sessionCollabora.type_bureautique === "tableur"
+                ? <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                : <FileText className="w-4 h-4 text-blue-500" />}
+              <span>{sessionCollabora.nom_fichier}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">Sauvegarde automatique</span>
+              <button type="button" onClick={() => setEditeurOuvert(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <form
+            ref={formulaireCollaboraRef}
+            action={sessionCollabora.url_editeur}
+            method="post"
+            target={cibleCollabora}
+            className="hidden"
+          >
+            <input type="hidden" name="access_token" value={sessionCollabora.access_token} />
+            <input type="hidden" name="access_token_ttl" value={String(sessionCollabora.access_token_ttl)} />
+          </form>
+          <iframe
+            name={cibleCollabora}
+            src="about:blank"
+            title={`Éditeur ${doc.intitule}`}
+            className="h-[820px] w-full border-0"
+            allow="clipboard-read; clipboard-write"
+          />
+        </div>
+      )}
 
       {modeEdition && (
         <div className="carte p-6 space-y-4">

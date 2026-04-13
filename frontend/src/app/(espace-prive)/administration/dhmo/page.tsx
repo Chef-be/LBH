@@ -33,6 +33,7 @@ interface ProfilDHMO {
   categorie: string;
   categorie_libelle: string;
   secteur_activite: string;
+  corps_etat: string;
   metier: string;
   specialite: string;
   niveau_classification: string;
@@ -97,6 +98,7 @@ interface FormulaireData {
   libelle: string;
   categorie: string;
   secteur_activite: string;
+  corps_etat: string;
   metier: string;
   specialite: string;
   niveau_classification: string;
@@ -128,11 +130,12 @@ interface FormulaireData {
 
 const VIDE: FormulaireData = {
   code: "", libelle: "", categorie: "ouvrier", secteur_activite: "batiment",
-  metier: "", specialite: "", niveau_classification: "", localisation: "metropole",
+  corps_etat: "", metier: "", specialite: "", niveau_classification: "", localisation: "metropole",
   salaire_brut_mensuel_defaut: 2200, primes_mensuelles_defaut: 0, avantages_mensuels_defaut: 0,
+  // Base 39h/semaine = 35h légal + 4h HS à 25% (17,33 h/mois)
   heures_contractuelles_mensuelles: 151.67, heures_par_jour: 7,
-  nb_heures_supp_25_mensuelles: 0, nb_heures_supp_50_mensuelles: 0,
-  panier_repas_journalier: 0, jours_travail_mensuels_defaut: 21.67,
+  nb_heures_supp_25_mensuelles: 17.33, nb_heures_supp_50_mensuelles: 0,
+  panier_repas_journalier: 9, jours_travail_mensuels_defaut: 21.67,
   taux_charges_salariales: 0.22, taux_charges_patronales: 0.42,
   taux_absenteisme: 0.03, taux_temps_improductif: 0.12,
   taux_frais_agence: 0.12, taux_risque_operationnel: 0.02, taux_marge_cible: 0.08,
@@ -234,6 +237,7 @@ function ModalFormulaire({
     libelle: profil.libelle,
     categorie: profil.categorie,
     secteur_activite: profil.secteur_activite,
+    corps_etat: profil.corps_etat || "",
     metier: profil.metier || "",
     specialite: profil.specialite || "",
     niveau_classification: profil.niveau_classification || "",
@@ -330,6 +334,7 @@ function ModalFormulaire({
         libelle: form.libelle,
         categorie: form.categorie,
         secteur_activite: form.secteur_activite,
+        corps_etat: form.corps_etat,
         metier: form.metier,
         specialite: form.specialite,
         niveau_classification: form.niveau_classification,
@@ -422,6 +427,10 @@ function ModalFormulaire({
                   onChange={(e) => maj("secteur_activite", e.target.value)}>
                   {SECTEURS.map((s) => <option key={s.val} value={s.val}>{s.lib}</option>)}
                 </select>
+              </LigneChamp>
+              <LigneChamp libelle="Corps d'état" aide="Lot BTP de rattachement (ex : Gros Œuvre, Électricité…)">
+                <input type="text" className="champ-saisie w-full" value={form.corps_etat}
+                  onChange={(e) => maj("corps_etat", e.target.value)} placeholder="Gros Œuvre, Menuiseries extérieures…" />
               </LigneChamp>
               <LigneChamp libelle="Métier">
                 <input type="text" className="champ-saisie w-full" value={form.metier}
@@ -776,6 +785,7 @@ export default function PageAdminDHMO() {
                           <span className="font-medium text-slate-800">{p.libelle}</span>
                         </div>
                         {p.metier && <p className="text-xs text-slate-400">{p.metier}{p.niveau_classification ? ` — ${p.niveau_classification}` : ""}</p>}
+                        {p.corps_etat && <p className="text-[11px] text-primaire-600 font-medium mt-0.5">{p.corps_etat}</p>}
                       </td>
                       <td className="py-3 pr-4 text-xs text-slate-500 hidden sm:table-cell">{p.categorie_libelle}</td>
                       <td className="py-3 pr-4 text-right text-xs text-slate-600">{fmt(p.salaire_brut_mensuel_defaut)} €</td>
