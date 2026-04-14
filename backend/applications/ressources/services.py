@@ -628,8 +628,6 @@ def extraire_metadonnees_devis(texte_brut: str, nom_fichier: str = "") -> dict:
 
     # --- Indice BT dominant (corps d'état le plus mentionné) ---
     familles = {
-        "BTM":  ["bâtiment", "construction", "réhabilitation", "rénovation"],
-        "TPM":  ["travaux publics", "infrastructure", "génie civil"],
         "BT01": ["béton", "maçonnerie", "gros oeuvre", "coffrages", "ferraillage"],
         "BT28": ["peinture", "enduit peinture", "lasure"],
         "BT37": ["menuiserie bois", "parquet", "escalier bois"],
@@ -1000,8 +998,8 @@ def _detecter_fondation(texte: str) -> str:
 # Correspondance code indice → identifiant de série INSEE BDM
 # Source : https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/{id}
 _INSEE_SERIES: dict[str, str] = {
-    "BTM":  "010537278",   # Bâtiment Tous Métiers
-    "TPM":  "010569059",   # Travaux Publics Tous Métiers
+    "BTM":  "",   # Bâtiment Mayotte — identifiant INSEE à confirmer
+    "TPM":  "",   # Travaux Publics Mayotte — identifiant INSEE à confirmer
     "BT01": "010537214",   # Gros œuvre / Bâtiment général
     "BT02": "010537216",   # Maçonnerie
     "BT10": "010537225",   # Charpente bois
