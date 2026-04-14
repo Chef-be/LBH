@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
+import { EditeurTexteRiche } from "@/composants/ui/EditeurTexteRiche";
 import { ArrowLeft, Save, Trash2, Plus, X, Tag, Link2 } from "lucide-react";
 
 interface LotCCTP {
@@ -257,15 +258,15 @@ export default function PageDetailArticleCCTP({ params }: PageProps) {
           {/* Corps de l'article */}
           <div className="carte space-y-3">
             <h2 className="text-sm font-semibold text-slate-700">Corps de l&apos;article</h2>
-            <textarea
-              className="champ-saisie w-full font-mono text-sm resize-y"
-              rows={18}
+            <EditeurTexteRiche
+              valeur={formData.corps_article}
+              onChange={(html) => changer("corps_article", html)}
               placeholder="Rédiger le corps de l'article CCTP…"
-              value={formData.corps_article}
-              onChange={(e) => changer("corps_article", e.target.value)}
+              hauteurMinimale="min-h-[400px]"
+              barreCollante
             />
             <p className="text-xs text-slate-400">
-              Les variables de fusion s&apos;écrivent entre doubles accolades : {"{{"} nom_projet {"}}"}
+              Variables de fusion : <code className="bg-slate-100 px-1 rounded text-slate-600">{"{{"} nom_projet {"}}"}</code>
             </p>
           </div>
 
