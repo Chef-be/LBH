@@ -2030,46 +2030,110 @@ def recalculer_depuis_prix_vente(ligne_prix: LignePrixBibliotheque) -> dict[str,
     famille = (ligne_prix.famille or "").lower()
 
     # --- Coefficients Kpv (DS/PV) par famille ---
-    if any(mot in famille for mot in ("gros", "œuvre", "go", "terrassement", "fondation")):
-        kpv = Decimal("0.70")
-    elif any(mot in famille for mot in ("vrd", "réseau", "voirie")):
-        kpv = Decimal("0.68")
-    elif any(mot in famille for mot in ("charpente", "couverture", "étanchéité", "zinguerie")):
+    # Calibrés sur ARTIPRIX 2025 + Manuel Cusant & Widloecher (Eyrolles 6e éd.)
+    # DS/PV médian par corps d'état — plage verte Kpv=1.25-1.55 soit DS/PV=0.645-0.80
+    sous_famille = (ligne_prix.sous_famille or "").lower()
+    reference = famille + " " + sous_famille
+
+    if any(mot in reference for mot in ("béton", "banche", "voile", "dalle", "poteau", "poutre", "coffrage")):
+        # Béton armé banché : fort matériel (coffrage) + MO qualifiée
         kpv = Decimal("0.72")
-    elif any(mot in famille for mot in ("menuiserie", "serrurerie")):
-        kpv = Decimal("0.65")
-    elif any(mot in famille for mot in ("isolation", "plâtrerie", "peinture")):
+    elif any(mot in reference for mot in ("terrassement", "déblai", "remblai", "excavation")):
+        # Terrassement mécanique : très fort matériel
+        kpv = Decimal("0.73")
+    elif any(mot in reference for mot in ("fondation", "radier", "semelle", "micropieu", "pieu")):
+        kpv = Decimal("0.71")
+    elif any(mot in reference for mot in ("maçonnerie", "parpaing", "brique", "bloc")):
+        # Maçonnerie : matériaux dominants, peu de matériel
+        kpv = Decimal("0.70")
+    elif any(mot in reference for mot in ("gros", "œuvre", "go")):
+        kpv = Decimal("0.71")
+    elif any(mot in reference for mot in ("vrd", "réseau", "voirie", "assainissement", "canalisations")):
         kpv = Decimal("0.68")
-    elif any(mot in famille for mot in ("carrelage", "revêtement", "sol")):
+    elif any(mot in reference for mot in ("charpente", "couverture", "zinguerie")):
+        kpv = Decimal("0.72")
+    elif any(mot in reference for mot in ("étanchéité",)):
+        kpv = Decimal("0.70")
+    elif any(mot in reference for mot in ("menuiserie extérieure", "façade", "vitrage", "aluminium")):
+        kpv = Decimal("0.64")
+    elif any(mot in reference for mot in ("menuiserie", "serrurerie", "quincaillerie")):
+        kpv = Decimal("0.66")
+    elif any(mot in reference for mot in ("isolation", "plâtrerie", "enduit", "cloison")):
+        kpv = Decimal("0.68")
+    elif any(mot in reference for mot in ("peinture", "revêtement mural")):
+        kpv = Decimal("0.70")
+    elif any(mot in reference for mot in ("carrelage", "revêtement", "faïence")):
         kpv = Decimal("0.67")
-    elif any(mot in famille for mot in ("électricité", "courant")):
-        kpv = Decimal("0.72")
-    elif any(mot in famille for mot in ("plomberie", "sanitaire", "cvc", "chauffage", "ventilation", "climatisation")):
-        kpv = Decimal("0.70")
-    elif any(mot in famille for mot in ("paysager", "espace vert", "aménagement extérieur")):
-        kpv = Decimal("0.65")
-    else:
+    elif any(mot in reference for mot in ("parquet", "plancher", "sol souple")):
         kpv = Decimal("0.68")
+    elif any(mot in reference for mot in ("électricité", "courant", "câblage", "tableau")):
+        kpv = Decimal("0.72")
+    elif any(mot in reference for mot in ("plomberie", "sanitaire")):
+        kpv = Decimal("0.70")
+    elif any(mot in reference for mot in ("cvc", "chauffage", "ventilation", "climatisation", "géothermie")):
+        kpv = Decimal("0.71")
+    elif any(mot in reference for mot in ("paysager", "espace vert", "espaces verts", "plantation")):
+        kpv = Decimal("0.65")
+    elif any(mot in reference for mot in ("démolition", "déconstruction", "dépose")):
+        kpv = Decimal("0.68")
+    else:
+        kpv = Decimal("0.70")  # médiane tous corps d'état
 
     debourse_sec = (pv * kpv).quantize(Decimal("0.0001"))
 
     # --- Ratios de répartition DS par famille ---
-    if any(mot in famille for mot in ("gros", "œuvre", "go", "terrassement", "fondation")):
-        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.30", "0.50", "0.15", "0.05"
-    elif any(mot in famille for mot in ("vrd", "réseau", "voirie")):
+    # Source : ARTIPRIX 2025 + Manuel Cusant & Widloecher — calibrés sur exemples numériques
+    # Voile BA (manuel p.206) : MO=38.7%, Matx=27.5%, Matl=33.8%  → référence béton banché
+    # Maçonnerie courante : MO~35%, Matx~55%, Matl~5%, divers~5%
+    # Terrassement mécanique : MO~10%, Matx~10%, Matl~75%, divers~5%
+    if any(mot in reference for mot in ("béton", "banche", "voile", "dalle", "poteau", "poutre", "coffrage")):
+        # Béton armé banché — coffrage métallique lourd → fort matériel
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.38", "0.27", "0.30", "0.05"
+    elif any(mot in reference for mot in ("terrassement", "déblai", "remblai", "excavation")):
+        # Terrassement mécanique — engins dominants
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.10", "0.10", "0.75", "0.05"
+    elif any(mot in reference for mot in ("fondation", "radier", "semelle")):
         ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.25", "0.40", "0.30", "0.05"
-    elif any(mot in famille for mot in ("menuiserie", "serrurerie")):
-        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.25", "0.65", "0.05", "0.05"
-    elif any(mot in famille for mot in ("carrelage", "revêtement", "sol")):
-        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.40", "0.55", "0.00", "0.05"
-    elif any(mot in famille for mot in ("électricité", "courant")):
+    elif any(mot in reference for mot in ("maçonnerie", "parpaing", "brique", "bloc")):
+        # Maçonnerie traditionnelle — matériaux dominants
         ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.35", "0.55", "0.05", "0.05"
-    elif any(mot in famille for mot in ("plomberie", "sanitaire", "cvc", "chauffage", "ventilation", "climatisation")):
+    elif any(mot in reference for mot in ("gros", "œuvre", "go", "fondation")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.33", "0.40", "0.22", "0.05"
+    elif any(mot in reference for mot in ("vrd", "réseau", "voirie", "assainissement", "canalisations")):
+        # VRD — mélange tranchées (matériel) et fournitures (matériaux)
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.22", "0.40", "0.33", "0.05"
+    elif any(mot in reference for mot in ("menuiserie extérieure", "vitrage", "aluminium")):
+        # Menuiseries extérieures — très forte part matériaux (fourniture)
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.20", "0.72", "0.03", "0.05"
+    elif any(mot in reference for mot in ("menuiserie", "serrurerie")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.25", "0.65", "0.05", "0.05"
+    elif any(mot in reference for mot in ("carrelage", "faïence")):
+        # Carrelage — MO qualifiée + matériaux colles/joints
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.42", "0.50", "0.03", "0.05"
+    elif any(mot in reference for mot in ("parquet", "plancher")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.30", "0.62", "0.03", "0.05"
+    elif any(mot in reference for mot in ("peinture",)):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.50", "0.40", "0.05", "0.05"
+    elif any(mot in reference for mot in ("isolation", "plâtrerie", "enduit", "cloison")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.38", "0.50", "0.07", "0.05"
+    elif any(mot in reference for mot in ("électricité", "courant", "câblage")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.38", "0.52", "0.05", "0.05"
+    elif any(mot in reference for mot in ("plomberie", "sanitaire")):
         ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.30", "0.60", "0.05", "0.05"
-    elif any(mot in famille for mot in ("charpente", "couverture", "étanchéité", "zinguerie")):
-        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.35", "0.45", "0.15", "0.05"
+    elif any(mot in reference for mot in ("cvc", "chauffage", "ventilation", "climatisation")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.28", "0.60", "0.07", "0.05"
+    elif any(mot in reference for mot in ("charpente",)):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.30", "0.45", "0.20", "0.05"
+    elif any(mot in reference for mot in ("couverture", "zinguerie")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.38", "0.48", "0.09", "0.05"
+    elif any(mot in reference for mot in ("étanchéité",)):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.35", "0.50", "0.10", "0.05"
+    elif any(mot in reference for mot in ("paysager", "espace vert", "plantation")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.35", "0.40", "0.20", "0.05"
+    elif any(mot in reference for mot in ("démolition", "déconstruction")):
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.25", "0.05", "0.65", "0.05"
     else:
-        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.33", "0.50", "0.12", "0.05"
+        ratio_mo, ratio_mat, ratio_materiel, ratio_divers = "0.33", "0.47", "0.15", "0.05"
 
     montant_mo = (debourse_sec * Decimal(ratio_mo)).quantize(Decimal("0.0001"))
     cout_matieres = (debourse_sec * Decimal(ratio_mat)).quantize(Decimal("0.0001"))

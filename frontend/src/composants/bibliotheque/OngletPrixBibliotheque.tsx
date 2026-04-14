@@ -541,59 +541,130 @@ function PanneauDetailLigne({
           )}
 
           {/* ── Chaîne DS → PV HT (Kpv) ── */}
-          {ds > 0 && (
-            <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
-                Chaîne DS → PV HT — Manuel Cusant & Widloecher
-              </h3>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between py-1 border-b border-slate-50">
-                  <span className="text-slate-600">DS (Déboursé Sec)</span>
-                  <span className="font-mono font-semibold text-slate-800">{formaterMontant(ds)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
-                  <span>+ FC (Frais de Chantier, ~5–15% DS)</span>
-                  <span className="font-mono">selon opération</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
-                  <span>+ Fop (Frais d&apos;opération, ~1–2% DS)</span>
-                  <span className="font-mono">selon opération</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
-                  <span>= CD (Coût Direct = DS + FC + Fop)</span>
-                  <span className="font-mono">—</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
-                  <span>+ FG (Frais Généraux, ~8–12% PV)</span>
-                  <span className="font-mono">selon entreprise</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-50 text-slate-400 text-xs">
-                  <span>+ B&amp;A (Bénéfice &amp; Aléas, ~4–8% PV)</span>
-                  <span className="font-mono">selon marché</span>
-                </div>
-                {pv > 0 ? (
-                  <>
-                    <div className="flex justify-between py-1.5 bg-primaire-50 rounded-lg px-2 font-semibold">
-                      <span className="text-primaire-800">= PV HT</span>
-                      <span className="font-mono text-primaire-700">{formaterMontant(pv)}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-1.5 px-2">
-                      <span className="text-slate-600 text-xs">Kpv = PV / DS</span>
-                      <span className={clsx("font-mono font-bold text-base", infoKpv.classe)}>
-                        {kpv.toFixed(3)}
-                        <span className="text-xs ml-1 font-normal">({infoKpv.label})</span>
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 px-2 italic">
-                      Plage normale bâtiment courant : Kpv = 1.25 – 1.55
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-xs text-slate-400 italic">Prix de vente non renseigné → Kpv non calculable.</p>
+          {ds > 0 && (() => {
+            // Taux standard BTP (valeurs médianes de marché)
+            const FC_PCT  = 0.10;   // Frais de Chantier — médiane 10% DS (plage 5–15%)
+            const FOP_PCT = 0.015;  // Frais d'opération — médiane 1.5% DS (plage 1–2%)
+            const FG_PCT  = 0.10;   // Frais Généraux — médiane 10% PV (plage 8–12%)
+            const BA_PCT  = 0.06;   // Bénéfice & Aléas — médiane 6% PV (plage 4–8%)
+
+            // DS → PV : PV = DS × (1 + FC + Fop) / (1 − FG − B&A)
+            const fc_val   = ds * FC_PCT;
+            const fop_val  = ds * FOP_PCT;
+            const cd_val   = ds + fc_val + fop_val;
+            const pvEstime = cd_val / (1 - FG_PCT - BA_PCT);
+            const fg_val   = pvEstime * FG_PCT;
+            const ba_val   = pvEstime * BA_PCT;
+            const kpvEstime = pvEstime / ds;
+
+            // Si PV réel connu — on remonte les taux implicites
+            let fcImplicit = "—", fopNote = "", cdReel = 0, fgImplicit = "—", baImplicit = "—";
+            if (pv > 0) {
+              // On ne peut pas isoler FC/Fop séparément sans les données de chantier,
+              // mais on peut estimer CD réel = DS × (1 + FC_med + Fop_med)
+              cdReel = ds + fc_val + fop_val;
+              const margeApparente = pv - cdReel;
+              fgImplicit  = `≈ ${formaterMontant(pv * FG_PCT)} (10% PV estimé)`;
+              baImplicit  = `≈ ${formaterMontant(pv * BA_PCT)} (6% PV estimé)`;
+              fcImplicit  = `≈ ${formaterMontant(fc_val)} (10% DS)`;
+              fopNote     = margeApparente > 0
+                ? `Marge brute implicite ≈ ${formaterMontant(margeApparente)} (${((margeApparente / pv) * 100).toFixed(1)}% PV)`
+                : "";
+            }
+
+            return (
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                  Chaîne DS → PV HT
+                </h3>
+                {pv === 0 && (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1 mb-2 italic">
+                    Prix de vente non renseigné — estimations calculées avec les taux médianes BTP
+                  </p>
                 )}
-              </div>
-            </section>
-          )}
+                <div className="space-y-0.5 text-sm">
+                  {/* DS */}
+                  <div className="flex justify-between items-center py-1.5 border-b border-slate-100">
+                    <span className="text-slate-700 font-medium">DS — Déboursé Sec</span>
+                    <span className="font-mono font-bold text-slate-800">{formaterMontant(ds)}</span>
+                  </div>
+                  {/* FC */}
+                  <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">
+                      + FC — Frais de Chantier
+                      <span className="ml-1 text-slate-400">(médiane 10% DS, plage 5–15%)</span>
+                    </span>
+                    <span className="font-mono text-xs text-slate-600">
+                      {pv > 0 ? fcImplicit : `≈ ${formaterMontant(fc_val)}`}
+                    </span>
+                  </div>
+                  {/* Fop */}
+                  <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">
+                      + Fop — Frais d&apos;opération
+                      <span className="ml-1 text-slate-400">(médiane 1.5% DS, plage 1–2%)</span>
+                    </span>
+                    <span className="font-mono text-xs text-slate-600">≈ {formaterMontant(fop_val)}</span>
+                  </div>
+                  {/* CD */}
+                  <div className="flex justify-between items-center py-1.5 border-b border-slate-200 bg-slate-50 rounded px-2">
+                    <span className="text-slate-600 text-xs font-semibold">= CD — Coût Direct</span>
+                    <span className="font-mono text-xs font-semibold text-slate-700">
+                      ≈ {formaterMontant(pv > 0 ? cdReel : cd_val)}
+                    </span>
+                  </div>
+                  {/* FG */}
+                  <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">
+                      + FG — Frais Généraux
+                      <span className="ml-1 text-slate-400">(médiane 10% PV, plage 8–12%)</span>
+                    </span>
+                    <span className="font-mono text-xs text-slate-600">
+                      {pv > 0 ? fgImplicit : `≈ ${formaterMontant(fg_val)}`}
+                    </span>
+                  </div>
+                  {/* B&A */}
+                  <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                    <span className="text-slate-500 text-xs">
+                      + B&amp;A — Bénéfice &amp; Aléas
+                      <span className="ml-1 text-slate-400">(médiane 6% PV, plage 4–8%)</span>
+                    </span>
+                    <span className="font-mono text-xs text-slate-600">
+                      {pv > 0 ? baImplicit : `≈ ${formaterMontant(ba_val)}`}
+                    </span>
+                  </div>
+                  {/* PV */}
+                  <div className="flex justify-between items-center py-2 mt-1 bg-indigo-600 rounded-lg px-3 font-bold">
+                    <span className="text-white text-sm tracking-wide">
+                      {pv > 0 ? "= PV HT" : "≈ PV HT estimé"}
+                    </span>
+                    <span className="font-mono text-white text-sm">
+                      {formaterMontant(pv > 0 ? pv : pvEstime)}
+                    </span>
+                  </div>
+                  {/* Kpv */}
+                  <div className="flex justify-between items-center py-1.5 px-2 mt-0.5 bg-slate-100 rounded-md">
+                    <span className="text-slate-600 text-xs font-medium">
+                      Kpv = PV / DS
+                      {pv === 0 && <span className="ml-1 text-slate-400">(estimé)</span>}
+                    </span>
+                    <span className={clsx("font-mono font-bold text-base", pv > 0 ? infoKpv.classe : "text-slate-400")}>
+                      {(pv > 0 ? kpv : kpvEstime).toFixed(3)}
+                      <span className="text-xs ml-1 font-normal">
+                        ({pv > 0 ? infoKpv.label : "médiane BTP"})
+                      </span>
+                    </span>
+                  </div>
+                  {pv > 0 && fopNote && (
+                    <p className="text-xs text-slate-500 px-2 italic">{fopNote}</p>
+                  )}
+                  <p className="text-xs text-slate-400 px-2 italic">
+                    Plage normale bâtiment courant : Kpv = 1.25 – 1.55
+                  </p>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* ── Informations techniques ── */}
           <section>

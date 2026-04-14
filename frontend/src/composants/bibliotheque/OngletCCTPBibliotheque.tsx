@@ -32,7 +32,7 @@ interface LotCCTP {
   numero?: string;
   intitule: string;
   description?: string;
-  normes?: string[];
+  normes_principales?: string[];
   est_actif?: boolean;
   ordre?: number;
   nb_prescriptions?: number;
@@ -55,12 +55,14 @@ interface ArticleCCTP {
   numero_article: string;
   code_reference: string;
   intitule: string;
+  corps_article?: string;
   lot?: string | null;
   lot_code?: string | null;
   lot_intitule?: string | null;
   ligne_prix_reference: string | null;
   source_url: string;
   date_modification: string;
+  normes_applicables?: string[];
 }
 
 interface LigneBibliothequeResume {
@@ -329,7 +331,7 @@ function ModalLot({
     code: lot?.code || lot?.numero || "",
     intitule: lot?.intitule || "",
     description: lot?.description || "",
-    normes: (lot?.normes || []).join(", "),
+    normes: (lot?.normes_principales || []).join(", "),
     est_actif: lot?.est_actif !== false,
     ordre: String(lot?.ordre ?? ""),
   });
@@ -352,7 +354,7 @@ function ModalLot({
       code: form.code.trim(),
       intitule: form.intitule.trim(),
       description: form.description.trim() || null,
-      normes: form.normes
+      normes_principales: form.normes
         .split(",")
         .map((n) => n.trim())
         .filter(Boolean),
@@ -484,6 +486,100 @@ function ModalLot({
 }
 
 // ---------------------------------------------------------------------------
+// Panneau latéral — visualisation du contenu d'un article CCTP
+// ---------------------------------------------------------------------------
+
+function PanneauArticleCCTP({
+  article,
+  onFermer,
+}: {
+  article: ArticleCCTP;
+  onFermer: () => void;
+}) {
+  return (
+    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col bg-white shadow-2xl">
+      {/* En-tête */}
+      <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+        <div className="min-w-0 flex-1 pr-4">
+          {(article.lot_code || article.chapitre) && (
+            <p className="text-xs font-mono text-slate-400 mb-0.5">
+              {article.lot_code && <span className="mr-2">{article.lot_code}</span>}
+              {article.chapitre && <span>{article.chapitre}</span>}
+            </p>
+          )}
+          <h2 className="text-base font-semibold text-slate-900 leading-snug">
+            {article.numero_article && (
+              <span className="font-mono text-slate-400 mr-2 text-sm">{article.numero_article}</span>
+            )}
+            {article.intitule}
+          </h2>
+          {article.lot_intitule && (
+            <p className="text-xs text-slate-400 mt-0.5">{article.lot_intitule}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onFermer}
+          className="flex-shrink-0 rounded-lg p-1.5 hover:bg-slate-100"
+        >
+          <X className="h-4 w-4 text-slate-500" />
+        </button>
+      </div>
+
+      {/* Corps */}
+      <div className="flex-1 overflow-y-auto px-6 py-5">
+        {article.corps_article ? (
+          <div
+            className="prose prose-sm prose-slate max-w-none text-sm leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: article.corps_article }}
+          />
+        ) : (
+          <p className="text-slate-400 italic text-sm">Aucun contenu rédigé pour cet article.</p>
+        )}
+
+        {article.normes_applicables && article.normes_applicables.length > 0 && (
+          <div className="mt-6 border-t border-slate-100 pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+              Normes applicables
+            </h3>
+            <ul className="space-y-1">
+              {article.normes_applicables.map((norme, i) => (
+                <li key={i} className="text-xs text-slate-600 font-mono">• {norme}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Pied */}
+      <div className="border-t border-slate-200 px-6 py-3 flex items-center gap-2">
+        <Link
+          href={`/bibliotheque/article/${article.id}`}
+          className="btn-secondaire text-xs"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+          Éditer
+        </Link>
+        {article.source_url && (
+          <a
+            href={article.source_url}
+            target="_blank"
+            rel="noreferrer"
+            className="btn-secondaire text-xs"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Source
+          </a>
+        )}
+        <button type="button" onClick={onFermer} className="ml-auto btn-secondaire text-xs">
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Modal rattachement article → lot
 // ---------------------------------------------------------------------------
 
@@ -574,6 +670,7 @@ function SousOngletArticles() {
   const [succes, setSucces] = useState<string | null>(null);
   const [erreurGlobal, setErreurGlobal] = useState<string | null>(null);
   const [articleARattacher, setArticleARattacher] = useState<ArticleCCTP | null>(null);
+  const [articleAVisualiser, setArticleAVisualiser] = useState<ArticleCCTP | null>(null);
 
   const params = new URLSearchParams({ est_dans_bibliotheque: "true" });
   if (recherche) params.set("search", recherche);
@@ -684,10 +781,18 @@ function SousOngletArticles() {
               {articles.map((article) => (
                 <tr key={article.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                   <td className="py-3 pr-4 max-w-xs">
-                    <p className="font-medium text-slate-800">{article.intitule}</p>
-                    {article.numero_article && (
-                      <p className="text-xs text-slate-400 mt-0.5">{article.numero_article}</p>
-                    )}
+                    <button
+                      type="button"
+                      className="text-left group"
+                      onClick={() => setArticleAVisualiser(article)}
+                    >
+                      <p className="font-medium text-slate-800 group-hover:text-indigo-600 transition-colors">
+                        {article.intitule}
+                      </p>
+                      {article.numero_article && (
+                        <p className="text-xs text-slate-400 mt-0.5">{article.numero_article}</p>
+                      )}
+                    </button>
                   </td>
                   <td className="py-3 pr-4 text-xs text-slate-500">
                     {article.lot_code
@@ -760,6 +865,14 @@ function SousOngletArticles() {
           lots={lots}
           onFermer={() => setArticleARattacher(null)}
           onSucces={apresRattachement}
+        />
+      )}
+
+      {/* Panneau visualisation article */}
+      {articleAVisualiser && (
+        <PanneauArticleCCTP
+          article={articleAVisualiser}
+          onFermer={() => setArticleAVisualiser(null)}
         />
       )}
     </div>
@@ -1147,17 +1260,17 @@ function SousOngletLots() {
                       : "—"}
                   </td>
                   <td className="py-3 pr-4">
-                    {lot.normes && lot.normes.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {lot.normes.slice(0, 2).map((norme, i) => (
-                          <span key={i} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-slate-600">
-                            {norme}
+                    {lot.normes_principales && lot.normes_principales.length > 0 ? (
+                      <div className="flex flex-col gap-0.5">
+                        {lot.normes_principales.slice(0, 2).map((norme, i) => (
+                          <span key={i} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-slate-600 truncate max-w-[200px]" title={norme}>
+                            {norme.length > 30 ? `${norme.slice(0, 30)}…` : norme}
                           </span>
                         ))}
-                        {lot.normes.length > 2 && (
+                        {lot.normes_principales.length > 2 && (
                           <span className="text-xs text-slate-400">
                             <Tag className="inline h-3 w-3 mr-0.5" />
-                            +{lot.normes.length - 2}
+                            +{lot.normes_principales.length - 2} normes
                           </span>
                         )}
                       </div>
