@@ -54,7 +54,7 @@ class DevisAnalyseSerialiseur(serializers.ModelSerializer):
             "capitalise", "lignes_count",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "statut", "erreur_detail", "capitalise", "date_creation", "date_modification"]
+        read_only_fields = ["id", "nom_original", "statut", "erreur_detail", "capitalise", "date_creation", "date_modification"]
 
     def get_lignes_count(self, obj) -> int:
         return obj.lignes.count()
@@ -77,7 +77,7 @@ class EstimationSourceSerialiseur(serializers.ModelSerializer):
             "statut", "erreur_detail", "date_suppression_programmee",
             "fiches_count", "date_creation",
         ]
-        read_only_fields = ["id", "statut", "erreur_detail", "date_creation"]
+        read_only_fields = ["id", "nom_original", "statut", "erreur_detail", "date_creation"]
 
     def get_fiches_count(self, obj) -> int:
         return obj.fiches_ratio.count()
