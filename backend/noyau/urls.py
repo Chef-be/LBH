@@ -67,6 +67,9 @@ urlpatterns = [
     # API — Site vitrine public
     path("api/site/", include("applications.site_public.urls")),
 
+    # API — Ressources et capitalisation des prix
+    path("api/ressources/", include("applications.ressources.urls")),
+
     # Vérification de santé (django-health-check)
     # On exclut le contrôle courrier (SMTP non critique pour la disponibilité)
     path("api/sante/", HealthCheckView.as_view(checks=[

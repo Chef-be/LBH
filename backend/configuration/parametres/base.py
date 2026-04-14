@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     "applications.messagerie",
     "applications.supervision",
     "applications.site_public",
+    "applications.ressources",
 ]
 
 # ============================================================
@@ -183,6 +184,7 @@ CELERY_TASK_ROUTES = {
     "applications.pieces_ecrites.taches.*": {"queue": "documents"},
     "applications.parametres.taches.*": {"queue": "principale"},
     "bibliotheque.*": {"queue": "calculs"},
+    "applications.ressources.taches.*": {"queue": "documents"},
 }
 
 # ============================================================

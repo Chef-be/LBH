@@ -10,7 +10,7 @@ import { api, extraireListeResultats } from "@/crochets/useApi";
 import {
   LayoutDashboard, FolderKanban, BookOpen,
   Activity, Globe, Users, Mail, Shield,
-  ChevronLeft, Menu,
+  ChevronLeft, Menu, FileSearch, TrendingUp, BarChart3, LineChart,
 } from "lucide-react";
 import { obtenirMarqueAffichee, obtenirNomPlateforme } from "@/lib/site-public";
 
@@ -39,6 +39,15 @@ const GROUPES_MENU: GroupeMenu[] = [
     titre: "Bibliothèques",
     entrees: [
       { libelle: "Bibliothèque", chemin: "/bibliotheque", icone: BookOpen, codeModule: "BIBLIOTHEQUE_PRIX" },
+    ],
+  },
+  {
+    titre: "Ressources",
+    entrees: [
+      { libelle: "Analyser un devis", chemin: "/ressources/devis", icone: FileSearch, codeModule: "RESSOURCES_CAPITALISATION" },
+      { libelle: "Prix marché", chemin: "/ressources/prix-marche", icone: TrendingUp, codeModule: "RESSOURCES_CAPITALISATION" },
+      { libelle: "Estimations & ratios", chemin: "/ressources/estimations", icone: BarChart3, codeModule: "RESSOURCES_CAPITALISATION" },
+      { libelle: "Indices BT/TP", chemin: "/ressources/indices", icone: LineChart, codeModule: "RESSOURCES_CAPITALISATION" },
     ],
   },
   {
