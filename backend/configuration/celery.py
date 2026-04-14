@@ -56,7 +56,12 @@ application_celery.conf.beat_schedule = {
         "task": "bibliotheque.lier_auto_prix_articles",
         "schedule": crontab(hour=3, minute=30),
     },
-    # Actualisation des indices de révision des prix — chaque mois le 1er à 06h00
+    # Récupération automatique des indices INSEE — chaque lundi à 07h00
+    "recuperer-indices-insee": {
+        "task": "applications.ressources.taches.tache_recuperer_indices_insee",
+        "schedule": crontab(hour=7, minute=0, day_of_week=1),
+    },
+    # Actualisation des prix marché avec les indices courants — chaque mois le 1er à 06h00
     "actualiser-indices-revision-prix": {
         "task": "applications.ressources.taches.tache_actualiser_indices",
         "schedule": crontab(hour=6, minute=0, day_of_month=1),

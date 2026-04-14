@@ -527,7 +527,7 @@ def vue_lier_prescriptions(request, pk):
 def vue_lots_cctp(request):
     """Liste des 18 lots CCTP disponibles pour filtrage et liaison."""
     from applications.pieces_ecrites.models import LotCCTP
-    lots = LotCCTP.objects.filter(est_actif=True).order_by("ordre", "numero")
+    lots = LotCCTP.objects.filter(est_actif=True).order_by("ordre")
     serialiseur = LotCCTPResumeSerialiseur(lots, many=True)
     return Response(serialiseur.data)
 

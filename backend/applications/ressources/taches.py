@@ -81,6 +81,19 @@ def tache_analyser_estimation(self, source_id: str) -> dict:
 
 
 @shared_task
+def tache_recuperer_indices_insee() -> dict:
+    """Récupère automatiquement les derniers indices BT/TP publiés par l'INSEE."""
+    from .services import recuperer_indices_insee
+    resultats = recuperer_indices_insee()
+    total = sum(v.get("crees", 0) for v in resultats.values())
+    erreurs = [f"{k}: {v['erreur']}" for k, v in resultats.items() if v.get("erreur")]
+    if erreurs:
+        logger.warning("Récupération INSEE partielle : %s", "; ".join(erreurs))
+    logger.info("Récupération INSEE : %d nouvelle(s) valeur(s)", total)
+    return {"total_crees": total, "erreurs": erreurs}
+
+
+@shared_task
 def tache_actualiser_indices() -> dict:
     """Actualise tous les prix marché avec les indices courants (tâche mensuelle)."""
     from .services import actualiser_toutes_les_lignes

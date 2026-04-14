@@ -37,6 +37,51 @@ class VueDetailIndice(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = IndiceRevisionPrixSerialiseur
 
 
+@api_view(["POST"])
+def vue_recuperer_indices_insee(request):
+    """
+    Déclenche la récupération automatique des indices BT/TP depuis l'API INSEE.
+    Peut recevoir une liste de codes optionnelle (par défaut tous).
+    """
+    from .services import recuperer_indices_insee
+    codes = request.data.get("codes") or None
+    resultats = recuperer_indices_insee(codes)
+    total_crees = sum(v.get("crees", 0) for v in resultats.values())
+    return Response({
+        "detail": f"{total_crees} valeur(s) créée(s) depuis l'INSEE.",
+        "resultats": resultats,
+    })
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def vue_actualiser_montant_devis(request):
+    """
+    Analyse un PDF de devis et calcule le montant actualisé selon l'indice courant.
+    Corps multipart : fichier, indice_code, indice_base_valeur (optionnel), methode (optionnel).
+    """
+    from .services import actualiser_montant_depuis_devis
+    from decimal import Decimal, InvalidOperation
+
+    fichier = request.FILES.get("fichier")
+    if not fichier:
+        return Response({"detail": "Fichier manquant."}, status=status.HTTP_400_BAD_REQUEST)
+    if fichier.size > 20 * 1024 * 1024:
+        return Response({"detail": "Fichier trop volumineux (max 20 Mo)."}, status=status.HTTP_400_BAD_REQUEST)
+
+    indice_code = request.data.get("indice_code", "BT01")
+    methode = request.data.get("methode", "ccag")
+
+    try:
+        indice_base = Decimal(str(request.data.get("indice_base_valeur", ""))) if request.data.get("indice_base_valeur") else None
+    except InvalidOperation:
+        indice_base = None
+
+    contenu = fichier.read()
+    resultat = actualiser_montant_depuis_devis(contenu, fichier.name, indice_code, indice_base, methode)
+    return Response(resultat)
+
+
 @api_view(["GET"])
 def vue_indices_courants(request):
     """Retourne la dernière valeur pour chaque code d'indice."""

@@ -991,3 +991,245 @@ def _detecter_fondation(texte: str) -> str:
     if "semelle" in texte:
         return "superficielle_semelle"
     return "non_identifie"
+
+
+# ---------------------------------------------------------------------------
+# Récupération automatique des indices BT/TP depuis l'INSEE (API SDMX publique)
+# ---------------------------------------------------------------------------
+
+# Correspondance code indice → identifiant de série INSEE BDM
+# Source : https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/{id}
+_INSEE_SERIES: dict[str, str] = {
+    "BTM":  "010537278",   # Bâtiment Tous Métiers
+    "TPM":  "010569059",   # Travaux Publics Tous Métiers
+    "BT01": "010537214",   # Gros œuvre / Bâtiment général
+    "BT02": "010537216",   # Maçonnerie
+    "BT10": "010537225",   # Charpente bois
+    "BT20": "010537229",   # Couverture
+    "BT28": "010537235",   # Peinture
+    "BT37": "010537243",   # Menuiserie bois
+    "BT40": "010537248",   # Serrurerie
+    "BT50": "010537255",   # Plomberie
+    "BT51": "010537257",   # CVC / Chauffage
+    "BT60": "010537262",   # Électricité
+    "TP01": "010537283",   # Terrassements
+    "TP05": "010537288",   # Canalisations
+    "TP09": "010537293",   # Béton hydraulique
+}
+
+_URL_INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/{series_id}?lastNObservations=3"
+
+
+def _parser_sdmx_xml(xml_bytes: bytes) -> list[dict]:
+    """
+    Parse une réponse SDMX XML de l'INSEE et retourne une liste de
+    {date: 'YYYY-MM', valeur: float} triée par date décroissante.
+    """
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_bytes)
+    ns = {
+        "message": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message",
+        "generic": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic",
+        "data": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/structurespecific",
+    }
+
+    observations = []
+
+    # Format générique SDMX 2.1
+    for obs in root.iter("{http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic}Obs"):
+        date_el = obs.find("{http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic}ObsDimension")
+        val_el = obs.find("{http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic}ObsValue")
+        if date_el is not None and val_el is not None:
+            try:
+                observations.append({
+                    "date": date_el.get("value", ""),
+                    "valeur": float(val_el.get("value", 0)),
+                })
+            except (ValueError, TypeError):
+                pass
+
+    # Format structurespecific (attributs directs sur <Obs>)
+    if not observations:
+        for obs in root.iter():
+            if obs.tag.endswith("}Obs") or obs.tag == "Obs":
+                periode = obs.get("TIME_PERIOD") or obs.get("time") or obs.get("TIME")
+                valeur = obs.get("OBS_VALUE") or obs.get("value") or obs.get("VALUE")
+                if periode and valeur:
+                    try:
+                        observations.append({"date": periode, "valeur": float(valeur)})
+                    except (ValueError, TypeError):
+                        pass
+
+    observations.sort(key=lambda x: x["date"], reverse=True)
+    return observations
+
+
+def recuperer_indices_insee(codes: list[str] | None = None) -> dict:
+    """
+    Récupère les dernières valeurs publiées des indices BT/TP depuis l'API
+    SDMX publique de l'INSEE et les enregistre en base de données.
+    Retourne un dict {code: {"crees": n, "ignores": n, "erreur": str|None}}.
+    """
+    from .models import IndiceRevisionPrix
+
+    if codes is None:
+        codes = list(_INSEE_SERIES.keys())
+
+    resultats: dict = {}
+
+    for code in codes:
+        series_id = _INSEE_SERIES.get(code)
+        if not series_id:
+            resultats[code] = {"crees": 0, "ignores": 0, "erreur": f"Aucune série INSEE connue pour {code}"}
+            continue
+
+        url = _URL_INSEE_SDMX.format(series_id=series_id)
+        try:
+            resp = requests.get(url, timeout=30, headers={"Accept": "application/xml"})
+            resp.raise_for_status()
+            observations = _parser_sdmx_xml(resp.content)
+        except requests.exceptions.RequestException as exc:
+            logger.warning("INSEE SDMX — %s : %s", code, exc)
+            resultats[code] = {"crees": 0, "ignores": 0, "erreur": str(exc)}
+            continue
+        except Exception as exc:
+            logger.warning("INSEE SDMX parsing — %s : %s", code, exc)
+            resultats[code] = {"crees": 0, "ignores": 0, "erreur": f"Erreur parsing : {exc}"}
+            continue
+
+        crees = 0
+        ignores = 0
+        for obs in observations:
+            date_str = obs["date"]  # format YYYY-MM ou YYYY-MM-DD
+            valeur = obs["valeur"]
+            if not date_str or not valeur:
+                continue
+
+            # Normaliser en date (dernier jour du mois si YYYY-MM)
+            if len(date_str) == 7:  # YYYY-MM
+                from django.utils.dateparse import parse_date
+                import calendar
+                annee, mois = int(date_str[:4]), int(date_str[5:7])
+                dernier_jour = calendar.monthrange(annee, mois)[1]
+                date_pub = parse_date(f"{annee}-{mois:02d}-{dernier_jour:02d}")
+            else:
+                from django.utils.dateparse import parse_date
+                date_pub = parse_date(date_str[:10])
+
+            if not date_pub:
+                continue
+
+            _, created = IndiceRevisionPrix.objects.get_or_create(
+                code=code,
+                date_publication=date_pub,
+                defaults={"valeur": valeur, "source": "INSEE (auto)"},
+            )
+            if created:
+                crees += 1
+                logger.info("INSEE — %s %s = %.2f (créé)", code, date_pub, valeur)
+            else:
+                ignores += 1
+
+        resultats[code] = {"crees": crees, "ignores": ignores, "erreur": None}
+
+    return resultats
+
+
+# ---------------------------------------------------------------------------
+# Actualisation d'un montant de devis avec les indices courants
+# ---------------------------------------------------------------------------
+
+_RE_MONTANT_TOTAL = re.compile(
+    r"(?:total\s*(?:général|ht|h\.t\.?|travaux|marché|devis)?|montant\s*(?:total|ht|h\.t\.?)?)"
+    r"\s*[:\s=]+\s*([\d\s]{2,12}[.,]\d{2})\s*(?:€|eur|euros?)?",
+    re.IGNORECASE,
+)
+_RE_GROS_MONTANT = re.compile(r"\b([\d\s]{4,12}[.,]\d{2})\s*(?:€|eur|euros?)?\b")
+
+
+def _extraire_montant_total_devis(texte: str) -> Optional[Decimal]:
+    """Extrait le montant total HT d'un texte brut de devis."""
+    # 1. Chercher un label "Total" explicite
+    for m in _RE_MONTANT_TOTAL.finditer(texte):
+        val = _to_decimal_safe(m.group(1))
+        if val and val >= Decimal("100"):
+            return val
+
+    # 2. Prendre le plus grand montant trouvé (heuristique)
+    candidats = []
+    for m in _RE_GROS_MONTANT.finditer(texte):
+        val = _to_decimal_safe(m.group(1))
+        if val and val >= Decimal("1000"):
+            candidats.append(val)
+
+    return max(candidats) if candidats else None
+
+
+def actualiser_montant_depuis_devis(
+    fichier_bytes: bytes,
+    nom_fichier: str,
+    indice_code: str = "BT01",
+    indice_base_valeur: Optional[Decimal] = None,
+    methode: str = "ccag",
+) -> dict:
+    """
+    Analyse un PDF de devis, en extrait le montant total HT, puis calcule
+    le montant actualisé selon l'indice BT/TP courant.
+
+    Méthodes disponibles :
+    - "ccag"    : P = P₀ × [0,15 + 0,85 × (In / I₀)]  (CCAG 2021, art. 10.3)
+    - "lineaire": P = P₀ × (In / I₀)  (révision linéaire simple)
+
+    Retourne un dict avec tous les éléments du calcul.
+    """
+    # 1. Extraire le texte via le service PDF
+    texte_brut = ""
+    try:
+        resp = requests.post(
+            f"{URL_SERVICE_PDF}/pdf/analyser",
+            files={"fichier": (nom_fichier, fichier_bytes, "application/pdf")},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        texte_brut = resp.json().get("texte_brut", "")
+    except Exception as exc:
+        logger.warning("Service PDF — actualiser_montant : %s", exc)
+
+    # 2. Extraire le montant
+    montant_original = _extraire_montant_total_devis(texte_brut) if texte_brut else None
+
+    # 3. Récupérer l'indice courant
+    indice_actuel = indice_bt_courant(indice_code)
+
+    # 4. Calculer
+    montant_actualise = None
+    facteur = None
+    formule_detail = ""
+
+    if montant_original and indice_actuel and indice_base_valeur and indice_base_valeur > 0:
+        indice_actuel_d = Decimal(str(indice_actuel))
+        if methode == "ccag":
+            facteur = (Decimal("0.15") + Decimal("0.85") * indice_actuel_d / indice_base_valeur).quantize(Decimal("0.0001"))
+            formule_detail = f"P = P₀ × [0,15 + 0,85 × ({indice_actuel_d} / {indice_base_valeur})] = P₀ × {facteur}"
+        else:
+            facteur = (indice_actuel_d / indice_base_valeur).quantize(Decimal("0.0001"))
+            formule_detail = f"P = P₀ × ({indice_actuel_d} / {indice_base_valeur}) = P₀ × {facteur}"
+        montant_actualise = (montant_original * facteur).quantize(Decimal("0.01"))
+
+    # 5. Extraire aussi les métadonnées
+    meta = extraire_metadonnees_devis(texte_brut, nom_fichier) if texte_brut else {}
+
+    return {
+        "montant_original_ht": float(montant_original) if montant_original else None,
+        "montant_actualise_ht": float(montant_actualise) if montant_actualise else None,
+        "indice_code": indice_code,
+        "indice_base_valeur": float(indice_base_valeur) if indice_base_valeur else None,
+        "indice_actuel_valeur": float(indice_actuel) if indice_actuel else None,
+        "facteur_actualisation": float(facteur) if facteur else None,
+        "methode": methode,
+        "formule": formule_detail,
+        "entreprise": meta.get("entreprise", ""),
+        "date_emission": meta.get("date_emission", ""),
+        "texte_extrait": bool(texte_brut),
+    }

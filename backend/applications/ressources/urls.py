@@ -7,6 +7,8 @@ urlpatterns = [
     # Indices BT/TP
     path("indices/", views.VueListeIndices.as_view(), name="ressources-indices"),
     path("indices/courants/", views.vue_indices_courants, name="ressources-indices-courants"),
+    path("indices/recuperer-insee/", views.vue_recuperer_indices_insee, name="ressources-indices-insee"),
+    path("indices/actualiser-montant/", views.vue_actualiser_montant_devis, name="ressources-actualiser-montant"),
     path("indices/<uuid:pk>/", views.VueDetailIndice.as_view(), name="ressources-indice-detail"),
 
     # Devis analysés
