@@ -998,21 +998,42 @@ def _detecter_fondation(texte: str) -> str:
 # Correspondance code indice → identifiant de série INSEE BDM
 # Source : https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/{id}
 _INSEE_SERIES: dict[str, str] = {
-    "BTM":  "",   # Bâtiment Mayotte — identifiant INSEE à confirmer
-    "TPM":  "",   # Travaux Publics Mayotte — identifiant INSEE à confirmer
-    "BT01": "010537214",   # Gros œuvre / Bâtiment général
-    "BT02": "010537216",   # Maçonnerie
-    "BT10": "010537225",   # Charpente bois
-    "BT20": "010537229",   # Couverture
-    "BT28": "010537235",   # Peinture
-    "BT37": "010537243",   # Menuiserie bois
-    "BT40": "010537248",   # Serrurerie
-    "BT50": "010537255",   # Plomberie
-    "BT51": "010537257",   # CVC / Chauffage
-    "BT60": "010537262",   # Électricité
-    "TP01": "010537283",   # Terrassements
-    "TP05": "010537288",   # Canalisations
-    "TP09": "010537293",   # Béton hydraulique
+    # Mayotte — indices IEDOM, non disponibles via API SDMX INSEE
+    "BTM":  "",
+    "TPM":  "",
+    # Indices Bâtiment base 2010 — vérifiés sur bdm.insee.fr
+    "BT01":  "001710986",   # Tous corps d'état
+    "BT02":  "001710950",   # Terrassements
+    "BT03":  "001710951",   # Maçonnerie et canalisations béton
+    "BT06":  "001710952",   # Ossature, ouvrages en béton armé
+    "BT07":  "001710953",   # Ossature et charpentes métalliques
+    "BT08":  "001710954",   # Plâtre et préfabriqués
+    "BT09":  "001710955",   # Carrelage et revêtement céramique
+    "BT10":  "001710956",   # Revêtements plastiques
+    "BT16b": "001710960",   # Charpente bois
+    "BT18a": "001710962",   # Menuiserie intérieure bois
+    "BT19b": "001710963",   # Menuiserie extérieure bois
+    "BT26":  "001710965",   # Fermeture de baies plastique / PVC
+    "BT27":  "001710966",   # Fermeture de baies aluminium
+    "BT28":  "001710967",   # Fermeture de baies métal ferreux
+    "BT30":  "001710968",   # Couverture ardoises
+    "BT32":  "001710969",   # Couverture tuiles terre cuite
+    "BT34":  "001710971",   # Couverture zinc et métal
+    "BT38":  "001710972",   # Plomberie sanitaire
+    "BT40":  "001710973",   # Chauffage central
+    "BT41":  "001710974",   # Ventilation et conditionnement d'air
+    "BT47":  "001710979",   # Électricité
+    "BT50":  "001710982",   # Rénovation, entretien tous corps d'état
+    "BT51":  "001710983",   # Menuiseries PVC
+    # Indices Travaux Publics base 2010 — vérifiés sur bdm.insee.fr
+    "TP01":  "001711007",   # Index général tous travaux
+    "TP02":  "001710987",   # Génie civil et ouvrages d'art
+    "TP03a": "001710988",   # Grands terrassements
+    "TP04":  "001710990",   # Fondations et travaux géotechniques
+    "TP05a": "001710991",   # Travaux souterrains traditionnels
+    "TP08":  "001710996",   # Voirie rurale et urbaine
+    "TP09":  "001710997",   # Fabrication et mise en œuvre d'enrobés
+    "TP10b": "001710999",   # Canalisations sans fourniture de tuyaux
 }
 
 _URL_INSEE_SDMX = "https://bdm.insee.fr/series/sdmx/data/SERIES_BDM/{series_id}?lastNObservations=3"
