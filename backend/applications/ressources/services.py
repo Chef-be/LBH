@@ -14,7 +14,7 @@ import logging
 import math
 import re
 import unicodedata
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 import requests
@@ -36,10 +36,10 @@ TAUX_BA_DEFAUT = Decimal("0.06")    # Bénéfice & aléas — 6% PV (plage 4–8
 # = DS × 1.115 / 0.84 ≈ DS × 1.327
 KPV_MEDIAN = (1 + TAUX_FC_DEFAUT + TAUX_FOP_DEFAUT) / (1 - TAUX_FG_DEFAUT - TAUX_BA_DEFAUT)
 
-# URLs des services d'analyse
-URL_SERVICE_PDF = "http://localhost:8011"
-URL_SERVICE_OCR = "http://localhost:8010"
-URL_SERVICE_CAO = "http://localhost:8012"
+# URLs des services (noms de conteneurs Docker Compose)
+URL_SERVICE_PDF = "http://lbh-analyse-pdf:8011"
+URL_SERVICE_OCR = "http://lbh-ocr:8010"
+URL_SERVICE_CAO = "http://lbh-analyse-cao:8012"
 
 # ---------------------------------------------------------------------------
 # Normalisation des désignations (pour détection de similarité)
@@ -58,13 +58,6 @@ _RE_UNITES = re.compile(
 
 
 def normaliser_designation(texte: str) -> str:
-    """
-    Normalise une désignation pour la comparaison de similarité :
-    - Minuscules
-    - Suppression des accents
-    - Suppression des stopwords et unités
-    - Suppression des caractères non alphabétiques
-    """
     texte = texte.lower().strip()
     texte = unicodedata.normalize("NFKD", texte)
     texte = "".join(c for c in texte if not unicodedata.combining(c))
@@ -75,10 +68,6 @@ def normaliser_designation(texte: str) -> str:
 
 
 def similarite_cosinus(texte_a: str, texte_b: str) -> float:
-    """
-    Calcule la similarité cosinus TF-IDF simplifiée entre deux désignations normalisées.
-    Retourne un score entre 0 et 1.
-    """
     mots_a = set(texte_a.split())
     mots_b = set(texte_b.split())
     if not mots_a or not mots_b:
@@ -93,7 +82,6 @@ def similarite_cosinus(texte_a: str, texte_b: str) -> float:
 
 
 def _lire_parametre_decimal(cle: str, defaut: Decimal) -> Decimal:
-    """Lit un paramètre de type décimal depuis la table Parametre."""
     try:
         from applications.parametres.models import Parametre
         p = Parametre.objects.get(cle=cle)
@@ -112,12 +100,10 @@ def _lire_parametre_entier(cle: str, defaut: int) -> int:
 
 
 def seuil_similarite() -> float:
-    """Seuil de similarité pour la fusion des lignes (0 à 1)."""
     return float(_lire_parametre_decimal("RESSOURCES_SEUIL_SIMILARITE_PCT", Decimal("80"))) / 100
 
 
 def retention_devis_jours() -> int:
-    """Durée de rétention des fichiers devis en jours."""
     return _lire_parametre_entier("RESSOURCES_RETENTION_DEVIS_JOURS", 365)
 
 
@@ -127,7 +113,6 @@ def retention_devis_jours() -> int:
 
 
 def indice_bt_courant(code: str = "BT01") -> Optional[Decimal]:
-    """Retourne la valeur la plus récente de l'indice demandé."""
     from .models import IndiceRevisionPrix
     try:
         return IndiceRevisionPrix.objects.filter(code=code).order_by("-date_publication").first().valeur
@@ -136,20 +121,12 @@ def indice_bt_courant(code: str = "BT01") -> Optional[Decimal]:
 
 
 def actualiser_prix(prix_original: Decimal, indice_base: Decimal, indice_actuel: Decimal) -> Decimal:
-    """
-    Actualise un prix selon la formule simple (sans part fixe) :
-      P_actuel = P_original × (indice_actuel / indice_base)
-    """
     if indice_base <= 0:
         return prix_original
     return (prix_original * indice_actuel / indice_base).quantize(Decimal("0.01"))
 
 
 def actualiser_prix_revision(prix_original: Decimal, indice_base: Decimal, indice_actuel: Decimal) -> Decimal:
-    """
-    Actualise selon la formule de révision CCAG Travaux 2021 :
-      P = P0 × [0.125 + 0.875 × (BT / BT0)]
-    """
     if indice_base <= 0:
         return prix_original
     facteur = Decimal("0.125") + Decimal("0.875") * (indice_actuel / indice_base)
@@ -161,10 +138,6 @@ def actualiser_prix_revision(prix_original: Decimal, indice_base: Decimal, indic
 # ---------------------------------------------------------------------------
 
 def _ratios_par_famille(famille: str, sous_famille: str = "") -> tuple[str, str, str, str, str]:
-    """
-    Retourne (kpv_ds_sur_pv, ratio_mo, ratio_matx, ratio_matl, ratio_divers)
-    calibrés sur ARTIPRIX 2025 + Manuel Cusant & Widloecher.
-    """
     ref = (famille + " " + sous_famille).lower()
 
     if any(m in ref for m in ("béton", "banche", "voile", "dalle", "poteau", "poutre", "coffrage")):
@@ -208,7 +181,6 @@ def _ratios_par_famille(famille: str, sous_famille: str = "") -> tuple[str, str,
     if any(m in ref for m in ("démolition", "déconstruction")):
         return "0.68", "0.25", "0.05", "0.65", "0.05"
 
-    # Défaut — tous corps d'état
     return "0.70", "0.33", "0.47", "0.15", "0.05"
 
 
@@ -217,10 +189,6 @@ def estimer_sdp_depuis_prix(
     famille: str = "",
     sous_famille: str = "",
 ) -> dict:
-    """
-    Génère un SDP estimé à partir du prix de vente HT.
-    Retourne un dict avec DS, composantes et Kpv.
-    """
     kpv_ds_pv, r_mo, r_matx, r_matl, r_div = _ratios_par_famille(famille, sous_famille)
     kpv_ds_pv_d = Decimal(kpv_ds_pv)
 
@@ -281,10 +249,6 @@ _MAPPING_CORPS_ETAT = [
 
 
 def detecter_corps_etat(designation: str) -> tuple[str, str]:
-    """
-    Détecte le corps d'état (code lot CCTP) depuis une désignation.
-    Retourne (code, libelle).
-    """
     texte = designation.lower()
     for code, mots_cles in _MAPPING_CORPS_ETAT:
         if any(m in texte for m in mots_cles):
@@ -298,56 +262,169 @@ def detecter_corps_etat(designation: str) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Analyse d'un devis (extraction via service PDF)
+# Parsing du texte brut d'un devis (extrait par le service PDF)
+# ---------------------------------------------------------------------------
+
+# Patterns numériques pour détecter prix/quantité/montant
+_RE_NOMBRE = re.compile(r"^[\d\s]+[.,]?\d*$")
+_RE_PRIX = re.compile(r"([\d\s]{1,10}[.,]\d{1,4})")
+_RE_UNITE = re.compile(
+    r"\b(ml|m\.l\.|m²|m2|m³|m3|m\.3|u\.|ens\.?|forf\.?|kg|t\.?|l\.|h\.|j\.|pse|u|m|%)\b",
+    re.IGNORECASE,
+)
+
+def _to_decimal_safe(val: str) -> Optional[Decimal]:
+    if not val:
+        return None
+    val = val.strip().replace(" ", "").replace(",", ".")
+    try:
+        return Decimal(val)
+    except InvalidOperation:
+        return None
+
+
+def parser_lignes_devis_depuis_texte(texte_brut: str) -> list[dict]:
+    """
+    Parse le texte brut d'un devis BTP pour en extraire les lignes.
+    Stratégie :
+    1. Chercher des lignes avec au moins un montant HT lisible (≥ 1 €)
+    2. Extraire désignation, unité, quantité, prix unitaire, montant
+    """
+    lignes_extraites = []
+
+    # Patterns de lignes de devis typiques
+    # Format : DESIGNATION  UNITE  QUANTITE  PU_HT  MONTANT_HT
+    # Ou : DESIGNATION  PU_HT  (si devis simplifié)
+    _re_ligne_complete = re.compile(
+        r"^(.{5,120}?)\s{2,}"          # désignation (au moins 5 car, séparée par ≥2 espaces)
+        r"(m[l²³23]?|u\.?|ens\.?|forf\.?|kg|t|h|j)\s+"  # unité
+        r"([\d\s]+[.,]\d+)\s+"         # quantité
+        r"([\d\s]+[.,]\d+)\s+"         # prix unitaire HT
+        r"([\d\s]+[.,]\d+)\s*$",       # montant HT
+        re.IGNORECASE,
+    )
+
+    _re_ligne_simple = re.compile(
+        r"^(.{10,200}?)\s{2,}"         # désignation (≥10 car, séparée par ≥2 espaces)
+        r"([\d\s]{1,12}[.,]\d{2})\s*$",  # montant ou PU en fin de ligne
+        re.IGNORECASE,
+    )
+
+    # Lignes avec motif montant explicite (chercher des montants ≥ 10 €)
+    _re_montant_fin = re.compile(
+        r"^(.{10,200}?)\s{2,}([\d ]{1,10}[,.]\d{2})\s*$"
+    )
+
+    for ligne in texte_brut.splitlines():
+        ligne = ligne.strip()
+        if not ligne or len(ligne) < 10:
+            continue
+        # Ignorer les lignes d'en-tête typiques
+        if re.match(r"^(désignation|libellé|description|article|total|sous-total|tva|ttc|ht|page)", ligne, re.IGNORECASE):
+            continue
+
+        # Tenter la reconnaissance de ligne complète
+        m = _re_ligne_complete.match(ligne)
+        if m:
+            designation = m.group(1).strip()
+            unite = m.group(2).strip()
+            quantite = _to_decimal_safe(m.group(3))
+            prix_u = _to_decimal_safe(m.group(4))
+            montant = _to_decimal_safe(m.group(5))
+            if prix_u and prix_u >= Decimal("1") and designation:
+                lignes_extraites.append({
+                    "designation": designation,
+                    "unite": unite,
+                    "quantite": float(quantite or 1),
+                    "prix_unitaire": float(prix_u),
+                    "montant": float(montant or (prix_u * (quantite or 1))),
+                })
+                continue
+
+        # Tenter la reconnaissance de ligne simplifiée (désig + montant en fin)
+        m2 = _re_montant_fin.match(ligne)
+        if m2:
+            designation = m2.group(1).strip()
+            montant = _to_decimal_safe(m2.group(2))
+            if montant and montant >= Decimal("10") and designation and len(designation) >= 10:
+                # Chercher une unité dans la désignation
+                unite = ""
+                u_m = _RE_UNITE.search(designation)
+                if u_m:
+                    unite = u_m.group(0)
+                    designation = designation[:u_m.start()].strip()
+                lignes_extraites.append({
+                    "designation": designation,
+                    "unite": unite,
+                    "quantite": 1.0,
+                    "prix_unitaire": float(montant),
+                    "montant": float(montant),
+                })
+                continue
+
+    # Dédoublonnage par désignation normalisée
+    vus = set()
+    lignes_dedup = []
+    for l in lignes_extraites:
+        cle = normaliser_designation(l["designation"])[:60]
+        if cle not in vus:
+            vus.add(cle)
+            lignes_dedup.append(l)
+
+    logger.info("Parser devis : %d lignes trouvées dans le texte brut", len(lignes_dedup))
+    return lignes_dedup
+
+
+# ---------------------------------------------------------------------------
+# Analyse d'un devis (via service PDF → texte brut → parsing)
 # ---------------------------------------------------------------------------
 
 
 def analyser_devis(devis_analyse) -> list[dict]:
     """
-    Envoie le fichier au service d'analyse PDF (port 8011) et retourne
-    la liste des lignes extraites sous forme de dict normalisé.
-
-    Format de retour :
-    [
-        {
-            "designation": str,
-            "unite": str,
-            "quantite": Decimal,
-            "prix_ht": Decimal,
-            "montant_ht": Decimal,
-        },
-        ...
-    ]
+    Envoie le fichier au service PDF (lbh-analyse-pdf:8011/pdf/analyser),
+    récupère le texte brut, le parse pour extraire les lignes, et les
+    enregistre en LignePrixMarche.
     """
     from .models import LignePrixMarche
 
-    fichier_path = devis_analyse.fichier.path if hasattr(devis_analyse.fichier, "path") else None
+    texte_brut = ""
 
-    lignes_extraites = []
-
-    # Tentative d'appel au service PDF
     try:
         with devis_analyse.fichier.open("rb") as f:
             resp = requests.post(
-                f"{URL_SERVICE_PDF}/extraire-tableau/",
-                files={"fichier": (devis_analyse.nom_original, f)},
+                f"{URL_SERVICE_PDF}/pdf/analyser",
+                files={"fichier": (devis_analyse.nom_original, f, "application/pdf")},
                 timeout=120,
             )
             resp.raise_for_status()
-            lignes_brutes = resp.json().get("lignes", [])
+            data = resp.json()
+            texte_brut = data.get("texte_brut", "")
+            logger.info(
+                "Service PDF : %d caractères extraits, %d tableaux, %d images",
+                len(texte_brut),
+                data.get("nb_tableaux", 0),
+                data.get("nb_images", 0),
+            )
     except requests.exceptions.ConnectionError:
-        logger.warning("Service PDF non disponible (port 8011) — extraction simulée")
-        lignes_brutes = []
+        logger.warning("Service PDF non disponible (lbh-analyse-pdf:8011)")
+    except requests.exceptions.HTTPError as exc:
+        logger.error("Erreur HTTP service PDF : %s", exc)
     except Exception as exc:
         logger.error("Erreur service PDF : %s", exc)
-        lignes_brutes = []
+
+    # Parser le texte brut
+    lignes_brutes = parser_lignes_devis_depuis_texte(texte_brut) if texte_brut else []
 
     # Récupérer l'indice courant pour actualisation
     indice_actuel = indice_bt_courant(devis_analyse.indice_base_code or "BT01")
     indice_base = devis_analyse.indice_base_valeur
 
+    lignes_extraites = []
+    seuil = seuil_similarite()
+
     with transaction.atomic():
-        for i, ligne in enumerate(lignes_brutes):
+        for ligne in lignes_brutes:
             designation = str(ligne.get("designation", "")).strip()
             if not designation:
                 continue
@@ -355,53 +432,44 @@ def analyser_devis(devis_analyse) -> list[dict]:
             unite = str(ligne.get("unite", "")).strip()
             try:
                 prix_ht = Decimal(str(ligne.get("prix_unitaire", 0)))
-            except Exception:
+            except (InvalidOperation, TypeError):
                 prix_ht = Decimal("0")
             try:
                 montant_ht = Decimal(str(ligne.get("montant", 0)))
-            except Exception:
+            except (InvalidOperation, TypeError):
                 montant_ht = Decimal("0")
             try:
                 quantite = Decimal(str(ligne.get("quantite", 1)))
-            except Exception:
+            except (InvalidOperation, TypeError):
                 quantite = Decimal("1")
 
             if prix_ht <= 0 and montant_ht > 0 and quantite > 0:
                 prix_ht = (montant_ht / quantite).quantize(Decimal("0.0001"))
 
-            # Détection corps d'état
+            if prix_ht <= 0:
+                continue
+
             code_lot, libelle_lot = detecter_corps_etat(designation)
+            sdp = estimer_sdp_depuis_prix(prix_ht, libelle_lot)
 
-            # SDP estimé
-            sdp = estimer_sdp_depuis_prix(prix_ht) if prix_ht > 0 else {}
-
-            # Actualisation
             prix_actualise = None
-            if prix_ht > 0 and indice_base and indice_actuel:
+            if indice_base and indice_actuel:
                 prix_actualise = actualiser_prix(prix_ht, indice_base, indice_actuel)
 
-            # Normalisation pour similarité
             designation_norm = normaliser_designation(designation)
-
-            # Vérifier si une ligne similaire existe déjà
-            seuil = seuil_similarite()
             ligne_existante = trouver_ligne_similaire(designation_norm, code_lot, seuil)
 
             if ligne_existante:
-                # Fusionner : moyenne pondérée
                 n = ligne_existante.nb_occurrences
-                nouveau_prix = (
-                    (ligne_existante.prix_ht_original * n + prix_ht) / (n + 1)
-                ).quantize(Decimal("0.0001"))
+                nouveau_prix = ((ligne_existante.prix_ht_original * n + prix_ht) / (n + 1)).quantize(Decimal("0.0001"))
                 ligne_existante.prix_ht_original = nouveau_prix
                 ligne_existante.nb_occurrences = n + 1
                 ligne_existante.est_ligne_commune = True
-                if prix_actualise:
-                    ligne_existante.prix_ht_actualise = actualiser_prix(
-                        nouveau_prix, indice_base, indice_actuel
-                    )
+                if prix_actualise and indice_base:
+                    ligne_existante.prix_ht_actualise = actualiser_prix(nouveau_prix, indice_base, indice_actuel)
                 ligne_existante.save()
                 ligne_marche = ligne_existante
+                est_fusion = True
             else:
                 ligne_marche = LignePrixMarche.objects.create(
                     devis_source=devis_analyse,
@@ -423,6 +491,7 @@ def analyser_devis(devis_analyse) -> list[dict]:
                     pct_materiaux_estime=sdp.get("pct_materiaux"),
                     pct_materiel_estime=sdp.get("pct_materiel"),
                 )
+                est_fusion = False
 
             lignes_extraites.append({
                 "id": str(ligne_marche.id),
@@ -434,7 +503,7 @@ def analyser_devis(devis_analyse) -> list[dict]:
                 "corps_etat": code_lot,
                 "corps_etat_libelle": libelle_lot,
                 "sdp": {k: float(v) for k, v in sdp.items() if isinstance(v, Decimal)},
-                "est_fusion": ligne_existante is not None,
+                "est_fusion": est_fusion,
             })
 
     return lignes_extraites
@@ -445,7 +514,6 @@ def trouver_ligne_similaire(
     corps_etat: str,
     seuil: float,
 ):
-    """Cherche une LignePrixMarche similaire dans le même corps d'état."""
     from .models import LignePrixMarche
 
     candidats = LignePrixMarche.objects.filter(
@@ -467,15 +535,11 @@ def trouver_ligne_similaire(
 
 
 # ---------------------------------------------------------------------------
-# Actualisation périodique (appelée par Celery)
+# Actualisation périodique
 # ---------------------------------------------------------------------------
 
 
 def actualiser_toutes_les_lignes(code_indice: str = "BT01") -> int:
-    """
-    Met à jour le prix actualisé de toutes les lignes de prix marché
-    en utilisant le dernier indice publié.
-    """
     from .models import LignePrixMarche
 
     indice_val = indice_bt_courant(code_indice)
@@ -491,10 +555,7 @@ def actualiser_toutes_les_lignes(code_indice: str = "BT01") -> int:
 
     nb = 0
     for ligne in lignes.iterator(chunk_size=500):
-        ancien = ligne.prix_ht_actualise
-        ligne.prix_ht_actualise = actualiser_prix(
-            ligne.prix_ht_original, ligne.indice_valeur_base, indice_val
-        )
+        ligne.prix_ht_actualise = actualiser_prix(ligne.prix_ht_original, ligne.indice_valeur_base, indice_val)
         ligne.indice_valeur_actuelle = indice_val
         ligne.date_indice_actualisation = timezone.now().date()
         ligne.save(update_fields=["prix_ht_actualise", "indice_valeur_actuelle", "date_indice_actualisation"])
@@ -510,10 +571,6 @@ def actualiser_toutes_les_lignes(code_indice: str = "BT01") -> int:
 
 
 def capitaliser_ligne_en_bibliotheque(ligne_marche) -> "LignePrixBibliotheque":
-    """
-    Crée ou met à jour une LignePrixBibliotheque depuis une LignePrixMarche,
-    et génère l'article CCTP correspondant.
-    """
     from applications.bibliotheque.models import LignePrixBibliotheque
     from applications.pieces_ecrites.models import ArticleCCTP, LotCCTP
     from applications.bibliotheque.services import generer_sous_details_depuis_composantes
@@ -522,7 +579,6 @@ def capitaliser_ligne_en_bibliotheque(ligne_marche) -> "LignePrixBibliotheque":
     sdp = estimer_sdp_depuis_prix(prix_ref, ligne_marche.corps_etat_libelle)
 
     with transaction.atomic():
-        # Lot CCTP
         lot = None
         if ligne_marche.corps_etat:
             try:
@@ -530,7 +586,6 @@ def capitaliser_ligne_en_bibliotheque(ligne_marche) -> "LignePrixBibliotheque":
             except LotCCTP.DoesNotExist:
                 pass
 
-        # Ligne bibliothèque
         ligne_bib, creee = LignePrixBibliotheque.objects.update_or_create(
             designation_courte=ligne_marche.designation[:200],
             defaults={
@@ -547,15 +602,12 @@ def capitaliser_ligne_en_bibliotheque(ligne_marche) -> "LignePrixBibliotheque":
             },
         )
 
-        # Lier la ligne marché
         ligne_marche.ligne_bibliotheque = ligne_bib
         ligne_marche.save(update_fields=["ligne_bibliotheque"])
 
-        # Générer les sous-détails
         if creee:
             generer_sous_details_depuis_composantes(ligne_bib, forcer=True)
 
-        # Article CCTP
         if lot:
             ArticleCCTP.objects.get_or_create(
                 intitule=ligne_marche.designation[:200],
@@ -578,8 +630,9 @@ def capitaliser_ligne_en_bibliotheque(ligne_marche) -> "LignePrixBibliotheque":
 
 def analyser_estimation_source(source) -> dict:
     """
-    Analyse un document source d'estimation (PDF, image, archive)
-    via les services OCR et CAO pour extraire les éléments de fiche ratio.
+    Analyse un document source d'estimation via le service PDF et/ou OCR.
+    Le service CAO est utilisé pour les fichiers DXF.
+    Retourne un dict compatible avec les champs de FicheRatioCout.
     """
     resultats = {
         "shon": None,
@@ -592,48 +645,125 @@ def analyser_estimation_source(source) -> dict:
         "observations": "",
     }
 
-    # Appel au service CAO pour extraction des surfaces
-    try:
-        with source.fichier.open("rb") as f:
-            resp = requests.post(
-                f"{URL_SERVICE_CAO}/analyser-plan/",
-                files={"fichier": (source.nom_original, f)},
-                timeout=180,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            resultats.update({
-                "shon": _to_decimal(data.get("shon")),
-                "shab": _to_decimal(data.get("shab")),
-                "emprise_sol": _to_decimal(data.get("emprise_sol")),
-                "niveaux_hs": data.get("niveaux_hors_sol"),
-                "niveaux_ss": data.get("niveaux_sous_sol", 0),
-            })
-    except requests.exceptions.ConnectionError:
-        logger.warning("Service CAO non disponible (port 8012)")
-    except Exception as exc:
-        logger.error("Erreur service CAO : %s", exc)
+    nom = (source.nom_original or "").lower()
+    est_dxf = nom.endswith(".dxf") or nom.endswith(".dwg")
 
-    # Appel OCR si image ou PDF scanné
-    if not resultats["cout_total_ht"]:
+    # ---- Service CAO (fichiers DXF) ----
+    if est_dxf:
         try:
             with source.fichier.open("rb") as f:
                 resp = requests.post(
-                    f"{URL_SERVICE_OCR}/extraire-texte/",
+                    f"{URL_SERVICE_CAO}/cao/analyser",
+                    files={"fichier": (source.nom_original, f)},
+                    timeout=180,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                # Extraire l'emprise (bounding box en unités du DXF)
+                emprise = data.get("emprise") or {}
+                if emprise:
+                    xmin = emprise.get("xmin", 0)
+                    xmax = emprise.get("xmax", 0)
+                    ymin = emprise.get("ymin", 0)
+                    ymax = emprise.get("ymax", 0)
+                    largeur = abs(xmax - xmin)
+                    hauteur = abs(ymax - ymin)
+                    # En DXF, les coordonnées sont souvent en millimètres ou en mètres
+                    # Si les dimensions semblent en mm (> 1000), convertir en m
+                    if largeur > 1000 or hauteur > 1000:
+                        largeur /= 1000
+                        hauteur /= 1000
+                    superficie = round(largeur * hauteur, 2)
+                    if superficie > 1:
+                        resultats["emprise_sol"] = Decimal(str(superficie))
+                        # Estimation SHON depuis emprise × nb niveaux probable
+                        resultats["shon"] = resultats["emprise_sol"]
+
+                # Extraire le nb de niveaux depuis les calques
+                calques = [c.lower() for c in data.get("calques", [])]
+                hs = sum(1 for c in calques if re.search(r"(niv|niveau|etage|r[+]\d|rdc)", c))
+                ss = sum(1 for c in calques if re.search(r"(ss|sous.sol|sous_sol|basement)", c))
+                if hs > 0:
+                    resultats["niveaux_hs"] = hs
+                if ss > 0:
+                    resultats["niveaux_ss"] = ss
+
+                logger.info(
+                    "Service CAO : %d calques, %d entités, emprise=%s m²",
+                    data.get("nb_calques", 0),
+                    data.get("nb_entites", 0),
+                    resultats.get("emprise_sol"),
+                )
+        except requests.exceptions.ConnectionError:
+            logger.warning("Service CAO non disponible (lbh-analyse-cao:8012)")
+        except Exception as exc:
+            logger.error("Erreur service CAO : %s", exc)
+
+    # ---- Service PDF (tous les fichiers PDF/image) ----
+    if not est_dxf:
+        try:
+            with source.fichier.open("rb") as f:
+                resp = requests.post(
+                    f"{URL_SERVICE_PDF}/pdf/analyser",
+                    files={"fichier": (source.nom_original, f, "application/pdf")},
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                texte = data.get("texte_brut", "")
+                if texte:
+                    montant = _extraire_montant_total(texte)
+                    if montant:
+                        resultats["cout_total_ht"] = montant
+                        resultats["observations"] = f"Montant extrait du PDF : {montant} €"
+                    # Surfaces
+                    shon = _extraire_surface(texte, ("shon", "surface hors œuvre nette", "surface totale"))
+                    shab = _extraire_surface(texte, ("shab", "surface habitable", "surface de plancher"))
+                    emprise = _extraire_surface(texte, ("emprise", "emprise au sol"))
+                    if shon:
+                        resultats["shon"] = shon
+                    if shab:
+                        resultats["shab"] = shab
+                    if emprise:
+                        resultats["emprise_sol"] = emprise
+                    # Niveaux
+                    niv = _extraire_niveaux(texte)
+                    if niv:
+                        resultats["niveaux_hs"] = niv
+                    # Type fondation
+                    resultats["type_fondation"] = _detecter_fondation(texte)
+        except requests.exceptions.ConnectionError:
+            logger.warning("Service PDF non disponible (lbh-analyse-pdf:8011)")
+        except Exception as exc:
+            logger.error("Erreur service PDF estimation : %s", exc)
+
+    # ---- Service OCR pour les images ----
+    nom_base = nom.rsplit(".", 1)[-1] if "." in nom else ""
+    est_image = nom_base in ("jpg", "jpeg", "png", "tif", "tiff", "bmp")
+
+    if est_image and not resultats["cout_total_ht"]:
+        try:
+            with source.fichier.open("rb") as f:
+                resp = requests.post(
+                    f"{URL_SERVICE_OCR}/ocr/extraire",
                     files={"fichier": (source.nom_original, f)},
                     timeout=120,
                 )
                 resp.raise_for_status()
-                texte = resp.json().get("texte", "")
-                # Extraction du coût total depuis le texte
-                montant = _extraire_montant_total(texte)
-                if montant:
-                    resultats["cout_total_ht"] = montant
-                    resultats["observations"] = f"Montant extrait par OCR : {montant} €"
-                # Détection fondation
-                resultats["type_fondation"] = _detecter_fondation(texte)
+                data = resp.json()
+                texte = data.get("texte", "")
+                if texte:
+                    montant = _extraire_montant_total(texte)
+                    if montant:
+                        resultats["cout_total_ht"] = montant
+                        confiance = data.get("confiance", 0)
+                        resultats["observations"] = f"Montant extrait par OCR (confiance {confiance:.0%}) : {montant} €"
+                    resultats["type_fondation"] = _detecter_fondation(texte)
+                    shon = _extraire_surface(texte, ("shon", "surface hors œuvre"))
+                    if shon:
+                        resultats["shon"] = shon
         except requests.exceptions.ConnectionError:
-            logger.warning("Service OCR non disponible (port 8010)")
+            logger.warning("Service OCR non disponible (lbh-ocr:8010)")
         except Exception as exc:
             logger.error("Erreur service OCR : %s", exc)
 
@@ -650,25 +780,62 @@ def _to_decimal(val) -> Optional[Decimal]:
 
 
 def _extraire_montant_total(texte: str) -> Optional[Decimal]:
-    """Extrait un montant total depuis un texte OCR (heuristique)."""
     patterns = [
-        r"total\s+ht\s*[:\s]+([0-9\s.,]+)\s*€",
-        r"montant\s+ht\s*[:\s]+([0-9\s.,]+)\s*€",
-        r"total\s+général\s*[:\s]+([0-9\s.,]+)\s*€",
+        r"total\s+(?:général\s+)?ht\s*[:\s]+([0-9\s]+[.,]\d{2})\s*€?",
+        r"montant\s+ht\s*[:\s]+([0-9\s]+[.,]\d{2})\s*€?",
+        r"total\s+(?:général|travaux)\s*[:\s]+([0-9\s]+[.,]\d{2})\s*€?",
+        r"([0-9\s]{4,12}[.,]\d{2})\s*€?\s*(?:ht|hors\s+taxe)\s*$",
     ]
     for pattern in patterns:
-        m = re.search(pattern, texte, re.IGNORECASE)
+        m = re.search(pattern, texte, re.IGNORECASE | re.MULTILINE)
         if m:
             valeur_str = m.group(1).replace(" ", "").replace(",", ".")
             try:
-                return Decimal(valeur_str)
-            except Exception:
+                val = Decimal(valeur_str)
+                if val > 100:  # Ignorer les valeurs absurdes
+                    return val
+            except InvalidOperation:
                 pass
     return None
 
 
+def _extraire_surface(texte: str, cles: tuple) -> Optional[Decimal]:
+    """Extrait une surface en m² depuis le texte."""
+    for cle in cles:
+        pattern = rf"{re.escape(cle)}\s*[=:]*\s*([\d\s]+[.,]?\d*)\s*m[²2]?"
+        m = re.search(pattern, texte, re.IGNORECASE)
+        if m:
+            val = _to_decimal_safe(m.group(1))
+            if val and val > 1:
+                return val
+    return None
+
+
+def _extraire_niveaux(texte: str) -> Optional[int]:
+    """Extrait le nombre de niveaux hors sol depuis le texte."""
+    patterns = [
+        r"(r\+\d+)",
+        r"(\d+)\s+(?:niveaux?|étages?)\s+(?:hors\s+sol|hs)",
+        r"(\d+)\s+niveaux?\s+au-dessus",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, texte, re.IGNORECASE)
+        if m:
+            g = m.group(1)
+            if g.lower().startswith("r+"):
+                try:
+                    return int(g[2:]) + 1  # R+3 = 4 niveaux
+                except ValueError:
+                    pass
+            else:
+                try:
+                    return int(g)
+                except ValueError:
+                    pass
+    return None
+
+
 def _detecter_fondation(texte: str) -> str:
-    """Détecte le type de fondation depuis un texte OCR."""
     texte = texte.lower()
     if "micropieu" in texte:
         return "profonde_micropieux"
@@ -676,7 +843,7 @@ def _detecter_fondation(texte: str) -> str:
         return "profonde_paroi_moulee"
     if "pieu métallique" in texte or "pieu metallique" in texte:
         return "profonde_pieux_metalliques"
-    if "pieu" in texte or "pieu foré" in texte:
+    if "pieu foré" in texte or "pieux béton" in texte or "pieux beton" in texte:
         return "profonde_pieux_beton"
     if "radier" in texte:
         return "superficielle_radier"

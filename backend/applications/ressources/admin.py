@@ -27,11 +27,11 @@ class LignePrixMarcheInline(admin.TabularInline):
 
 @admin.register(DevisAnalyse)
 class DevisAnalyseAdmin(admin.ModelAdmin):
-    list_display = ("nom_original", "entreprise", "localite", "statut", "capitalise", "date_analyse")
-    list_filter = ("statut", "capitalise", "type_document", "corps_etat_principal")
+    list_display = ("nom_original", "entreprise", "localite", "statut", "capitalise", "date_creation")
+    list_filter = ("statut", "capitalise", "type_document")
     search_fields = ("nom_original", "entreprise", "localite")
-    readonly_fields = ("date_analyse", "date_modification")
-    ordering = ("-date_analyse",)
+    readonly_fields = ("date_creation", "date_modification")
+    ordering = ("-date_creation",)
     inlines = [LignePrixMarcheInline]
 
 
@@ -46,15 +46,15 @@ class LignePrixMarcheAdmin(admin.ModelAdmin):
 
 @admin.register(EstimationSource)
 class EstimationSourceAdmin(admin.ModelAdmin):
-    list_display = ("nom_original", "type_document", "statut", "date_analyse")
+    list_display = ("nom_original", "type_document", "statut", "date_creation")
     list_filter = ("statut", "type_document")
     search_fields = ("nom_original",)
-    ordering = ("-date_analyse",)
+    ordering = ("-date_creation",)
 
 
 @admin.register(FicheRatioCout)
 class FicheRatioCoutAdmin(admin.ModelAdmin):
-    list_display = ("intitule", "type_projet", "localite", "annee_reference", "cout_total", "cout_m2_shon")
+    list_display = ("intitule", "type_projet", "localite", "annee_reference", "cout_total_ht", "cout_m2_shon")
     list_filter = ("type_projet", "type_fondation")
     search_fields = ("intitule", "localite")
-    ordering = ("-annee_reference",)
+    ordering = ("-date_creation",)

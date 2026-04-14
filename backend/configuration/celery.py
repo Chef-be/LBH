@@ -56,6 +56,16 @@ application_celery.conf.beat_schedule = {
         "task": "bibliotheque.lier_auto_prix_articles",
         "schedule": crontab(hour=3, minute=30),
     },
+    # Actualisation des indices de révision des prix — chaque mois le 1er à 06h00
+    "actualiser-indices-revision-prix": {
+        "task": "applications.ressources.taches.tache_actualiser_indices",
+        "schedule": crontab(hour=6, minute=0, day_of_month=1),
+    },
+    # Suppression des devis et estimations expirés — chaque jour à 04h00
+    "supprimer-devis-expires": {
+        "task": "applications.ressources.taches.tache_supprimer_devis_expires",
+        "schedule": crontab(hour=4, minute=0),
+    },
 }
 
 application_celery.conf.timezone = "Europe/Paris"
