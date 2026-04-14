@@ -628,6 +628,8 @@ def extraire_metadonnees_devis(texte_brut: str, nom_fichier: str = "") -> dict:
 
     # --- Indice BT dominant (corps d'état le plus mentionné) ---
     familles = {
+        "BTM":  ["bâtiment", "construction", "réhabilitation", "rénovation"],
+        "TPM":  ["travaux publics", "infrastructure", "génie civil"],
         "BT01": ["béton", "maçonnerie", "gros oeuvre", "coffrages", "ferraillage"],
         "BT28": ["peinture", "enduit peinture", "lasure"],
         "BT37": ["menuiserie bois", "parquet", "escalier bois"],

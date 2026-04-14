@@ -19,6 +19,8 @@ class IndiceRevisionPrix(models.Model):
     """
 
     CODE_CHOICES = [
+        ("BTM", "BTM — Bâtiment Tous Métiers (agrégé)"),
+        ("TPM", "TPM — Travaux Publics Tous Métiers (agrégé)"),
         ("BT01", "BT01 — Gros œuvre / Bâtiment général"),
         ("BT02", "BT02 — Maçonnerie"),
         ("BT10", "BT10 — Charpente bois"),

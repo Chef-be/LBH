@@ -86,7 +86,7 @@ def tache_actualiser_indices() -> dict:
     from .services import actualiser_toutes_les_lignes
 
     total = 0
-    for code in ["BT01", "BT02", "TP01"]:
+    for code in ["BTM", "TPM", "BT01", "BT02", "TP01"]:
         nb = actualiser_toutes_les_lignes(code)
         total += nb
         logger.info("Actualisation %s : %d lignes", code, nb)

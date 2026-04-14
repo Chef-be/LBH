@@ -90,7 +90,7 @@ const TYPES_DOCUMENT = [
   { value: "autre", label: "Autre" },
 ];
 
-const INDICES_DISPONIBLES = ["BT01", "BT02", "BT28", "BT37", "BT40", "BT50", "BT51", "BT60", "TP01"];
+const INDICES_DISPONIBLES = ["BTM", "TPM", "BT01", "BT02", "BT10", "BT20", "BT28", "BT37", "BT40", "BT50", "BT51", "BT60", "TP01", "TP05", "TP09"];
 
 // ---------------------------------------------------------------------------
 // Composant ligne SDP
