@@ -45,7 +45,42 @@ export class ErreurApi extends Error {
   }
 }
 
-function extraireMessageErreur(donnees: unknown): string | null {
+// Table de traduction des noms de champs API → libellés lisibles
+const NOMS_CHAMPS: Record<string, string> = {
+  intitule: "Intitulé",
+  designation: "Désignation",
+  designation_courte: "Désignation courte",
+  corps_article: "Corps de l'article",
+  chapitre: "Chapitre",
+  numero_article: "Numéro d'article",
+  lot: "Corps d'état",
+  reference: "Référence",
+  code: "Code",
+  libelle: "Libellé",
+  nom: "Nom",
+  prenom: "Prénom",
+  email: "Adresse de courriel",
+  mot_de_passe: "Mot de passe",
+  entreprise: "Entreprise",
+  localite: "Localité",
+  date_emission: "Date d'émission",
+  unite: "Unité",
+  prix_ht: "Prix HT",
+  prix_vente_unitaire: "Prix de vente unitaire",
+  debourse_sec_unitaire: "Déboursé sec unitaire",
+  fichier: "Fichier",
+  titre: "Titre",
+  description: "Description",
+  type_projet: "Type de projet",
+};
+
+function nomChampLisible(cle: string): string {
+  if (NOMS_CHAMPS[cle]) return NOMS_CHAMPS[cle];
+  // Transformation de repli : underscores → espaces, première lettre en majuscule
+  return cle.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function extraireMessageErreur(donnees: unknown, _profondeur = 0): string | null {
   if (!donnees || typeof donnees !== "object") return null;
 
   const enregistrement = donnees as Record<string, unknown>;
@@ -61,15 +96,17 @@ function extraireMessageErreur(donnees: unknown): string | null {
 
   for (const [cle, valeur] of Object.entries(enregistrement)) {
     if (cle === "detail" || cle === "code" || cle === "non_field_errors") continue;
+    const libelle = _profondeur === 0 ? nomChampLisible(cle) : null;
+    const prefixe = libelle ? `${libelle} : ` : "";
     if (typeof valeur === "string" && valeur.trim()) {
-      return valeur;
+      return `${prefixe}${valeur}`;
     }
     if (Array.isArray(valeur) && typeof valeur[0] === "string") {
-      return valeur[0];
+      return `${prefixe}${valeur[0]}`;
     }
-    const messageImbrique = extraireMessageErreur(valeur);
+    const messageImbrique = extraireMessageErreur(valeur, _profondeur + 1);
     if (messageImbrique) {
-      return messageImbrique;
+      return libelle ? `${libelle} : ${messageImbrique}` : messageImbrique;
     }
   }
 
