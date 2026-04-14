@@ -10,6 +10,7 @@ urlpatterns = [
     path("indices/<uuid:pk>/", views.VueDetailIndice.as_view(), name="ressources-indice-detail"),
 
     # Devis analysés
+    path("devis/previsualiser/", views.vue_previsualiser_devis, name="ressources-devis-previsualiser"),
     path("devis/", views.VueListeDevis.as_view(), name="ressources-devis"),
     path("devis/<uuid:pk>/", views.VueDetailDevis.as_view(), name="ressources-devis-detail"),
     path("devis/<uuid:pk>/relancer/", views.vue_relancer_analyse, name="ressources-devis-relancer"),

@@ -78,6 +78,29 @@ class VueDetailDevis(generics.RetrieveUpdateDestroyAPIView):
 
 
 @api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def vue_previsualiser_devis(request):
+    """
+    Analyse rapidement un fichier PDF pour en extraire les métadonnées suggérées
+    (entreprise, localité, date, type de document, indice BT dominant).
+    Ne crée aucun enregistrement en base — utilisé pour pré-remplir le formulaire.
+    """
+    from .services import previsualiser_devis_depuis_fichier
+
+    fichier = request.FILES.get("fichier")
+    if not fichier:
+        return Response({"detail": "Fichier manquant."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Lire les octets en mémoire (limité à 20 Mo)
+    if fichier.size > 20 * 1024 * 1024:
+        return Response({"detail": "Fichier trop volumineux (max 20 Mo)."}, status=status.HTTP_400_BAD_REQUEST)
+
+    contenu = fichier.read()
+    metadonnees = previsualiser_devis_depuis_fichier(contenu, fichier.name)
+    return Response(metadonnees)
+
+
+@api_view(["POST"])
 def vue_relancer_analyse(request, pk):
     """Relance l'analyse d'un devis."""
     devis = generics.get_object_or_404(DevisAnalyse, pk=pk)

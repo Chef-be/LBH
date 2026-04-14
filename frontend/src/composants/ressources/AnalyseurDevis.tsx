@@ -7,12 +7,20 @@ import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
 import {
   Upload, FileText, CheckCircle2, AlertCircle, Clock,
   RefreshCw, BookOpen, ChevronDown, ChevronRight,
-  TrendingUp, BarChart3, Layers, X, ExternalLink,
+  X, Sparkles, Send,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+interface MetadonneesPrevisualisation {
+  entreprise: string;
+  localite: string;
+  date_emission: string;
+  type_document: string;
+  indice_base_code: string;
+}
 
 interface DevisAnalyse {
   id: string;
@@ -46,7 +54,6 @@ interface LignePrixMarche {
   est_ligne_commune: boolean;
   nb_occurrences: number;
   ligne_bibliotheque: string | null;
-  sdp: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +90,7 @@ const TYPES_DOCUMENT = [
   { value: "autre", label: "Autre" },
 ];
 
-const INDICES_DISPONIBLES = ["BT01", "BT02", "BT28", "BT37", "BT50", "BT60", "TP01"];
+const INDICES_DISPONIBLES = ["BT01", "BT02", "BT28", "BT37", "BT40", "BT50", "BT51", "BT60", "TP01"];
 
 // ---------------------------------------------------------------------------
 // Composant ligne SDP
@@ -133,7 +140,6 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
 
       {deplie && (
         <div className="border-t border-slate-100 px-4 py-4 bg-slate-50 space-y-3">
-          {/* SDP estimé */}
           {ds > 0 && (
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
@@ -146,35 +152,25 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
                 </div>
                 <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
                   <p className="text-slate-400">MO</p>
-                  <p className="font-mono font-bold text-indigo-600 mt-0.5">
-                    {ligne.pct_mo_estime?.toFixed(0)}%
-                  </p>
+                  <p className="font-mono font-bold text-indigo-600 mt-0.5">{ligne.pct_mo_estime?.toFixed(0)}%</p>
                   <p className="text-slate-400 text-xs">{formaterMontant((ds * (ligne.pct_mo_estime || 0)) / 100)}</p>
                 </div>
                 <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
                   <p className="text-slate-400">Matériaux</p>
-                  <p className="font-mono font-bold text-emerald-600 mt-0.5">
-                    {ligne.pct_materiaux_estime?.toFixed(0)}%
-                  </p>
+                  <p className="font-mono font-bold text-emerald-600 mt-0.5">{ligne.pct_materiaux_estime?.toFixed(0)}%</p>
                   <p className="text-slate-400 text-xs">{formaterMontant((ds * (ligne.pct_materiaux_estime || 0)) / 100)}</p>
                 </div>
                 <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
                   <p className="text-slate-400">Matériel</p>
-                  <p className="font-mono font-bold text-amber-600 mt-0.5">
-                    {ligne.pct_materiel_estime?.toFixed(0)}%
-                  </p>
+                  <p className="font-mono font-bold text-amber-600 mt-0.5">{ligne.pct_materiel_estime?.toFixed(0)}%</p>
                   <p className="text-slate-400 text-xs">{formaterMontant((ds * (ligne.pct_materiel_estime || 0)) / 100)}</p>
                 </div>
               </div>
-
-              {/* Barre DS */}
               <div className="mt-2 flex h-2 rounded-full overflow-hidden bg-slate-200">
                 <div style={{ width: `${ligne.pct_mo_estime || 0}%`, backgroundColor: "#6366f1" }} title="MO" />
                 <div style={{ width: `${ligne.pct_materiaux_estime || 0}%`, backgroundColor: "#10b981" }} title="Matériaux" />
                 <div style={{ width: `${ligne.pct_materiel_estime || 0}%`, backgroundColor: "#f59e0b" }} title="Matériel" />
               </div>
-
-              {/* Chaîne DS → PV */}
               <div className="mt-3 space-y-0.5 text-xs">
                 {(() => {
                   const fc = ds * 0.10;
@@ -197,8 +193,6 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
               </div>
             </div>
           )}
-
-          {/* Cohérence Kpv */}
           {kpv > 0 && (
             <div className={clsx(
               "rounded-lg px-3 py-2 text-xs font-medium flex items-center justify-between",
@@ -267,7 +261,6 @@ function CarteDevis({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      {/* En-tête */}
       <div className="flex items-center gap-4 px-5 py-4">
         <FileText className="h-5 w-5 text-slate-400 flex-shrink-0" />
         <div className="flex-1 min-w-0">
@@ -278,24 +271,16 @@ function CarteDevis({
             {devis.date_emission && <span>· {new Date(devis.date_emission).toLocaleDateString("fr-FR")}</span>}
           </p>
         </div>
-
         <span className={clsx("flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1", config.classe)}>
           <Icone className="h-3 w-3" />
           {config.label}
         </span>
-
         {devis.statut === "termine" && (
           <span className="text-xs text-slate-500">{devis.lignes_count} ligne(s)</span>
         )}
-
         <div className="flex items-center gap-2 ml-auto">
           {devis.statut === "termine" && !devis.capitalise && (
-            <button
-              type="button"
-              className="btn-primaire text-xs"
-              onClick={capitaliser}
-              disabled={capitalEnCours}
-            >
+            <button type="button" className="btn-primaire text-xs" onClick={capitaliser} disabled={capitalEnCours}>
               <BookOpen className="h-3.5 w-3.5" />
               {capitalEnCours ? "En cours…" : "Capitaliser"}
             </button>
@@ -311,11 +296,7 @@ function CarteDevis({
             </button>
           )}
           {devis.statut === "termine" && devis.lignes_count > 0 && (
-            <button
-              type="button"
-              className="btn-secondaire text-xs"
-              onClick={() => setDeplie(!deplie)}
-            >
+            <button type="button" className="btn-secondaire text-xs" onClick={() => setDeplie(!deplie)}>
               {deplie ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
               Lignes
             </button>
@@ -330,20 +311,16 @@ function CarteDevis({
         </div>
       </div>
 
-      {/* Erreur */}
       {devis.statut === "erreur" && devis.erreur_detail && (
         <div className="px-5 pb-3 text-xs text-red-600 bg-red-50 border-t border-red-100 py-2">
           {devis.erreur_detail}
         </div>
       )}
 
-      {/* Lignes extraites */}
       {deplie && lignes.length > 0 && (
         <div className="border-t border-slate-100 px-5 py-4 space-y-2 bg-slate-50">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">
-              Lignes extraites ({lignes.length})
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-700">Lignes extraites ({lignes.length})</h3>
             <p className="text-xs text-slate-400">
               Indice {devis.indice_base_code} = {devis.indice_base_valeur ?? "?"}
             </p>
@@ -358,11 +335,30 @@ function CarteDevis({
 }
 
 // ---------------------------------------------------------------------------
+// Badge "suggéré"
+// ---------------------------------------------------------------------------
+
+function BadgeSuggere() {
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded-full px-1.5 py-0.5 ml-1.5 leading-none">
+      <Sparkles className="h-2.5 w-2.5" />
+      suggéré
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Composant principal
 // ---------------------------------------------------------------------------
 
+type EtatPrevisualisation = "vide" | "chargement" | "pret";
+
 export default function AnalyseurDevis() {
   const queryClient = useQueryClient();
+
+  const [fichierSelectionne, setFichierSelectionne] = useState<File | null>(null);
+  const [etatPreview, setEtatPreview] = useState<EtatPrevisualisation>("vide");
+  const [champsAuto, setChampsAuto] = useState<Set<string>>(new Set());
   const [enUpload, setEnUpload] = useState(false);
   const [form, setForm] = useState({
     type_document: "devis",
@@ -387,22 +383,85 @@ export default function AnalyseurDevis() {
     ? devisData
     : ((devisData as { results?: DevisAnalyse[] })?.results ?? []);
 
-  const uploaderFichier = useCallback(async (fichier: File) => {
-    if (!fichier) return;
+  // ----------- Sélection du fichier + prévisualisation -----------
+
+  const changer = (champ: keyof typeof form, valeur: string) => {
+    setForm((f) => ({ ...f, [champ]: valeur }));
+    // Si l'utilisateur modifie un champ suggéré, retirer le badge
+    setChampsAuto((prev) => { const s = new Set(prev); s.delete(champ); return s; });
+  };
+
+  const selectionnerFichier = useCallback(async (fichier: File) => {
+    setFichierSelectionne(fichier);
+    setErreurUpload(null);
+
+    // Réinitialiser les champs du formulaire
+    setForm({ type_document: "devis", entreprise: "", localite: "", date_emission: "", indice_base_code: "BT01", indice_base_valeur: "" });
+    setChampsAuto(new Set());
+
+    // N'appeler la prévisualisation que pour les PDF
+    if (!fichier.name.toLowerCase().endsWith(".pdf")) {
+      setEtatPreview("pret");
+      return;
+    }
+
+    setEtatPreview("chargement");
+    try {
+      const formData = new FormData();
+      formData.append("fichier", fichier);
+      const meta = await api.post<MetadonneesPrevisualisation>("/api/ressources/devis/previsualiser/", formData);
+
+      const auto = new Set<string>();
+      const updates: Partial<typeof form> = {};
+
+      if (meta.type_document && meta.type_document !== "devis") {
+        updates.type_document = meta.type_document; auto.add("type_document");
+      }
+      if (meta.entreprise) {
+        updates.entreprise = meta.entreprise; auto.add("entreprise");
+      }
+      if (meta.localite) {
+        updates.localite = meta.localite; auto.add("localite");
+      }
+      if (meta.date_emission) {
+        updates.date_emission = meta.date_emission; auto.add("date_emission");
+      }
+      if (meta.indice_base_code && meta.indice_base_code !== "BT01") {
+        updates.indice_base_code = meta.indice_base_code; auto.add("indice_base_code");
+      }
+
+      setForm((f) => ({ ...f, ...updates }));
+      setChampsAuto(auto);
+      setEtatPreview("pret");
+    } catch {
+      // Pas bloquant : on peut quand même uploader sans prévisualisation
+      setEtatPreview("pret");
+    }
+  }, []);
+
+  // ----------- Upload final -----------
+
+  const analyser = async () => {
+    if (!fichierSelectionne) return;
     setEnUpload(true);
     setErreurUpload(null);
     const data = new FormData();
-    data.append("fichier", fichier);
+    data.append("fichier", fichierSelectionne);
     Object.entries(form).forEach(([k, v]) => { if (v) data.append(k, v); });
     try {
       await api.post("/api/ressources/devis/", data);
       queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
+      // Réinitialiser
+      setFichierSelectionne(null);
+      setEtatPreview("vide");
+      setChampsAuto(new Set());
+      setForm({ type_document: "devis", entreprise: "", localite: "", date_emission: "", indice_base_code: "BT01", indice_base_valeur: "" });
     } catch (e) {
       setErreurUpload(e instanceof ErreurApi ? e.detail : "Téléversement impossible.");
     } finally {
       setEnUpload(false);
     }
-  }, [form, queryClient]);
+  };
 
   const supprimerDevis = async (id: string) => {
     if (!window.confirm("Supprimer ce devis et ses lignes extraites ?")) return;
@@ -418,7 +477,15 @@ export default function AnalyseurDevis() {
     e.preventDefault();
     setIsDragOver(false);
     const fichier = e.dataTransfer.files[0];
-    if (fichier) uploaderFichier(fichier);
+    if (fichier) selectionnerFichier(fichier);
+  };
+
+  const reinitialiser = () => {
+    setFichierSelectionne(null);
+    setEtatPreview("vide");
+    setChampsAuto(new Set());
+    setErreurUpload(null);
+    setForm({ type_document: "devis", entreprise: "", localite: "", date_emission: "", indice_base_code: "BT01", indice_base_valeur: "" });
   };
 
   return (
@@ -432,100 +499,37 @@ export default function AnalyseurDevis() {
         </p>
       </div>
 
-      {/* Formulaire + zone upload */}
+      {/* Formulaire */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
-        <h2 className="font-semibold text-slate-800">Informations du document</h2>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="etiquette-champ">Type de document</label>
-            <select
-              className="champ-saisie"
-              value={form.type_document}
-              onChange={(e) => setForm({ ...form, type_document: e.target.value })}
-            >
-              {TYPES_DOCUMENT.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="etiquette-champ">Entreprise émettrice</label>
-            <input
-              type="text"
-              className="champ-saisie"
-              placeholder="ex. Bouygues Construction"
-              value={form.entreprise}
-              onChange={(e) => setForm({ ...form, entreprise: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="etiquette-champ">Localité / Zone géographique</label>
-            <input
-              type="text"
-              className="champ-saisie"
-              placeholder="ex. Paris, Île-de-France, 75"
-              value={form.localite}
-              onChange={(e) => setForm({ ...form, localite: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="etiquette-champ">Date d&apos;émission</label>
-            <input
-              type="date"
-              className="champ-saisie"
-              value={form.date_emission}
-              onChange={(e) => setForm({ ...form, date_emission: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="etiquette-champ">Indice BT de référence</label>
-            <select
-              className="champ-saisie"
-              value={form.indice_base_code}
-              onChange={(e) => setForm({ ...form, indice_base_code: e.target.value })}
-            >
-              {INDICES_DISPONIBLES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="etiquette-champ">Valeur de l&apos;indice à la date du devis</label>
-            <input
-              type="number"
-              className="champ-saisie"
-              placeholder="ex. 130.5 (laisser vide si inconnue)"
-              value={form.indice_base_valeur}
-              onChange={(e) => setForm({ ...form, indice_base_valeur: e.target.value })}
-            />
-          </div>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-slate-800">Document à analyser</h2>
+          {etatPreview === "pret" && champsAuto.size > 0 && (
+            <span className="flex items-center gap-1.5 text-xs text-violet-600">
+              <Sparkles className="h-3.5 w-3.5" />
+              {champsAuto.size} champ{champsAuto.size > 1 ? "s" : ""} pré-rempli{champsAuto.size > 1 ? "s" : ""} depuis le document
+            </span>
+          )}
         </div>
 
-        {/* Zone drag & drop */}
-        <div
-          className={clsx(
-            "border-2 border-dashed rounded-2xl p-10 text-center transition-colors cursor-pointer",
-            isDragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 hover:border-indigo-300 hover:bg-slate-50"
-          )}
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={onDrop}
-          onClick={() => document.getElementById("input-fichier-devis")?.click()}
-        >
-          <input
-            id="input-fichier-devis"
-            type="file"
-            className="hidden"
-            accept=".pdf,.xlsx,.xls,.doc,.docx,.csv,.ods"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploaderFichier(f); }}
-          />
-          {enUpload ? (
-            <div className="flex flex-col items-center gap-2">
-              <RefreshCw className="h-8 w-8 text-indigo-500 animate-spin" />
-              <p className="text-sm text-indigo-600 font-medium">Téléversement en cours…</p>
-            </div>
-          ) : (
+        {/* Zone de sélection de fichier */}
+        {etatPreview === "vide" ? (
+          <div
+            className={clsx(
+              "border-2 border-dashed rounded-2xl p-10 text-center transition-colors cursor-pointer",
+              isDragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 hover:border-indigo-300 hover:bg-slate-50"
+            )}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => document.getElementById("input-fichier-devis")?.click()}
+          >
+            <input
+              id="input-fichier-devis"
+              type="file"
+              className="hidden"
+              accept=".pdf,.xlsx,.xls,.doc,.docx,.csv,.ods"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) selectionnerFichier(f); }}
+            />
             <div className="flex flex-col items-center gap-2">
               <Upload className="h-8 w-8 text-slate-400" />
               <p className="text-sm font-medium text-slate-600">
@@ -533,12 +537,155 @@ export default function AnalyseurDevis() {
               </p>
               <p className="text-xs text-slate-400">PDF, XLSX, XLS, DOC, DOCX, CSV, ODS</p>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          /* Fichier sélectionné */
+          <div className={clsx(
+            "flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors",
+            etatPreview === "chargement"
+              ? "border-violet-200 bg-violet-50"
+              : "border-slate-200 bg-slate-50"
+          )}>
+            <FileText className="h-5 w-5 text-slate-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-slate-800 truncate">{fichierSelectionne?.name}</p>
+              {etatPreview === "chargement" ? (
+                <p className="text-xs text-violet-600 flex items-center gap-1 mt-0.5">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Lecture des métadonnées…
+                </p>
+              ) : champsAuto.size > 0 ? (
+                <p className="text-xs text-violet-600 mt-0.5">
+                  Informations extraites du document — vérifiez avant de lancer l&apos;analyse
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {fichierSelectionne ? (fichierSelectionne.size / 1024).toFixed(0) + " Ko" : ""}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-slate-200 text-slate-400 hover:text-slate-600 flex-shrink-0"
+              onClick={reinitialiser}
+              title="Choisir un autre fichier"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Formulaire de métadonnées */}
+        {etatPreview !== "vide" && (
+          <div className={clsx("grid grid-cols-2 gap-4 transition-opacity", etatPreview === "chargement" && "opacity-50 pointer-events-none")}>
+            <div>
+              <label className="etiquette-champ flex items-center">
+                Type de document
+                {champsAuto.has("type_document") && <BadgeSuggere />}
+              </label>
+              <select
+                className={clsx("champ-saisie", champsAuto.has("type_document") && "ring-1 ring-violet-300 bg-violet-50/40")}
+                value={form.type_document}
+                onChange={(e) => changer("type_document", e.target.value)}
+              >
+                {TYPES_DOCUMENT.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="etiquette-champ flex items-center">
+                Entreprise émettrice
+                {champsAuto.has("entreprise") && <BadgeSuggere />}
+              </label>
+              <input
+                type="text"
+                className={clsx("champ-saisie", champsAuto.has("entreprise") && "ring-1 ring-violet-300 bg-violet-50/40")}
+                placeholder="ex. Bouygues Construction"
+                value={form.entreprise}
+                onChange={(e) => changer("entreprise", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="etiquette-champ flex items-center">
+                Localité / Zone géographique
+                {champsAuto.has("localite") && <BadgeSuggere />}
+              </label>
+              <input
+                type="text"
+                className={clsx("champ-saisie", champsAuto.has("localite") && "ring-1 ring-violet-300 bg-violet-50/40")}
+                placeholder="ex. Paris, Île-de-France, 75"
+                value={form.localite}
+                onChange={(e) => changer("localite", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="etiquette-champ flex items-center">
+                Date d&apos;émission
+                {champsAuto.has("date_emission") && <BadgeSuggere />}
+              </label>
+              <input
+                type="date"
+                className={clsx("champ-saisie", champsAuto.has("date_emission") && "ring-1 ring-violet-300 bg-violet-50/40")}
+                value={form.date_emission}
+                onChange={(e) => changer("date_emission", e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="etiquette-champ flex items-center">
+                Indice BT de référence
+                {champsAuto.has("indice_base_code") && <BadgeSuggere />}
+              </label>
+              <select
+                className={clsx("champ-saisie", champsAuto.has("indice_base_code") && "ring-1 ring-violet-300 bg-violet-50/40")}
+                value={form.indice_base_code}
+                onChange={(e) => changer("indice_base_code", e.target.value)}
+              >
+                {INDICES_DISPONIBLES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="etiquette-champ">Valeur de l&apos;indice à la date du devis</label>
+              <input
+                type="number"
+                className="champ-saisie"
+                placeholder="ex. 130.5 (laisser vide si inconnue)"
+                value={form.indice_base_valeur}
+                onChange={(e) => changer("indice_base_valeur", e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         {erreurUpload && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {erreurUpload}
+          </div>
+        )}
+
+        {/* Bouton lancer l'analyse */}
+        {etatPreview === "pret" && (
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              className="btn-primaire"
+              onClick={analyser}
+              disabled={enUpload}
+            >
+              {enUpload ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Envoi en cours…
+                </>
+              ) : (
+                <>
+                  <Send className="h-4 w-4" />
+                  Lancer l&apos;analyse
+                </>
+              )}
+            </button>
           </div>
         )}
       </div>

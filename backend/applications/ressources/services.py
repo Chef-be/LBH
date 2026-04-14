@@ -535,6 +535,145 @@ def trouver_ligne_similaire(
 
 
 # ---------------------------------------------------------------------------
+# Extraction de métadonnées depuis le texte brut d'un devis
+# ---------------------------------------------------------------------------
+
+_RE_DATE_LABEL = re.compile(
+    r"(?:date\s+(?:d[eu']?\s+)?(?:devis|offre|émission|proposition|établissement)?|"
+    r"établi\s+le|émis\s+le|fait\s+le|le\s*:)\s*[:\s]*"
+    r"(\d{1,2}[\s\/\-\.]\d{1,2}[\s\/\-\.]\d{4})",
+    re.IGNORECASE,
+)
+_RE_DATE_FR = re.compile(r"\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b")
+_RE_CP_VILLE = re.compile(r"\b((?:F[\s\-])?\d{5})\s+([A-ZÀ-Ü][A-Za-zÀ-üÀ-ü\s\-]{2,35})")
+_RE_LOCALITE_LABEL = re.compile(
+    r"(?:localité|ville|commune|chantier|lieu des travaux|agence|adresse des travaux)"
+    r"\s*[:\s]+([A-ZÀ-Ü][^\n\r]{2,60})",
+    re.IGNORECASE,
+)
+_RE_ENTREPRISE_LABEL = re.compile(
+    r"(?:entreprise|société|émetteur|prestataire|établie par|présentée par|titulaire|de\s*:)"
+    r"\s*[:\s]+([A-ZÀ-Ü][^\n\r]{3,80})",
+    re.IGNORECASE,
+)
+_RE_FORME_JURIDIQUE = re.compile(
+    r"([A-ZÀ-Ü][A-Za-zÀ-üÀ-ü&\-'. ]{2,50})"
+    r"\s+(?:SARL|SAS\b|SA\b|EURL|SNC|SASU|EI\b|EIRL|SCI|SCOP|GIE|SEM|SEML|SPL|EPIC|SARI)\b",
+)
+
+
+def extraire_metadonnees_devis(texte_brut: str, nom_fichier: str = "") -> dict:
+    """
+    Analyse les premiers caractères du texte brut d'un devis PDF pour en déduire
+    les métadonnées : entreprise, localité, date d'émission, type de document,
+    indice BT dominant.
+    Retourne un dict avec les clés du modèle DevisAnalyse (chaînes vides si non détecté).
+    """
+    resultat: dict = {
+        "entreprise": "",
+        "localite": "",
+        "date_emission": "",
+        "type_document": "devis",
+        "indice_base_code": "BT01",
+    }
+
+    # N'analyser que les premières lignes (en-tête du document)
+    texte_entete = texte_brut[:3000]
+    texte_upper = texte_entete.upper()
+
+    # --- Type de document (texte + nom de fichier) ---
+    nom_up = nom_fichier.upper()
+    for cle in (texte_upper, nom_up):
+        if "DPGF" in cle or "DÉCOMPOSITION DU PRIX" in cle:
+            resultat["type_document"] = "dpgf"; break
+        if "DQE" in cle or "DÉTAIL QUANTITATIF" in cle or "DETAIL QUANTITATIF" in cle:
+            resultat["type_document"] = "dqe"; break
+        if "BORDEREAU DE PRIX" in cle or re.search(r"\bBPU\b", cle):
+            resultat["type_document"] = "bpu"; break
+        if "BON DE COMMANDE" in cle:
+            resultat["type_document"] = "bon_commande"; break
+
+    # --- Entreprise ---
+    m = _RE_ENTREPRISE_LABEL.search(texte_entete)
+    if m:
+        resultat["entreprise"] = m.group(1).strip()[:100]
+    else:
+        m2 = _RE_FORME_JURIDIQUE.search(texte_entete)
+        if m2:
+            resultat["entreprise"] = m2.group(0).strip()[:100]
+
+    # --- Date (cherche d'abord avec label, sinon première date valide) ---
+    m = _RE_DATE_LABEL.search(texte_entete)
+    date_str = m.group(1).strip() if m else ""
+    if not date_str:
+        m2 = _RE_DATE_FR.search(texte_entete)
+        if m2:
+            date_str = f"{m2.group(1)}/{m2.group(2)}/{m2.group(3)}"
+
+    if date_str:
+        # Normaliser en YYYY-MM-DD
+        md = re.match(r"(\d{1,2})[\s\/\-\.](\d{1,2})[\s\/\-\.](\d{4})", date_str)
+        if md:
+            j, mo, a = md.group(1).zfill(2), md.group(2).zfill(2), md.group(3)
+            resultat["date_emission"] = f"{a}-{mo}-{j}"
+
+    # --- Localité ---
+    m = _RE_LOCALITE_LABEL.search(texte_entete)
+    if m:
+        resultat["localite"] = m.group(1).strip()[:100]
+    else:
+        m2 = _RE_CP_VILLE.search(texte_entete)
+        if m2:
+            resultat["localite"] = f"{m2.group(1)} {m2.group(2).strip()}"[:100]
+
+    # --- Indice BT dominant (corps d'état le plus mentionné) ---
+    familles = {
+        "BT01": ["béton", "maçonnerie", "gros oeuvre", "coffrages", "ferraillage"],
+        "BT28": ["peinture", "enduit peinture", "lasure"],
+        "BT37": ["menuiserie bois", "parquet", "escalier bois"],
+        "BT40": ["serrurerie", "métallerie", "garde-corps"],
+        "BT50": ["plomberie", "sanitaire", "tuyauterie"],
+        "BT51": ["chauffage", "cvc", "ventilation", "climatisation"],
+        "BT60": ["électricité", "câblage", "tableau électrique"],
+        "TP01": ["terrassement", "voirie", "vrd", "canalisation", "déblai"],
+    }
+    texte_lower = texte_brut[:6000].lower()
+    scores = {code: sum(texte_lower.count(m) for m in mots) for code, mots in familles.items()}
+    best = max(scores, key=scores.get)
+    if scores[best] > 0:
+        resultat["indice_base_code"] = best
+
+    logger.debug(
+        "Métadonnées extraites : entreprise=%r localite=%r date=%r type=%s indice=%s",
+        resultat["entreprise"], resultat["localite"], resultat["date_emission"],
+        resultat["type_document"], resultat["indice_base_code"],
+    )
+    return resultat
+
+
+def previsualiser_devis_depuis_fichier(fichier_bytes: bytes, nom_fichier: str) -> dict:
+    """
+    Appelle le service PDF pour extraire le texte brut, puis en dérive les métadonnées.
+    Retourne les métadonnées suggérées (sans créer d'enregistrement en base).
+    """
+    texte_brut = ""
+    try:
+        resp = requests.post(
+            f"{URL_SERVICE_PDF}/pdf/analyser",
+            files={"fichier": (nom_fichier, fichier_bytes, "application/pdf")},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        texte_brut = resp.json().get("texte_brut", "")
+    except requests.exceptions.ConnectionError:
+        logger.warning("Service PDF non disponible pour la prévisualisation")
+    except Exception as exc:
+        logger.warning("Erreur prévisualisation : %s", exc)
+
+    return extraire_metadonnees_devis(texte_brut, nom_fichier)
+
+
+# ---------------------------------------------------------------------------
 # Actualisation périodique
 # ---------------------------------------------------------------------------
 
