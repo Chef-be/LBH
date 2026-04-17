@@ -7,11 +7,9 @@ import { useRouter } from "next/navigation";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
-import {
-  ArrowLeft, Calendar, MapPin, Building2, User,
-  Euro, FolderOpen, Users, Pencil, Trash2,
-} from "lucide-react";
+import { ArrowLeft, Calendar, MapPin, Building2, User, Euro, FolderOpen, Users, Pencil, Trash2 } from "lucide-react";
 import { NavigationProjet } from "@/composants/projets/NavigationProjet";
+import { DashboardProjet } from "@/composants/projets/DashboardProjet";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -292,7 +290,10 @@ export function DetailProjet({ id }: { id: string }) {
         }}
       />
 
-      {/* Grille informations */}
+      {/* Dashboard projet */}
+      <DashboardProjet projet={projet} />
+
+      {/* Grille informations complémentaires (conservée) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Colonne gauche : données principales */}
         <div className="lg:col-span-2 space-y-6">

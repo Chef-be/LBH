@@ -275,3 +275,103 @@ def vue_qualification_documentaire_projet(requete, projet_id):
     """Retourne l'état documentaire d'un projet à partir de l'analyse réelle des pièces versées."""
     projet = generics.get_object_or_404(Projet, pk=projet_id)
     return Response(construire_bilan_documentaire_projet(projet))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_synthese_projet(requete, projet_id):
+    """
+    GET /api/projets/<uuid>/synthese/
+    Synthèse agrégée du projet : documents, études, montants, progression de phase.
+    Utilisée par le dashboard projet.
+    """
+    from applications.documents.models import Document
+    from applications.economie.models import EtudeEconomique
+
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+
+    # Index de phase pour la jauge de progression (0 = début, 9 = clos)
+    phases_ordonnees = [code for code, _ in Projet.PHASES]
+    phase_index = phases_ordonnees.index(projet.phase_actuelle) if projet.phase_actuelle in phases_ordonnees else -1
+
+    nb_documents = Document.objects.filter(
+        projet=projet, est_version_courante=True
+    ).count()
+
+    etudes = EtudeEconomique.objects.filter(projet=projet)
+    nb_etudes = etudes.count()
+    etudes_actives = etudes.filter(statut__in=["en_cours", "a_valider", "validee"])
+    total_prix_vente = sum(float(e.total_prix_vente or 0) for e in etudes_actives)
+    total_marge_nette = sum(float(e.total_marge_nette or 0) for e in etudes_actives)
+
+    # Documents par statut
+    from applications.documents.models import Document as Doc
+    docs_qs = Doc.objects.filter(projet=projet, est_version_courante=True)
+    nb_docs_valides = docs_qs.filter(statut="valide").count()
+    nb_docs_brouillon = docs_qs.filter(statut="brouillon").count()
+
+    # Activité récente (derniers documents et études modifiés)
+    activite = []
+    for doc in docs_qs.order_by("-date_modification")[:3]:
+        activite.append({
+            "type": "document",
+            "intitule": doc.intitule,
+            "statut": doc.statut,
+            "date": doc.date_modification.isoformat(),
+        })
+    for etude in etudes.order_by("-date_modification")[:3]:
+        activite.append({
+            "type": "etude",
+            "intitule": etude.intitule,
+            "statut": etude.statut,
+            "date": etude.date_modification.isoformat(),
+        })
+    activite.sort(key=lambda x: x["date"], reverse=True)
+
+    return Response({
+        "nb_documents": nb_documents,
+        "nb_docs_valides": nb_docs_valides,
+        "nb_docs_brouillon": nb_docs_brouillon,
+        "nb_etudes_economiques": nb_etudes,
+        "total_prix_vente_etudes": total_prix_vente,
+        "total_marge_nette_etudes": total_marge_nette,
+        "phase_index": phase_index,
+        "nb_phases": len(phases_ordonnees),
+        "phase_libelle": dict(Projet.PHASES).get(projet.phase_actuelle, ""),
+        "activite_recente": activite[:5],
+    })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_ressources_documentaires(requete):
+    """
+    GET /api/projets/ressources-documentaires/
+    Liste les fichiers dans le volume /ressources (partage Samba monté en lecture seule).
+    """
+    import os
+
+    chemin = "/ressources"
+    fichiers = []
+    if os.path.isdir(chemin):
+        for nom in sorted(os.listdir(chemin)):
+            chemin_complet = os.path.join(chemin, nom)
+            if os.path.isfile(chemin_complet):
+                stat = os.stat(chemin_complet)
+                ext = os.path.splitext(nom)[1].lower()
+                # Nom lisible : retirer les préfixes numériques et les tirets
+                nom_base = os.path.splitext(nom)[0]
+                nom_affichage = nom_base.replace("-", " ").replace("_", " ")
+                # Retirer les préfixes numériques type "123456789-"
+                import re
+                nom_affichage = re.sub(r"^\d{5,}-", "", nom_affichage).strip()
+                nom_affichage = nom_affichage[0].upper() + nom_affichage[1:] if nom_affichage else nom
+                fichiers.append({
+                    "nom": nom,
+                    "nom_affichage": nom_affichage,
+                    "extension": ext.lstrip("."),
+                    "taille_octets": stat.st_size,
+                    "type": "pdf" if ext == ".pdf" else ("tableur" if ext in (".xlsx", ".xls") else "texte"),
+                })
+
+    return Response({"fichiers": fichiers, "total": len(fichiers)})

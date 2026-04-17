@@ -1,0 +1,613 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import {
+  RadialBarChart, RadialBar, ResponsiveContainer,
+} from "recharts";
+import {
+  FileText, BarChart2, Layers, PenTool, Hammer, Search,
+  TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
+  MapPin, Building2, ExternalLink, Plus, FolderOpen,
+} from "lucide-react";
+import { api } from "@/crochets/useApi";
+
+/* ────────────────────────────────────────────────────────────
+   TYPES
+────────────────────────────────────────────────────────────── */
+interface SyntheseProjet {
+  nb_documents: number;
+  nb_etudes_economiques: number;
+  total_prix_vente_etudes: number;
+  phase_index: number;      // 0-9
+  phase_libelle: string;
+  activite_recente: Array<{
+    date: string;
+    type: string;
+    libelle: string;
+    utilisateur: string;
+  }>;
+}
+
+interface ProjetDetail {
+  id: string;
+  reference: string;
+  intitule: string;
+  statut: string;
+  statut_libelle: string;
+  type_libelle: string;
+  phase_actuelle: string;
+  phase_libelle: string;
+  organisation_nom: string | null;
+  maitre_ouvrage_nom: string | null;
+  maitre_oeuvre_nom: string | null;
+  responsable_nom: string;
+  commune: string;
+  departement: string;
+  date_debut_prevue: string | null;
+  date_fin_prevue: string | null;
+  montant_estime: number | null;
+  montant_marche: number | null;
+  description: string;
+  contexte_projet: {
+    famille_client: { code: string; libelle: string };
+    nature_ouvrage: string;
+    nature_marche: string;
+    missions_associees: Array<{ code: string; libelle: string }>;
+    sous_missions: Array<{ code: string; libelle: string }>;
+    partie_contractante: string;
+    role_lbh: string;
+    methode_estimation: string;
+  } | null;
+  processus_recommande: {
+    points_de_controle: string[];
+    methodes_estimation: Array<{ code: string; libelle: string; objectif: string }>;
+    livrables_prioritaires: string[];
+    indicateurs_clefs: string[];
+  };
+  dossiers_ged: Array<{ code: string; intitule: string; description: string }>;
+}
+
+/* ────────────────────────────────────────────────────────────
+   HELPERS
+────────────────────────────────────────────────────────────── */
+const PHASES_CYCLE = ["faisabilite", "esq", "aps", "apd", "pro", "act", "exe", "suivi", "aor", "clos"];
+const LABELS_PHASES: Record<string, string> = {
+  faisabilite: "Faisabilité", esq: "ESQ", aps: "APS", apd: "APD",
+  pro: "PRO", act: "ACT", exe: "EXE", suivi: "Suivi", aor: "AOR", clos: "Clos",
+};
+
+function formaterMontant(val: number | null, zero = "—"): string {
+  if (val == null || val === 0) return zero;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}M€`;
+  if (val >= 1_000) return `${Math.round(val / 1_000)} k€`;
+  return `${val.toLocaleString("fr-FR")} €`;
+}
+
+function formaterDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/* ────────────────────────────────────────────────────────────
+   TUILE KPI
+────────────────────────────────────────────────────────────── */
+function TuileKpi({
+  icone, label, valeur, sous, couleur = "var(--c-base)",
+}: {
+  icone: React.ReactNode; label: string; valeur: string; sous?: string; couleur?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl p-4"
+      style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>{label}</p>
+          <p className="text-xl font-bold mt-1" style={{ color: "var(--texte)" }}>{valeur}</p>
+          {sous && <p className="text-xs mt-0.5" style={{ color: "var(--texte-2)" }}>{sous}</p>}
+        </div>
+        <span
+          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: `color-mix(in srgb, ${couleur} 12%, var(--fond-app))`, color: couleur }}
+        >
+          {icone}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   GAUGE PHASE
+────────────────────────────────────────────────────────────── */
+function GaugePhase({ phaseIndex, phaseLibelle }: { phaseIndex: number; phaseLibelle: string }) {
+  const pct = Math.round(((phaseIndex + 1) / PHASES_CYCLE.length) * 100);
+  const data = [{ name: "phase", valeur: pct, fill: "var(--c-base)" }];
+
+  return (
+    <div className="flex flex-col items-center">
+      <div className="relative w-32 h-16">
+        <ResponsiveContainer width="100%" height="100%">
+          <RadialBarChart
+            cx="50%" cy="100%"
+            innerRadius="65%" outerRadius="100%"
+            startAngle={180} endAngle={0}
+            data={data}
+          >
+            <RadialBar dataKey="valeur" cornerRadius={4} background={{ fill: "var(--fond-entree)" }} />
+          </RadialBarChart>
+        </ResponsiveContainer>
+        <div className="absolute inset-0 flex items-end justify-center pb-0.5">
+          <span className="text-base font-bold" style={{ color: "var(--c-base)" }}>{pct}%</span>
+        </div>
+      </div>
+      <p className="text-xs font-semibold mt-1" style={{ color: "var(--texte)" }}>{phaseLibelle || "—"}</p>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   TIMELINE PHASES
+────────────────────────────────────────────────────────────── */
+function TimelinePhases({ phaseActuelle }: { phaseActuelle: string }) {
+  const idxActuel = PHASES_CYCLE.indexOf(phaseActuelle);
+
+  return (
+    <div className="flex items-center gap-0 overflow-x-auto pb-1">
+      {PHASES_CYCLE.map((phase, i) => {
+        const fait = i < idxActuel;
+        const actif = i === idxActuel;
+        const dernier = i === PHASES_CYCLE.length - 1;
+        return (
+          <div key={phase} className="flex items-center flex-shrink-0">
+            <div className="flex flex-col items-center gap-1">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold"
+                style={{
+                  background: fait ? "rgb(16,185,129)" : actif ? "var(--c-base)" : "var(--fond-entree)",
+                  color: fait || actif ? "white" : "var(--texte-3)",
+                  border: fait || actif ? "none" : "1px solid var(--bordure)",
+                }}
+              >
+                {i + 1}
+              </div>
+              <span
+                className="text-[9px] text-center leading-none whitespace-nowrap"
+                style={{ color: actif ? "var(--c-base)" : fait ? "rgb(16,185,129)" : "var(--texte-3)" }}
+              >
+                {LABELS_PHASES[phase] ?? phase}
+              </span>
+            </div>
+            {!dernier && (
+              <div
+                className="w-5 h-0.5 mb-3 flex-shrink-0"
+                style={{ background: fait ? "rgb(16,185,129)" : "var(--bordure)" }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   CARTE MODULE
+────────────────────────────────────────────────────────────── */
+function CarteModule({
+  href, icone, titre, nb, libelle, couleur = "var(--c-base)", actif = true,
+}: {
+  href: string; icone: React.ReactNode; titre: string;
+  nb?: number; libelle?: string; couleur?: string; actif?: boolean;
+}) {
+  if (!actif) return null;
+  return (
+    <Link
+      href={href}
+      className="group rounded-xl p-4 transition-all duration-200 hover:shadow-md flex flex-col gap-3"
+      style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+    >
+      <div className="flex items-center justify-between">
+        <span
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: `color-mix(in srgb, ${couleur} 12%, var(--fond-app))`, color: couleur }}
+        >
+          {icone}
+        </span>
+        <ExternalLink size={12} style={{ color: "var(--texte-3)" }} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+      <div>
+        <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>{titre}</p>
+        {nb !== undefined && (
+          <p className="text-xl font-bold mt-0.5" style={{ color: couleur }}>{nb}</p>
+        )}
+        {libelle && <p className="text-xs mt-0.5" style={{ color: "var(--texte-2)" }}>{libelle}</p>}
+      </div>
+    </Link>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   ACCORDÉON PROCESSUS
+────────────────────────────────────────────────────────────── */
+function AccordeonProcessus({
+  titre, items, icone,
+}: {
+  titre: string;
+  items: string[];
+  icone: React.ReactNode;
+}) {
+  const [ouvert, setOuvert] = useState(false);
+  if (items.length === 0) return null;
+  return (
+    <div
+      className="rounded-xl border overflow-hidden"
+      style={{ borderColor: "var(--bordure)" }}
+    >
+      <button
+        type="button"
+        onClick={() => setOuvert(!ouvert)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-[color:var(--fond-entree)] transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span style={{ color: "var(--c-base)" }}>{icone}</span>
+          <span className="text-sm font-semibold" style={{ color: "var(--texte)" }}>{titre}</span>
+          <span
+            className="text-xs px-1.5 py-0.5 rounded-full"
+            style={{ background: "var(--fond-entree)", color: "var(--texte-3)", border: "1px solid var(--bordure)" }}
+          >
+            {items.length}
+          </span>
+        </div>
+        {ouvert ? <ChevronUp size={14} style={{ color: "var(--texte-3)" }} /> : <ChevronDown size={14} style={{ color: "var(--texte-3)" }} />}
+      </button>
+      {ouvert && (
+        <ul
+          className="px-4 pb-4 pt-1 space-y-2 border-t"
+          style={{ borderColor: "var(--bordure)" }}
+        >
+          {items.map((item, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "var(--texte-2)" }}>
+              <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0" style={{ background: "var(--c-base)" }} />
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   COMPOSANT PRINCIPAL
+────────────────────────────────────────────────────────────── */
+export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
+  const { data: synthese } = useQuery<SyntheseProjet>({
+    queryKey: ["projet-synthese", projet.id],
+    queryFn: () => api.get<SyntheseProjet>(`/api/projets/${projet.id}/synthese/`),
+    staleTime: 60_000,
+  });
+
+  const idProjet = projet.id;
+  const contexte = projet.contexte_projet;
+  const processus = projet.processus_recommande;
+  const familleClient = contexte?.famille_client?.code || "";
+  const natureOuvrage = contexte?.nature_ouvrage || "";
+
+  const estEntreprise = familleClient === "entreprise";
+  const estMOE = familleClient === "maitrise_oeuvre";
+  const estMOA = familleClient === "maitrise_ouvrage";
+  const afficherInfra = natureOuvrage === "infrastructure" || natureOuvrage === "mixte";
+  const afficherBatiment = natureOuvrage === "batiment" || natureOuvrage === "mixte" || !natureOuvrage;
+
+  const codesMission = new Set([
+    ...(contexte?.missions_associees ?? []).map((m) => m.code),
+    ...(contexte?.sous_missions ?? []).map((s) => s.code),
+  ]);
+
+  const afficherPiecesEcrites =
+    estMOE || estMOA ||
+    ["redaction_cctp", "redaction_bpu", "redaction_dpgf", "redaction_pieces_marche_infrastructure"].some((c) => codesMission.has(c));
+  const afficherExecution =
+    ["exe", "visa", "det", "opc", "aor"].some((c) => codesMission.has(c));
+  const afficherAppelsOffres =
+    ["act", "rapport_analyse_offres", "reponse_appel_offres"].some((c) => codesMission.has(c));
+  const afficherRentabilite = estEntreprise;
+
+  const phaseIndex = synthese?.phase_index ?? PHASES_CYCLE.indexOf(projet.phase_actuelle);
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── KPIs ── */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <TuileKpi
+          icone={<Euro size={16} />}
+          label="Budget estimé"
+          valeur={formaterMontant(projet.montant_estime)}
+          sous={projet.montant_marche ? `Marché : ${formaterMontant(projet.montant_marche)}` : undefined}
+          couleur="var(--c-base)"
+        />
+        <TuileKpi
+          icone={<BarChart2 size={16} />}
+          label="Études économiques"
+          valeur={String(synthese?.nb_etudes_economiques ?? "—")}
+          sous={synthese?.total_prix_vente_etudes ? `Total PV : ${formaterMontant(synthese.total_prix_vente_etudes)}` : undefined}
+          couleur="#8b5cf6"
+        />
+        <TuileKpi
+          icone={<FileText size={16} />}
+          label="Documents GED"
+          valeur={String(synthese?.nb_documents ?? "—")}
+          sous={`${projet.dossiers_ged.length} dossier${projet.dossiers_ged.length > 1 ? "s" : ""} configuré${projet.dossiers_ged.length > 1 ? "s" : ""}`}
+          couleur="#f59e0b"
+        />
+        <TuileKpi
+          icone={<Calendar size={16} />}
+          label="Calendrier"
+          valeur={formaterDate(projet.date_debut_prevue)}
+          sous={projet.date_fin_prevue ? `Fin prévue : ${formaterDate(projet.date_fin_prevue)}` : undefined}
+          couleur="#10b981"
+        />
+      </div>
+
+      {/* ── Progression + Infos ── */}
+      <div className="grid gap-6 lg:grid-cols-3">
+
+        {/* Gauge + timeline */}
+        <div
+          className="rounded-xl p-5 flex flex-col gap-5"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>
+              Phase actuelle
+            </p>
+            <GaugePhase
+              phaseIndex={phaseIndex}
+              phaseLibelle={synthese?.phase_libelle ?? projet.phase_libelle ?? "—"}
+            />
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>
+              Cycle de vie
+            </p>
+            <TimelinePhases phaseActuelle={projet.phase_actuelle} />
+          </div>
+        </div>
+
+        {/* Informations projet */}
+        <div
+          className="lg:col-span-2 rounded-xl p-5"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Identification
+            </p>
+            <Link
+              href={`/projets/${idProjet}/modifier`}
+              className="text-xs underline"
+              style={{ color: "var(--texte-3)" }}
+            >
+              Modifier
+            </Link>
+          </div>
+          <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            {projet.organisation_nom && (
+              <div>
+                <dt className="flex items-center gap-1 text-xs" style={{ color: "var(--texte-3)" }}>
+                  <Building2 size={11} /> Bureau d&apos;études
+                </dt>
+                <dd className="font-medium mt-0.5" style={{ color: "var(--texte)" }}>{projet.organisation_nom}</dd>
+              </div>
+            )}
+            {projet.maitre_ouvrage_nom && (
+              <div>
+                <dt className="text-xs" style={{ color: "var(--texte-3)" }}>Maître d&apos;ouvrage</dt>
+                <dd className="font-medium mt-0.5" style={{ color: "var(--texte)" }}>{projet.maitre_ouvrage_nom}</dd>
+              </div>
+            )}
+            {(projet.commune || projet.departement) && (
+              <div>
+                <dt className="flex items-center gap-1 text-xs" style={{ color: "var(--texte-3)" }}>
+                  <MapPin size={11} /> Localisation
+                </dt>
+                <dd className="font-medium mt-0.5" style={{ color: "var(--texte)" }}>
+                  {[projet.commune, projet.departement ? `(${projet.departement})` : ""].filter(Boolean).join(" ")}
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt className="text-xs" style={{ color: "var(--texte-3)" }}>Type</dt>
+              <dd className="font-medium mt-0.5" style={{ color: "var(--texte)" }}>{projet.type_libelle}</dd>
+            </div>
+            {contexte?.role_lbh && (
+              <div>
+                <dt className="text-xs" style={{ color: "var(--texte-3)" }}>Rôle LBH</dt>
+                <dd className="font-medium mt-0.5" style={{ color: "var(--texte)" }}>{contexte.role_lbh}</dd>
+              </div>
+            )}
+            {contexte?.methode_estimation && (
+              <div>
+                <dt className="text-xs" style={{ color: "var(--texte-3)" }}>Méthode estimation</dt>
+                <dd className="font-medium mt-0.5" style={{ color: "var(--texte)" }}>{contexte.methode_estimation}</dd>
+              </div>
+            )}
+          </dl>
+          {projet.description && (
+            <p className="mt-4 text-sm leading-relaxed" style={{ color: "var(--texte-2)", borderTop: "1px solid var(--bordure)", paddingTop: "1rem" }}>
+              {projet.description}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* ── Modules ── */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+            Modules
+          </h3>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <CarteModule
+            href={`/projets/${idProjet}/economie`}
+            icone={<BarChart2 size={16} />}
+            titre="Études économiques"
+            nb={synthese?.nb_etudes_economiques}
+            libelle={synthese?.total_prix_vente_etudes ? formaterMontant(synthese.total_prix_vente_etudes, "0 €") + " PV" : "Aucune étude"}
+            couleur="#8b5cf6"
+          />
+          <CarteModule
+            href={`/projets/${idProjet}/documents`}
+            icone={<FolderOpen size={16} />}
+            titre="Documents GED"
+            nb={synthese?.nb_documents}
+            libelle="Documents du projet"
+            couleur="#f59e0b"
+          />
+          <CarteModule
+            href={`/projets/${idProjet}/pieces-ecrites`}
+            icone={<PenTool size={16} />}
+            titre="Pièces écrites"
+            libelle="CCTP, BPU, DPGF…"
+            couleur="#6366f1"
+            actif={afficherPiecesEcrites}
+          />
+          <CarteModule
+            href={`/projets/${idProjet}/metres`}
+            icone={<Layers size={16} />}
+            titre="Métrés"
+            libelle={afficherInfra ? "Bâtiment + VRD" : afficherBatiment ? "Métrés bâtiment" : "Métrés"}
+            couleur="var(--c-base)"
+          />
+          <CarteModule
+            href={`/projets/${idProjet}/appels-offres`}
+            icone={<Search size={16} />}
+            titre="Appels d&apos;offres"
+            libelle="Analyse des offres"
+            couleur="#10b981"
+            actif={afficherAppelsOffres}
+          />
+          <CarteModule
+            href={`/projets/${idProjet}/execution`}
+            icone={<Hammer size={16} />}
+            titre="Exécution"
+            libelle="Suivi de chantier"
+            couleur="#f97316"
+            actif={afficherExecution}
+          />
+          <CarteModule
+            href={`/projets/${idProjet}/rentabilite`}
+            icone={<TrendingUp size={16} />}
+            titre="Rentabilité"
+            libelle="Analyse financière"
+            couleur="#ef4444"
+            actif={afficherRentabilite}
+          />
+        </div>
+      </section>
+
+      {/* ── Actions rapides ── */}
+      <section
+        className="rounded-xl p-5"
+        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+      >
+        <h3 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--texte-3)" }}>
+          Actions rapides
+        </h3>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href={`/projets/${idProjet}/economie/nouvelle`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90"
+            style={{ background: "var(--c-base)" }}
+          >
+            <Plus size={14} /> Nouvelle étude économique
+          </Link>
+          <Link
+            href={`/projets/${idProjet}/documents`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+          >
+            <FileText size={14} /> Ajouter un document
+          </Link>
+          {afficherPiecesEcrites && (
+            <Link
+              href={`/projets/${idProjet}/pieces-ecrites/nouvelle`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+              style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            >
+              <PenTool size={14} /> Nouvelle pièce écrite
+            </Link>
+          )}
+          <Link
+            href={`/projets/${idProjet}/modifier`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+          >
+            Modifier le projet
+          </Link>
+        </div>
+      </section>
+
+      {/* ── Processus recommandé ── */}
+      {(processus.points_de_controle.length > 0 || processus.livrables_prioritaires.length > 0 || processus.methodes_estimation.length > 0) && (
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+            Processus recommandé
+          </h3>
+          <AccordeonProcessus
+            titre="Points de contrôle"
+            items={processus.points_de_controle}
+            icone={<Search size={14} />}
+          />
+          <AccordeonProcessus
+            titre="Livrables prioritaires"
+            items={processus.livrables_prioritaires}
+            icone={<FileText size={14} />}
+          />
+          <AccordeonProcessus
+            titre="Méthodes d'estimation"
+            items={processus.methodes_estimation.map((m) => `${m.libelle} — ${m.objectif}`)}
+            icone={<BarChart2 size={14} />}
+          />
+        </section>
+      )}
+
+      {/* ── Activité récente ── */}
+      {synthese?.activite_recente && synthese.activite_recente.length > 0 && (
+        <section
+          className="rounded-xl p-5"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <h3 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--texte-3)" }}>
+            Activité récente
+          </h3>
+          <ul className="space-y-3">
+            {synthese.activite_recente.slice(0, 8).map((activite, i) => (
+              <li key={i} className="flex items-start gap-3 text-sm">
+                <span
+                  className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: "var(--c-base)" }}
+                />
+                <div className="flex-1 min-w-0">
+                  <span style={{ color: "var(--texte)" }}>{activite.libelle}</span>
+                  <span className="ml-1 text-xs" style={{ color: "var(--texte-3)" }}>
+                    — {activite.utilisateur}
+                  </span>
+                </div>
+                <span className="text-xs flex-shrink-0" style={{ color: "var(--texte-3)" }}>
+                  {new Date(activite.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
