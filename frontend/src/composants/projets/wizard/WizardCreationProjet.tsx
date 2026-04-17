@@ -95,7 +95,6 @@ function etatInitial(): EtatWizard {
 /* ────────────────────────────────────────────────────────────
    PERSISTANCE BROUILLON
 ────────────────────────────────────────────────────────────── */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function lireBrouillon(): Partial<EtatWizard> | null {
   if (typeof window === "undefined") return null;
   try {
