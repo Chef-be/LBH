@@ -20,6 +20,7 @@ urlpatterns = [
     path("lots-cctp/", views.VueLotCCTPListeCreation.as_view(), name="lots-cctp-liste"),
     path("lots-cctp/<uuid:pk>/", views.VueLotCCTPDetail.as_view(), name="lots-cctp-detail"),
     path("generer-cctp/", views.vue_generer_cctp_multi_lots, name="generer-cctp"),
+    path("apercu-cctp/", views.vue_apercu_cctp, name="apercu-cctp"),
 
     # Bibliothèque d'articles CCTP
     path("articles/auto-classifier/", views.vue_auto_classifier_articles, name="articles-auto-classifier"),

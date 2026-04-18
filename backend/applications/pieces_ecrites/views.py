@@ -524,9 +524,12 @@ def vue_generer_cctp_multi_lots(request):
     """
     Génère un CCTP Word complet depuis la sélection de lots et prescriptions.
     Body: {projet_id, intitule, lots: [...], prescriptions_exclues: [...], variables: {...}}
+    Retourne le fichier Word en stream (Content-Disposition: attachment).
     """
     from applications.projets.models import Projet
     from .services import generer_cctp_depuis_bibliotheque
+    from slugify import slugify
+    from django.utils import timezone
 
     serialiseur = GenerateurCCTPCreationSerialiseur(data=request.data, context={"request": request})
     if not serialiseur.is_valid():
@@ -546,7 +549,79 @@ def vue_generer_cctp_multi_lots(request):
         variables=donnees.get("variables", {}),
         utilisateur=request.user,
     )
-    return Response(PieceEcriteDetailSerialiseur(piece, context={"request": request}).data, status=201)
+
+    # Lire le fichier Word depuis le stockage et le streamer en réponse
+    nom_fichier = f"CCTP_{slugify(donnees['intitule']) or 'document'}_{timezone.now():%Y%m%d}.docx"
+    type_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    try:
+        with piece.fichier_genere.open("rb") as f:
+            contenu = f.read()
+    except Exception:
+        # Fallback : retourner les métadonnées si le fichier n'est pas accessible
+        return Response(
+            PieceEcriteDetailSerialiseur(piece, context={"request": request}).data,
+            status=201,
+        )
+
+    reponse = FileResponse(
+        BytesIO(contenu),
+        as_attachment=True,
+        filename=nom_fichier,
+        content_type=type_mime,
+    )
+    reponse["Content-Length"] = str(len(contenu))
+    reponse["X-Piece-Id"] = str(piece.id)
+    return reponse
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_apercu_cctp(request):
+    """
+    Retourne un aperçu structuré du CCTP (sans générer le Word) pour prévisualisation.
+    Body: {lots: [...], prescriptions_exclues: [...], variables: {...}}
+    """
+    import re as _re
+    from django.utils import timezone
+
+    lots_codes = request.data.get("lots", [])
+    exclues_ids = set(str(i) for i in request.data.get("prescriptions_exclues", []))
+    variables = request.data.get("variables", {})
+
+    variables_completes = {
+        "date_generation": timezone.now().strftime("%d/%m/%Y"),
+        **variables,
+    }
+
+    lots = LotCCTP.objects.filter(
+        code__in=lots_codes, est_actif=True
+    ).prefetch_related("chapitres__prescriptions").order_by("ordre", "code")
+
+    apercu = []
+    for lot in lots:
+        lot_data = {"code": lot.code, "intitule": lot.intitule, "chapitres": []}
+        for chapitre in lot.chapitres.all().order_by("ordre"):
+            ch_data = {"numero": chapitre.numero, "intitule": chapitre.intitule, "prescriptions": []}
+            for prescrip in chapitre.prescriptions.filter(est_actif=True).order_by("ordre"):
+                if str(prescrip.pk) in exclues_ids:
+                    continue
+                corps = prescrip.corps
+                for var, valeur in variables_completes.items():
+                    corps = corps.replace(f"{{{var}}}", str(valeur))
+                corps = _re.sub(r"\{([^}:]+):-([^}]*)\}", r"\2", corps)
+                corps = _re.sub(r"\{([^}]+)\}", r"[\1]", corps)
+                ch_data["prescriptions"].append({
+                    "id": str(prescrip.pk),
+                    "intitule": prescrip.intitule,
+                    "corps": corps,
+                    "normes": prescrip.normes,
+                    "niveau": prescrip.niveau,
+                })
+            if ch_data["prescriptions"]:
+                lot_data["chapitres"].append(ch_data)
+        apercu.append(lot_data)
+
+    return Response({"apercu": apercu, "nb_lots": len(apercu)})
 
 
 # ---------------------------------------------------------------------------
