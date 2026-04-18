@@ -86,9 +86,11 @@ class AppelOffresDetailSerialiseur(serializers.ModelSerializer):
             "analyse_contractuelle", "conditions_paiement", "garanties_exigees",
             "delai_execution_jours", "variantes_autorisees",
             "observations", "offres",
+            "parametres_analyse", "synthese_analyse",
             "date_creation", "date_modification",
         ]
         read_only_fields = [
             "id", "date_creation", "date_modification",
             "type_libelle", "statut_libelle", "projet_reference",
+            "synthese_analyse",
         ]

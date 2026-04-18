@@ -107,6 +107,18 @@ class AppelOffres(models.Model):
     )
 
     observations = models.TextField(blank=True)
+
+    # Analyse comparative — stockage des résultats
+    parametres_analyse = models.JSONField(
+        default=dict, blank=True,
+        verbose_name="Paramètres d'analyse",
+        help_text="{methode_prix: '...', ...}",
+    )
+    synthese_analyse = models.JSONField(
+        null=True, blank=True,
+        verbose_name="Synthèse de l'analyse comparative",
+    )
+
     date_creation = models.DateTimeField(auto_now_add=True)
     date_modification = models.DateTimeField(auto_now=True)
 

@@ -8,6 +8,10 @@ import {
   ChevronRight, CheckCircle, AlertCircle, X, Plus,
   Pencil, Trophy, BarChart3, Calendar, Building2, Save,
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine, Legend, Cell,
+} from "recharts";
 
 interface Critere {
   libelle: string;
@@ -53,12 +57,14 @@ interface Offre {
 
 interface SyntheseAnalyse {
   methode_prix: string;
-  offre_min_ht: number;
-  offre_moyenne_ht: number;
+  offre_min_ht: number | null;
+  offre_max_ht: number | null;
+  offre_moyenne_ht: number | null;
   estimation_reference_ht: number | null;
   resultats: Array<{
     offre_id: string;
     entreprise: string;
+    montant_ht: number | null;
     montant_analyse_ht: number;
     note_globale: number;
     rang: number;
@@ -619,41 +625,132 @@ export default function PageDetailAO({
       )}
 
       {ao.synthese_analyse?.resultats?.length ? (
-        <div className="carte p-6 space-y-4">
+        <div className="carte p-6 space-y-6">
+          {/* En-tête synthèse */}
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h3 className="font-semibold text-slate-800">Synthèse d&apos;analyse</h3>
+              <h3 className="font-semibold text-slate-800">Analyse comparative des offres</h3>
               <p className="text-sm text-slate-500 mt-1">
-                Méthode prix : {METHODES_PRIX.find((methode) => methode.value === ao.synthese_analyse?.methode_prix)?.label || ao.synthese_analyse?.methode_prix}
+                Méthode prix : <span className="font-medium text-slate-700">{METHODES_PRIX.find((m) => m.value === ao.synthese_analyse?.methode_prix)?.label || ao.synthese_analyse?.methode_prix}</span>
               </p>
             </div>
-            <div className="text-right text-sm text-slate-500">
-              <div>Offre moyenne : <span className="font-mono text-slate-700">{fmt(ao.synthese_analyse.offre_moyenne_ht)}</span></div>
-              <div>Offre basse : <span className="font-mono text-slate-700">{fmt(ao.synthese_analyse.offre_min_ht)}</span></div>
+            <div className="flex gap-6 text-sm text-slate-500">
+              <div className="text-right">
+                <div className="text-xs text-slate-400 mb-0.5">Estimation</div>
+                <div className="font-mono font-semibold text-slate-700">{fmt(ao.synthese_analyse.estimation_reference_ht)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-slate-400 mb-0.5">Offre moyenne</div>
+                <div className="font-mono font-semibold text-slate-700">{fmt(ao.synthese_analyse.offre_moyenne_ht)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-slate-400 mb-0.5">Offre basse</div>
+                <div className="font-mono font-semibold text-green-700">{fmt(ao.synthese_analyse.offre_min_ht)}</div>
+              </div>
             </div>
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Tableau classement */}
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
-                  <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-slate-500">Rang</th>
+                  <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-slate-500 w-12">Rang</th>
                   <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-slate-500">Entreprise</th>
-                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500">Montant</th>
-                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500">Note</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500">Montant HT</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500 w-32">Écart estimé</th>
+                  <th className="px-4 py-3 text-right text-xs uppercase tracking-wider text-slate-500 w-28">Note finale</th>
+                  <th className="px-4 py-3 text-xs uppercase tracking-wider text-slate-500 w-40">Score visuel</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {ao.synthese_analyse.resultats.map((resultat) => (
-                  <tr key={resultat.offre_id}>
-                    <td className="px-4 py-3 font-semibold text-slate-700">{resultat.rang}</td>
-                    <td className="px-4 py-3 text-slate-700">{resultat.entreprise}</td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-700">{fmt(resultat.montant_analyse_ht)}</td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">{resultat.note_globale.toFixed(2)}/100</td>
-                  </tr>
-                ))}
+                {ao.synthese_analyse.resultats.map((r, idx) => {
+                  const ecart = ao.synthese_analyse?.estimation_reference_ht && r.montant_ht
+                    ? ((r.montant_ht - ao.synthese_analyse.estimation_reference_ht) / ao.synthese_analyse.estimation_reference_ht * 100)
+                    : null;
+                  const couleur = idx === 0 ? "text-green-700" : idx === 1 ? "text-blue-700" : "text-slate-700";
+                  const bgCouleur = idx === 0 ? "bg-green-500" : idx === 1 ? "bg-blue-400" : "bg-slate-300";
+                  return (
+                    <tr key={r.offre_id} className={idx === 0 ? "bg-green-50/40" : ""}>
+                      <td className="px-4 py-3 font-bold text-center">
+                        {idx === 0 ? <Trophy className="w-4 h-4 text-amber-500 mx-auto" /> : <span className="text-slate-400">{r.rang}</span>}
+                      </td>
+                      <td className={`px-4 py-3 font-semibold ${couleur}`}>{r.entreprise}</td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">{fmt(r.montant_ht ?? r.montant_analyse_ht)}</td>
+                      <td className={`px-4 py-3 text-right font-mono text-sm ${ecart === null ? "text-slate-300" : ecart > 0 ? "text-red-600" : "text-green-600"}`}>
+                        {ecart === null ? "—" : `${ecart > 0 ? "+" : ""}${ecart.toFixed(1)} %`}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`font-mono text-sm font-bold ${r.note_globale >= 70 ? "text-green-700" : r.note_globale >= 50 ? "text-amber-600" : "text-red-600"}`}>
+                          {r.note_globale.toFixed(1)} / 100
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${bgCouleur}`}
+                              style={{ width: `${r.note_globale}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-slate-400 w-8 text-right font-mono">{r.note_globale.toFixed(0)}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+
+          {/* Graphique comparatif montants */}
+          {ao.synthese_analyse.resultats.length >= 2 && (
+            <div>
+              <h4 className="text-sm font-semibold text-slate-600 mb-3">Comparatif des montants</h4>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart
+                  data={ao.synthese_analyse.resultats.map((r) => ({
+                    nom: r.entreprise.length > 16 ? r.entreprise.slice(0, 16) + "…" : r.entreprise,
+                    montant: r.montant_ht ?? r.montant_analyse_ht,
+                    note: r.note_globale,
+                  }))}
+                  margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="nom" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    yAxisId="montant"
+                    tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}k€`}
+                    tick={{ fontSize: 10 }}
+                    width={55}
+                  />
+                  <YAxis yAxisId="note" orientation="right" domain={[0, 100]} tick={{ fontSize: 10 }} width={35} />
+                  <Tooltip
+                    formatter={(value, name) =>
+                      name === "Montant HT"
+                        ? [`${Number(value).toLocaleString("fr-FR")} €`, name]
+                        : [`${Number(value).toFixed(1)}/100`, name]
+                    }
+                  />
+                  <Legend />
+                  {ao.synthese_analyse.estimation_reference_ht && (
+                    <ReferenceLine
+                      yAxisId="montant"
+                      y={ao.synthese_analyse.estimation_reference_ht}
+                      stroke="#f59e0b"
+                      strokeDasharray="6 3"
+                      label={{ value: "Estimé", position: "right", fontSize: 10, fill: "#f59e0b" }}
+                    />
+                  )}
+                  <Bar yAxisId="montant" dataKey="montant" name="Montant HT" radius={[4, 4, 0, 0]}>
+                    {ao.synthese_analyse.resultats.map((_, i) => (
+                      <Cell key={i} fill={i === 0 ? "#22c55e" : i === 1 ? "#60a5fa" : "#94a3b8"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       ) : null}
 
