@@ -176,7 +176,7 @@ export default function PageEconomieProjet({ params }: { params: Promise<{ id: s
   // Modules selon le type de client
   const modules = {
     moa_public: [
-      { libelle: "Estimation TCE", description: "Estimation tous corps d'état en phase amont", href: `/projets/${id}/economie/nouvelle`, icone: <BadgeEuro className="w-5 h-5 text-blue-600" /> },
+      { libelle: "Estimation TCE", description: "Estimation tous corps d'état en phase amont", href: `/projets/${id}/economie/estimation-tce`, icone: <BadgeEuro className="w-5 h-5 text-blue-600" /> },
       { libelle: "DPGF", description: "Décomposition du prix global et forfaitaire", href: `/projets/${id}/pieces-ecrites/nouvelle?type=dpgf`, icone: <FileText className="w-5 h-5 text-indigo-600" /> },
       { libelle: "DQE", description: "Détail quantitatif estimatif", href: `/projets/${id}/pieces-ecrites/nouvelle?type=dqe`, icone: <FileText className="w-5 h-5 text-violet-600" /> },
       { libelle: "Analyse d'offres", description: "Comparatif des offres des entreprises", href: `/projets/${id}/appels-offres`, icone: <BarChart3 className="w-5 h-5 text-emerald-600" /> },
@@ -194,7 +194,7 @@ export default function PageEconomieProjet({ params }: { params: Promise<{ id: s
       { libelle: "Analyse de marge", description: "Rentabilité prévisionnelle et risques", href: `/projets/${id}/rentabilite`, icone: <BarChart3 className="w-5 h-5 text-emerald-600" /> },
     ],
     generique: [
-      { libelle: "Estimation TCE", description: "Estimation tous corps d'état", href: `/projets/${id}/economie/nouvelle`, icone: <BadgeEuro className="w-5 h-5 text-blue-600" /> },
+      { libelle: "Estimation TCE", description: "Estimation tous corps d'état", href: `/projets/${id}/economie/estimation-tce`, icone: <BadgeEuro className="w-5 h-5 text-blue-600" /> },
       { libelle: "Étude de prix analytique", description: "DS / FC / FG / B&A jusqu'au PV", href: `/projets/${id}/economie/nouvelle`, icone: <Calculator className="w-5 h-5 text-blue-600" /> },
       { libelle: "Analyse de marge", description: "Rentabilité prévisionnelle et risques", href: `/projets/${id}/rentabilite`, icone: <BarChart3 className="w-5 h-5 text-emerald-600" /> },
     ],

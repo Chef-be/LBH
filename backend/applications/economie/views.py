@@ -1133,6 +1133,214 @@ def vue_decomposer_prix_inverse(request):
         return Response({"erreur": str(exc)}, status=400)
 
 
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_estimation_tce(request):
+    """
+    Calcule une estimation TCE (Tous Corps d'État) par ratio depuis un montant global.
+
+    Body: {
+      type_ouvrage: str,       # batiment_collectif | batiment_tertiaire | erp | vrd
+      montant_ht: float,       # Montant de base HT
+      ajustements: dict,       # {code: ratio_pct} — surcharges optionnelles
+    }
+
+    Retourne la liste des corps d'état avec ratio % et montant HT.
+    """
+    RATIOS_TCE = {
+        "batiment_collectif": {
+            "label": "Bâtiment collectif résidentiel",
+            "lignes": [
+                {"code": "TCE-01", "designation": "VRD / Aménagements extérieurs", "unite": "fft", "ratio": 8.0, "categorie": "vrd"},
+                {"code": "TCE-02", "designation": "Terrassements / Fondations", "unite": "fft", "ratio": 5.0, "categorie": "structure"},
+                {"code": "TCE-03", "designation": "Gros œuvre / Structure béton armé", "unite": "fft", "ratio": 32.0, "categorie": "structure"},
+                {"code": "TCE-04", "designation": "Charpente / Couverture", "unite": "fft", "ratio": 6.0, "categorie": "enveloppe"},
+                {"code": "TCE-05", "designation": "Étanchéité", "unite": "fft", "ratio": 3.0, "categorie": "enveloppe"},
+                {"code": "TCE-06", "designation": "Menuiseries extérieures / Façade", "unite": "fft", "ratio": 9.0, "categorie": "enveloppe"},
+                {"code": "TCE-07", "designation": "Menuiseries intérieures / Serrurerie", "unite": "fft", "ratio": 4.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-08", "designation": "Isolation / Cloisons / Plâtrerie", "unite": "fft", "ratio": 10.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-09", "designation": "Revêtements de sol / Carrelage", "unite": "fft", "ratio": 4.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-10", "designation": "Peinture", "unite": "fft", "ratio": 3.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-11", "designation": "Électricité / Courants forts et faibles", "unite": "fft", "ratio": 7.0, "categorie": "fluides"},
+                {"code": "TCE-12", "designation": "Plomberie / Sanitaires", "unite": "fft", "ratio": 5.0, "categorie": "fluides"},
+                {"code": "TCE-13", "designation": "CVC / VMC", "unite": "fft", "ratio": 4.0, "categorie": "fluides"},
+            ],
+        },
+        "batiment_tertiaire": {
+            "label": "Bâtiment tertiaire / Bureaux",
+            "lignes": [
+                {"code": "TCE-01", "designation": "VRD / Aménagements extérieurs", "unite": "fft", "ratio": 6.0, "categorie": "vrd"},
+                {"code": "TCE-02", "designation": "Terrassements / Fondations", "unite": "fft", "ratio": 5.0, "categorie": "structure"},
+                {"code": "TCE-03", "designation": "Gros œuvre / Structure béton armé", "unite": "fft", "ratio": 28.0, "categorie": "structure"},
+                {"code": "TCE-04", "designation": "Charpente / Couverture / Étanchéité", "unite": "fft", "ratio": 8.0, "categorie": "enveloppe"},
+                {"code": "TCE-05", "designation": "Façades / Menuiseries extérieures", "unite": "fft", "ratio": 12.0, "categorie": "enveloppe"},
+                {"code": "TCE-06", "designation": "Menuiseries intérieures / Cloisons", "unite": "fft", "ratio": 6.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-07", "designation": "Isolation / Faux plafonds", "unite": "fft", "ratio": 8.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-08", "designation": "Revêtements de sol", "unite": "fft", "ratio": 3.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-09", "designation": "Peinture", "unite": "fft", "ratio": 3.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-10", "designation": "Électricité / Courants forts et faibles", "unite": "fft", "ratio": 10.0, "categorie": "fluides"},
+                {"code": "TCE-11", "designation": "Plomberie / Sanitaires", "unite": "fft", "ratio": 4.0, "categorie": "fluides"},
+                {"code": "TCE-12", "designation": "CVC / GTB", "unite": "fft", "ratio": 7.0, "categorie": "fluides"},
+            ],
+        },
+        "erp": {
+            "label": "Équipement public / ERP",
+            "lignes": [
+                {"code": "TCE-01", "designation": "VRD / Aménagements extérieurs", "unite": "fft", "ratio": 10.0, "categorie": "vrd"},
+                {"code": "TCE-02", "designation": "Terrassements / Fondations", "unite": "fft", "ratio": 7.0, "categorie": "structure"},
+                {"code": "TCE-03", "designation": "Gros œuvre / Structure", "unite": "fft", "ratio": 28.0, "categorie": "structure"},
+                {"code": "TCE-04", "designation": "Charpente bois / Couverture", "unite": "fft", "ratio": 10.0, "categorie": "enveloppe"},
+                {"code": "TCE-05", "designation": "Étanchéité", "unite": "fft", "ratio": 2.0, "categorie": "enveloppe"},
+                {"code": "TCE-06", "designation": "Menuiseries extérieures", "unite": "fft", "ratio": 8.0, "categorie": "enveloppe"},
+                {"code": "TCE-07", "designation": "Menuiseries intérieures", "unite": "fft", "ratio": 4.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-08", "designation": "Isolation / Plâtrerie", "unite": "fft", "ratio": 9.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-09", "designation": "Revêtements de sol", "unite": "fft", "ratio": 3.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-10", "designation": "Peinture", "unite": "fft", "ratio": 3.0, "categorie": "second_oeuvre"},
+                {"code": "TCE-11", "designation": "Électricité", "unite": "fft", "ratio": 8.0, "categorie": "fluides"},
+                {"code": "TCE-12", "designation": "Plomberie / Sanitaires", "unite": "fft", "ratio": 4.0, "categorie": "fluides"},
+                {"code": "TCE-13", "designation": "CVC / VMC", "unite": "fft", "ratio": 4.0, "categorie": "fluides"},
+            ],
+        },
+        "vrd": {
+            "label": "Travaux de VRD / Aménagement",
+            "lignes": [
+                {"code": "TCE-01", "designation": "Démolition / Démantèlement", "unite": "fft", "ratio": 5.0, "categorie": "vrd"},
+                {"code": "TCE-02", "designation": "Terrassements généraux", "unite": "fft", "ratio": 20.0, "categorie": "vrd"},
+                {"code": "TCE-03", "designation": "Fondations / Soutènements", "unite": "fft", "ratio": 8.0, "categorie": "structure"},
+                {"code": "TCE-04", "designation": "Chaussées / Revêtements de voirie", "unite": "fft", "ratio": 25.0, "categorie": "vrd"},
+                {"code": "TCE-05", "designation": "Réseaux eaux usées / pluviales", "unite": "fft", "ratio": 15.0, "categorie": "reseaux"},
+                {"code": "TCE-06", "designation": "Réseau AEP / eau potable", "unite": "fft", "ratio": 8.0, "categorie": "reseaux"},
+                {"code": "TCE-07", "designation": "Électricité / Éclairage public", "unite": "fft", "ratio": 10.0, "categorie": "reseaux"},
+                {"code": "TCE-08", "designation": "Espaces verts / Plantations", "unite": "fft", "ratio": 5.0, "categorie": "paysager"},
+                {"code": "TCE-09", "designation": "Mobilier urbain / Signalisation", "unite": "fft", "ratio": 4.0, "categorie": "paysager"},
+            ],
+        },
+    }
+
+    type_ouvrage = request.data.get("type_ouvrage", "batiment_collectif")
+    if type_ouvrage not in RATIOS_TCE:
+        type_ouvrage = "batiment_collectif"
+
+    montant_ht = float(request.data.get("montant_ht", 0) or 0)
+    if montant_ht <= 0:
+        return Response({"erreur": "montant_ht doit être positif."}, status=400)
+
+    ajustements = request.data.get("ajustements", {}) or {}
+    referentiel = RATIOS_TCE[type_ouvrage]
+    lignes_base = referentiel["lignes"]
+
+    # Appliquer ajustements
+    lignes = []
+    for l in lignes_base:
+        ratio = float(ajustements.get(l["code"], l["ratio"]))
+        lignes.append({**l, "ratio": ratio})
+
+    total_ratio = sum(l["ratio"] for l in lignes)
+
+    COULEURS_CATEGORIE = {
+        "vrd": "#6366f1",
+        "structure": "#ef4444",
+        "enveloppe": "#f59e0b",
+        "second_oeuvre": "#10b981",
+        "fluides": "#3b82f6",
+        "reseaux": "#8b5cf6",
+        "paysager": "#22c55e",
+    }
+
+    lignes_calculees = []
+    for l in lignes:
+        montant = montant_ht * (l["ratio"] / total_ratio)
+        lignes_calculees.append({
+            "code": l["code"],
+            "designation": l["designation"],
+            "unite": l["unite"],
+            "categorie": l["categorie"],
+            "ratio": round(l["ratio"], 2),
+            "montant": round(montant, 2),
+            "couleur": COULEURS_CATEGORIE.get(l["categorie"], "#64748b"),
+        })
+
+    return Response({
+        "type_ouvrage": type_ouvrage,
+        "label_ouvrage": referentiel["label"],
+        "montant_ht": montant_ht,
+        "total_ratio": round(total_ratio, 2),
+        "lignes": lignes_calculees,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_creer_etude_tce(request):
+    """
+    Crée une EtudeEconomique avec des LignePrix générées par TCE.
+
+    Body: {
+      projet_id: str,
+      intitule: str,
+      type_ouvrage: str,
+      montant_ht: float,
+      ajustements: dict,  # optionnel
+    }
+    """
+    from applications.projets.models import Projet
+
+    projet_id = request.data.get("projet_id")
+    if not projet_id:
+        return Response({"erreur": "projet_id est requis."}, status=400)
+
+    try:
+        projet = Projet.objects.get(pk=projet_id)
+    except Projet.DoesNotExist:
+        return Response({"erreur": "Projet introuvable."}, status=404)
+
+    # Réutiliser la logique de calcul TCE
+    simulation_request = type("Req", (), {
+        "data": {
+            "type_ouvrage": request.data.get("type_ouvrage", "batiment_collectif"),
+            "montant_ht": request.data.get("montant_ht"),
+            "ajustements": request.data.get("ajustements", {}),
+        }
+    })()
+    reponse_tce = vue_estimation_tce(simulation_request)
+    if reponse_tce.status_code != 200:
+        return reponse_tce
+    tce = reponse_tce.data
+
+    intitule = request.data.get("intitule") or f"Estimation TCE — {tce['label_ouvrage']}"
+
+    etude = EtudeEconomique.objects.create(
+        projet=projet,
+        intitule=intitule,
+        statut="brouillon",
+        cree_par=request.user,
+    )
+
+    for i, ligne in enumerate(tce["lignes"], start=1):
+        LignePrix.objects.create(
+            etude=etude,
+            numero_ordre=i,
+            code=ligne["code"],
+            designation=ligne["designation"],
+            unite=ligne["unite"],
+            quantite_prevue=Decimal("1"),
+            cout_matieres=Decimal(str(round(ligne["montant"], 2))),
+            debourse_sec_unitaire=Decimal(str(round(ligne["montant"], 2))),
+            prix_vente_unitaire=Decimal(str(round(ligne["montant"], 2))),
+            etat_rentabilite="indefini",
+        )
+
+    # Mettre à jour les totaux
+    total = Decimal(str(tce["montant_ht"]))
+    etude.total_debourse_sec = total
+    etude.total_cout_direct = total
+    etude.total_cout_revient = total
+    etude.total_prix_vente = total
+    etude.save()
+
+    return Response({"id": str(etude.id), "intitule": etude.intitule}, status=201)
+
+
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_missions_par_type_client(request):

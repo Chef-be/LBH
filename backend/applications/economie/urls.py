@@ -56,4 +56,8 @@ urlpatterns = [
     # Décomposition inverse de prix et missions par type de client
     path("decomposer-prix/", views.vue_decomposer_prix_inverse, name="decomposer-prix-inverse"),
     path("missions/", views.vue_missions_par_type_client, name="missions-par-type-client"),
+
+    # Estimation TCE par ratios
+    path("estimation-tce/", views.vue_estimation_tce, name="estimation-tce"),
+    path("estimation-tce/creer-etude/", views.vue_creer_etude_tce, name="estimation-tce-creer-etude"),
 ]

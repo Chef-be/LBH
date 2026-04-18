@@ -10,12 +10,34 @@ import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
   TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
   MapPin, Building2, ExternalLink, Plus, FolderOpen, ReceiptText,
+  ChevronRight, AlertTriangle,
 } from "lucide-react";
 import { api } from "@/crochets/useApi";
 
 /* ────────────────────────────────────────────────────────────
    TYPES
 ────────────────────────────────────────────────────────────── */
+interface DevisResume {
+  id: string;
+  reference: string;
+  intitule: string;
+  statut: string;
+  montant_ttc: string;
+  date_emission: string;
+  client_nom: string;
+}
+
+interface FactureResume {
+  id: string;
+  reference: string;
+  client_nom: string;
+  statut: string;
+  montant_ttc: string;
+  montant_restant: string;
+  est_en_retard: boolean;
+  date_echeance: string;
+}
+
 interface SyntheseProjet {
   nb_documents: number;
   nb_etudes_economiques: number;
@@ -284,10 +306,45 @@ function AccordeonProcessus({
 /* ────────────────────────────────────────────────────────────
    COMPOSANT PRINCIPAL
 ────────────────────────────────────────────────────────────── */
+const STATUTS_DEVIS: Record<string, { couleur: string; label: string }> = {
+  brouillon: { couleur: "var(--texte-3)", label: "Brouillon" },
+  envoye: { couleur: "#f59e0b", label: "Envoyé" },
+  accepte: { couleur: "#10b981", label: "Accepté" },
+  refuse: { couleur: "#ef4444", label: "Refusé" },
+  expire: { couleur: "#6b7280", label: "Expiré" },
+};
+
+const STATUTS_FACTURE: Record<string, { couleur: string; label: string }> = {
+  brouillon: { couleur: "var(--texte-3)", label: "Brouillon" },
+  emise: { couleur: "#3b82f6", label: "Émise" },
+  en_retard: { couleur: "#ef4444", label: "En retard" },
+  partiellement_payee: { couleur: "#f59e0b", label: "Part. payée" },
+  payee: { couleur: "#10b981", label: "Payée" },
+  annulee: { couleur: "var(--texte-3)", label: "Annulée" },
+};
+
 export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
   const { data: synthese } = useQuery<SyntheseProjet>({
     queryKey: ["projet-synthese", projet.id],
     queryFn: () => api.get<SyntheseProjet>(`/api/projets/${projet.id}/synthese/`),
+    staleTime: 60_000,
+  });
+
+  const { data: devisProjet = [] } = useQuery<DevisResume[]>({
+    queryKey: ["devis-projet", projet.id],
+    queryFn: async () => {
+      const r = await api.get<{ results?: DevisResume[] } | DevisResume[]>(`/api/societe/devis/?projet=${projet.id}`);
+      return Array.isArray(r) ? r : (r.results ?? []);
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: facturesProjet = [] } = useQuery<FactureResume[]>({
+    queryKey: ["factures-projet", projet.id],
+    queryFn: async () => {
+      const r = await api.get<{ results?: FactureResume[] } | FactureResume[]>(`/api/societe/factures/?projet=${projet.id}`);
+      return Array.isArray(r) ? r : (r.results ?? []);
+    },
     staleTime: 60_000,
   });
 
@@ -560,6 +617,117 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           </Link>
         </div>
       </section>
+
+      {/* ── Synthèse financière ── */}
+      {(devisProjet.length > 0 || facturesProjet.length > 0) && (
+        <section className="grid gap-4 lg:grid-cols-2">
+          {/* Devis */}
+          {devisProjet.length > 0 && (
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+            >
+              <div
+                className="flex items-center justify-between px-4 py-3"
+                style={{ borderBottom: "1px solid var(--bordure)" }}
+              >
+                <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+                  Devis honoraires ({devisProjet.length})
+                </h3>
+                <Link href="/societe/devis" className="text-xs" style={{ color: "var(--c-base)" }}>
+                  Voir tout
+                </Link>
+              </div>
+              <ul className="divide-y" style={{ borderColor: "var(--bordure)" }}>
+                {devisProjet.slice(0, 4).map((d) => {
+                  const cfg = STATUTS_DEVIS[d.statut] ?? STATUTS_DEVIS.brouillon;
+                  return (
+                    <li key={d.id}>
+                      <Link
+                        href={`/societe/devis/${d.id}`}
+                        className="flex items-center justify-between px-4 py-3 hover:opacity-80 transition-opacity"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate" style={{ color: "var(--texte)" }}>{d.intitule}</p>
+                          <p className="text-xs font-mono" style={{ color: "var(--texte-3)" }}>{d.reference}</p>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-full font-medium"
+                            style={{ background: `color-mix(in srgb, ${cfg.couleur} 12%, var(--fond-entree))`, color: cfg.couleur }}
+                          >
+                            {cfg.label}
+                          </span>
+                          <span className="text-sm font-mono font-semibold" style={{ color: "var(--texte)" }}>
+                            {parseFloat(d.montant_ttc).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} €
+                          </span>
+                          <ChevronRight size={12} style={{ color: "var(--texte-3)" }} />
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {/* Factures */}
+          {facturesProjet.length > 0 && (
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+            >
+              <div
+                className="flex items-center justify-between px-4 py-3"
+                style={{ borderBottom: "1px solid var(--bordure)" }}
+              >
+                <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+                  Factures ({facturesProjet.length})
+                </h3>
+                <Link href="/societe/factures" className="text-xs" style={{ color: "var(--c-base)" }}>
+                  Voir tout
+                </Link>
+              </div>
+              <ul className="divide-y" style={{ borderColor: "var(--bordure)" }}>
+                {facturesProjet.slice(0, 4).map((f) => {
+                  const cfg = STATUTS_FACTURE[f.statut] ?? STATUTS_FACTURE.emise;
+                  const restant = parseFloat(f.montant_restant);
+                  return (
+                    <li key={f.id}>
+                      <Link
+                        href={`/societe/factures/${f.id}`}
+                        className="flex items-center justify-between px-4 py-3 hover:opacity-80 transition-opacity"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-mono font-medium" style={{ color: "var(--texte)" }}>
+                            {f.est_en_retard && <AlertTriangle size={11} className="inline mr-1" style={{ color: "#ef4444" }} />}
+                            {f.reference}
+                          </p>
+                          <p className="text-xs" style={{ color: "var(--texte-3)" }}>{f.client_nom}</p>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-full font-medium"
+                            style={{ background: `color-mix(in srgb, ${cfg.couleur} 12%, var(--fond-entree))`, color: cfg.couleur }}
+                          >
+                            {cfg.label}
+                          </span>
+                          {restant > 0 && (
+                            <span className="text-xs font-mono" style={{ color: f.est_en_retard ? "#ef4444" : "var(--texte-2)" }}>
+                              -{restant.toLocaleString("fr-FR", { maximumFractionDigits: 0 })} €
+                            </span>
+                          )}
+                          <ChevronRight size={12} style={{ color: "var(--texte-3)" }} />
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Processus recommandé ── */}
       {(processus.points_de_controle.length > 0 || processus.livrables_prioritaires.length > 0 || processus.methodes_estimation.length > 0) && (
