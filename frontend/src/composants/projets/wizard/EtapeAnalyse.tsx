@@ -1,14 +1,12 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
   Upload, FileText, FileSpreadsheet, Image, File, X, Zap,
-  CheckCircle2, AlertCircle, FolderOpen, BookOpen, ChevronDown,
+  CheckCircle2, AlertCircle, FolderOpen, ChevronDown,
   ChevronUp, Sparkles,
 } from "lucide-react";
-import { api } from "@/crochets/useApi";
 import type { EtatWizard, ResultatPreanalyseSources, TachePreanalyseSources, ParcoursProjet } from "./types";
 
 // ─── Icônes par extension ────────────────────────────────────────────────────
@@ -69,93 +67,6 @@ function BadgeType({ code, libelle }: { code: string; libelle: string }) {
   );
 }
 
-// ─── Section ressources Samba ────────────────────────────────────────────────
-
-interface RessourceDoc {
-  nom: string;
-  nom_affichage: string;
-  extension: string;
-  taille_octets: number;
-  type: string;
-}
-
-function ModalRessources({
-  onAjouter,
-  onFermer,
-}: {
-  onAjouter: (noms: string[]) => void;
-  onFermer: () => void;
-}) {
-  const { data } = useQuery<{ fichiers: RessourceDoc[]; total: number }>({
-    queryKey: ["ressources-documentaires"],
-    queryFn: () => api.get("/api/projets/ressources-documentaires/"),
-  });
-  const [selectionnes, setSelectionnes] = useState<string[]>([]);
-
-  function toggle(nom: string) {
-    setSelectionnes((prev) =>
-      prev.includes(nom) ? prev.filter((n) => n !== nom) : [...prev, nom]
-    );
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.5)" }}
-    >
-      <div
-        className="w-full max-w-lg rounded-2xl shadow-2xl p-5 flex flex-col gap-4 max-h-[80vh]"
-        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-[color:var(--texte)]">Ressources documentaires</h3>
-            <p className="text-xs text-[color:var(--texte-2)] mt-0.5">Guides et références disponibles sur le serveur</p>
-          </div>
-          <button type="button" onClick={onFermer} className="text-[color:var(--texte-3)] hover:text-[color:var(--texte)]">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="overflow-y-auto flex-1 space-y-1.5">
-          {data?.fichiers.map((f) => (
-            <button
-              key={f.nom}
-              type="button"
-              onClick={() => toggle(f.nom)}
-              className={clsx(
-                "w-full text-left flex items-center gap-3 px-3 py-2 rounded-xl border transition-all",
-                selectionnes.includes(f.nom)
-                  ? "border-[color:var(--c-base)] bg-[color:var(--c-leger)]"
-                  : "border-[color:var(--bordure)] hover:border-[color:var(--c-clair)]"
-              )}
-              style={{ background: selectionnes.includes(f.nom) ? "var(--c-leger)" : "var(--fond-carte)" }}
-            >
-              <BookOpen size={16} className="text-[color:var(--texte-2)] shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[color:var(--texte)] truncate">{f.nom_affichage}</p>
-                <p className="text-[10px] text-[color:var(--texte-3)]">{f.extension.toUpperCase()} — {tailleLisible(f.taille_octets)}</p>
-              </div>
-              {selectionnes.includes(f.nom) && <CheckCircle2 size={16} className="shrink-0 ml-auto text-[color:var(--c-base)]" />}
-            </button>
-          ))}
-          {!data && <div className="py-8 text-center text-sm text-[color:var(--texte-2)]">Chargement…</div>}
-        </div>
-        <div className="flex justify-end gap-2 pt-2 border-t border-[color:var(--bordure)]">
-          <button type="button" onClick={onFermer} className="btn-secondaire">Annuler</button>
-          <button
-            type="button"
-            onClick={() => { onAjouter(selectionnes); onFermer(); }}
-            disabled={!selectionnes.length}
-            className="btn-primaire"
-          >
-            Ajouter {selectionnes.length > 0 ? `(${selectionnes.length})` : ""}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Composant principal ─────────────────────────────────────────────────────
 
 interface EtapeAnalyseProps {
@@ -188,7 +99,6 @@ export function EtapeAnalyse({
 }: EtapeAnalyseProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [survol, setSurvol] = useState(false);
-  const [afficherRessources, setAfficherRessources] = useState(false);
   const [resultatEtendu, setResultatEtendu] = useState(false);
 
   const statut = tacheAnalyse?.statut;
@@ -282,17 +192,9 @@ export function EtapeAnalyse({
           </div>
         )}
 
-        {/* Boutons d'action */}
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setAfficherRessources(true)}
-            className="btn-secondaire text-xs"
-          >
-            <BookOpen size={14} />
-            Ajouter depuis les ressources
-          </button>
-          {etat.fichiersSourcesProjet.length > 0 && !analyseEnCours && statut !== "terminee" && (
+        {/* Bouton d'analyse */}
+        {etat.fichiersSourcesProjet.length > 0 && !analyseEnCours && statut !== "terminee" && (
+          <div className="mt-3">
             <button
               type="button"
               onClick={onLancerAnalyse}
@@ -301,8 +203,8 @@ export function EtapeAnalyse({
               <Zap size={14} />
               Analyser les pièces ({etat.fichiersSourcesProjet.length})
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Progression de l'analyse */}
@@ -492,18 +394,6 @@ export function EtapeAnalyse({
         </p>
       )}
 
-      {/* Modal ressources */}
-      {afficherRessources && (
-        <ModalRessources
-          onAjouter={(noms) => {
-            // Les fichiers Samba ne peuvent pas être créés en File côté client.
-            // On note juste le contexte — l'import réel se fait via l'API au moment de la création.
-            console.info("Ressources sélectionnées pour contexte:", noms);
-            setAfficherRessources(false);
-          }}
-          onFermer={() => setAfficherRessources(false)}
-        />
-      )}
     </div>
   );
 }

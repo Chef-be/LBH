@@ -17,9 +17,13 @@ import { ListeEtudesPrix } from "@/composants/economie/ListeEtudesPrix";
 interface Projet {
   id: string;
   reference: string;
-  nom: string;
-  type_client?: string;
-  contexte?: { famille_client?: string };
+  intitule: string;
+  clientele_cible?: string;
+  contexte_projet?: {
+    famille_client?: { code: string; libelle: string };
+    sous_type_client?: { code: string; libelle: string };
+    mission_principale?: { code: string; libelle: string };
+  } | null;
 }
 
 interface ResultatDecomposition {
@@ -69,14 +73,15 @@ const LOTS_SELECTEUR = [
 ];
 
 function detecterTypeClient(projet: Projet): "moa_public" | "moe" | "entreprise" | "generique" {
-  const typeClient = (projet.type_client || projet.contexte?.famille_client || "").toLowerCase();
-  if (typeClient.includes("public") || typeClient.includes("collectivite") || typeClient.includes("moa")) {
+  // Lit le code exact depuis contexte_projet.famille_client.code (structure réelle de l'API)
+  const code = (projet.contexte_projet?.famille_client?.code || "").toLowerCase();
+  if (code === "maitrise_ouvrage" || code === "moa" || code.includes("public") || code.includes("collectivite")) {
     return "moa_public";
   }
-  if (typeClient.includes("moe") || typeClient.includes("architecte") || typeClient.includes("bureau")) {
+  if (code === "maitrise_oeuvre" || code === "moe" || code.includes("architecte") || code.includes("bureau")) {
     return "moe";
   }
-  if (typeClient.includes("entreprise") || typeClient.includes("btp") || typeClient.includes("constructeur")) {
+  if (code === "entreprise" || code.includes("btp") || code.includes("constructeur")) {
     return "entreprise";
   }
   return "generique";
@@ -188,7 +193,11 @@ export default function PageEconomieProjet({ params }: { params: Promise<{ id: s
       { libelle: "BPU / DQE", description: "Bordereau des prix unitaires et quantitatif", href: `/projets/${id}/pieces-ecrites/nouvelle?type=bpu`, icone: <FileText className="w-5 h-5 text-indigo-600" /> },
       { libelle: "Analyse de marge", description: "Rentabilité prévisionnelle et risques", href: `/projets/${id}/rentabilite`, icone: <BarChart3 className="w-5 h-5 text-emerald-600" /> },
     ],
-    generique: [],
+    generique: [
+      { libelle: "Estimation TCE", description: "Estimation tous corps d'état", href: `/projets/${id}/economie/nouvelle`, icone: <BadgeEuro className="w-5 h-5 text-blue-600" /> },
+      { libelle: "Étude de prix analytique", description: "DS / FC / FG / B&A jusqu'au PV", href: `/projets/${id}/economie/nouvelle`, icone: <Calculator className="w-5 h-5 text-blue-600" /> },
+      { libelle: "Analyse de marge", description: "Rentabilité prévisionnelle et risques", href: `/projets/${id}/rentabilite`, icone: <BarChart3 className="w-5 h-5 text-emerald-600" /> },
+    ],
   }[typeClient];
 
   const iconeTypeClient = {
@@ -199,10 +208,10 @@ export default function PageEconomieProjet({ params }: { params: Promise<{ id: s
   }[typeClient];
 
   const libelleTypeClient = {
-    moa_public: "Maître d'ouvrage public",
+    moa_public: "Maître d'ouvrage",
     moe: "Maître d'œuvre",
     entreprise: "Entreprise BTP",
-    generique: "Client générique",
+    generique: projet?.contexte_projet?.famille_client?.libelle || "Profil mixte",
   }[typeClient];
 
   return (

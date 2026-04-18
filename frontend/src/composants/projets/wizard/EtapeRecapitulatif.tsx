@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
-  RadialBarChart, RadialBar,
 } from "recharts";
 import {
   MapPin, Building2, Calendar, Euro, FileText, CheckCircle2,
@@ -121,45 +120,80 @@ function RadarMissions({ sousMissionsIds, parcours }: { sousMissionsIds: string[
 }
 
 /* ────────────────────────────────────────────────────────────
-   GAUGE BUDGET (RadialBarChart)
+   GAUGE BUDGET — SVG semi-cercle
 ────────────────────────────────────────────────────────────── */
 function GaugeBudget({ montant }: { montant: string }) {
   const valeur = parseFloat(montant.replace(/\s/g, "").replace(",", ".")) || 0;
 
-  // Seuils indicatifs (en €)
   const seuilsKpi = [100_000, 500_000, 1_000_000, 5_000_000, 10_000_000];
   const niveaux = ["Très petit", "Petit", "Moyen", "Grand", "Très grand", "Majeur"];
   const niveauIdx = seuilsKpi.findIndex((s) => valeur < s);
   const niveau = niveauIdx === -1 ? niveaux[5] : niveaux[niveauIdx];
-  const pct = niveauIdx === -1 ? 100 : Math.round(((niveauIdx + (valeur / seuilsKpi[niveauIdx])) / seuilsKpi.length) * 100);
+  const pct = Math.min(
+    niveauIdx === -1 ? 100 : Math.round(((niveauIdx + (valeur / seuilsKpi[niveauIdx])) / seuilsKpi.length) * 100),
+    100
+  );
 
-  const couleur = pct < 30 ? "#10b981" : pct < 60 ? "var(--c-base)" : pct < 85 ? "#f59e0b" : "#ef4444";
+  const couleur = pct < 30 ? "#10b981" : pct < 60 ? "#3b82f6" : pct < 85 ? "#f59e0b" : "#ef4444";
 
-  const data = [{ name: "budget", valeur: Math.min(pct, 100), fill: couleur }];
+  const montantFormate = valeur >= 1_000_000
+    ? `${(valeur / 1_000_000).toFixed(1)}M€`
+    : valeur >= 1_000
+    ? `${Math.round(valeur / 1_000)} k€`
+    : valeur > 0 ? `${valeur} €` : "—";
+
+  // SVG semi-cercle : centre (60,58), rayon 42
+  const R = 42;
+  const cx = 60;
+  const cy = 58;
+  const ARC = Math.PI * R; // longueur de la demi-circonférence
+  const dashOffset = ARC * (1 - pct / 100);
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative w-40 h-20">
-        <ResponsiveContainer width="100%" height="100%">
-          <RadialBarChart
-            cx="50%"
-            cy="100%"
-            innerRadius="70%"
-            outerRadius="100%"
-            startAngle={180}
-            endAngle={0}
-            data={data}
-          >
-            <RadialBar dataKey="valeur" cornerRadius={4} background={{ fill: "var(--fond-entree)" }} />
-          </RadialBarChart>
-        </ResponsiveContainer>
-        <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-          <span className="text-lg font-bold" style={{ color: couleur }}>
-            {valeur > 0 ? (valeur >= 1_000_000 ? `${(valeur / 1_000_000).toFixed(1)}M€` : `${Math.round(valeur / 1000)}k€`) : "—"}
-          </span>
-        </div>
-      </div>
-      <span className="text-xs mt-1 font-medium" style={{ color: "var(--texte-2)" }}>{niveau}</span>
+    <div className="flex flex-col items-center gap-0">
+      <svg viewBox="0 0 120 68" width="148" height="84" aria-hidden="true">
+        {/* Track (fond) */}
+        <path
+          d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+          fill="none"
+          stroke="var(--fond-entree)"
+          strokeWidth="10"
+          strokeLinecap="round"
+        />
+        {/* Arc de progression */}
+        <path
+          d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+          fill="none"
+          stroke={couleur}
+          strokeWidth="10"
+          strokeLinecap="round"
+          strokeDasharray={ARC}
+          strokeDashoffset={dashOffset}
+          style={{ transition: "stroke-dashoffset 0.6s ease" }}
+        />
+        {/* Valeur centrée DANS l'arc */}
+        <text
+          x={cx} y={cy - 4}
+          textAnchor="middle"
+          fill={couleur}
+          fontSize="14"
+          fontWeight="700"
+          fontFamily="inherit"
+        >
+          {montantFormate}
+        </text>
+        {/* Pourcentage en petit */}
+        <text
+          x={cx} y={cy + 10}
+          textAnchor="middle"
+          fill="var(--texte-3)"
+          fontSize="9"
+          fontFamily="inherit"
+        >
+          {pct}% de l&apos;échelle
+        </text>
+      </svg>
+      <p className="text-xs font-semibold -mt-1" style={{ color: "var(--texte-2)" }}>{niveau}</p>
     </div>
   );
 }

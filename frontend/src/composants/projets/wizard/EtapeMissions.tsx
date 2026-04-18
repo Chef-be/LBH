@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, ChevronDown, ChevronUp, FileText, Calculator, PenTool, ClipboardList, Search, Settings } from "lucide-react";
 import { clsx } from "clsx";
+import { useSessionStore } from "@/crochets/useSession";
 import type { EtatWizard, ParcoursProjet, ValeurChamp, ChampDynamique } from "./types";
 
 interface EtapeMissionsProps {
@@ -586,6 +587,8 @@ function SectionDonneesEntree({
    COMPOSANT PRINCIPAL
 ────────────────────────────────────────────────────────────── */
 export function EtapeMissions({ etat, parcours, onChange }: EtapeMissionsProps) {
+  const utilisateur = useSessionStore((s) => s.utilisateur);
+  const nomCabinet = utilisateur?.organisation_nom ?? "notre cabinet";
   const sousMissions = parcours?.referentiels?.sous_missions ?? [];
   const champsDynamiques = parcours?.champs_dynamiques ?? [];
 
@@ -709,7 +712,7 @@ export function EtapeMissions({ etat, parcours, onChange }: EtapeMissionsProps) 
             />
           </div>
           <div>
-            <label className="libelle-champ" htmlFor="role-lbh">Rôle LBH dans ce projet</label>
+            <label className="libelle-champ" htmlFor="role-lbh">Rôle de {nomCabinet} dans ce projet</label>
             <select
               id="role-lbh"
               className="champ-saisie mt-1"

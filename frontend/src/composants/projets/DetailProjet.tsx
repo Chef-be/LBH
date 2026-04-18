@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
-import { ArrowLeft, Calendar, MapPin, Building2, User, Euro, FolderOpen, Users, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Euro, FolderOpen, Users, Pencil, Trash2, X, Info, ChevronRight } from "lucide-react";
 import { NavigationProjet } from "@/composants/projets/NavigationProjet";
 import { DashboardProjet } from "@/composants/projets/DashboardProjet";
 
@@ -293,112 +293,31 @@ export function DetailProjet({ id }: { id: string }) {
       {/* Dashboard projet */}
       <DashboardProjet projet={projet} />
 
-      {/* Grille informations complémentaires (conservée) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Colonne gauche : données principales */}
+      {/* Grille compacte */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* Colonne gauche */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Informations générales */}
-          <div className="carte">
-            <h2 className="mb-4">Informations générales</h2>
-            <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
-              <div>
-                <dt className="text-slate-500 flex items-center gap-1">
-                  <Building2 size={12} /> Bureau d&apos;études
-                </dt>
-                <dd className="font-medium mt-0.5">{projet.organisation_nom || "—"}</dd>
-              </div>
-              {projet.maitre_ouvrage_nom && (
-                <div>
-                  <dt className="text-slate-500">Maître d&apos;ouvrage</dt>
-                  <dd className="font-medium mt-0.5">{projet.maitre_ouvrage_nom}</dd>
-                </div>
-              )}
-              {projet.maitre_oeuvre_nom && (
-                <div>
-                  <dt className="text-slate-500">Maître d&apos;œuvre</dt>
-                  <dd className="font-medium mt-0.5">{projet.maitre_oeuvre_nom}</dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-slate-500 flex items-center gap-1">
-                  <User size={12} /> Responsable
-                </dt>
-                <dd className="font-medium mt-0.5">{projet.responsable_nom}</dd>
-              </div>
-              {(projet.commune || projet.departement) && (
-                <div>
-                  <dt className="text-slate-500 flex items-center gap-1">
-                    <MapPin size={12} /> Localisation
-                  </dt>
-                  <dd className="font-medium mt-0.5">
-                    {[projet.commune, projet.departement ? `(${projet.departement})` : ""].filter(Boolean).join(" ")}
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-slate-500">Type</dt>
-                <dd className="font-medium mt-0.5">{projet.type_libelle}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">Clientèle cible</dt>
-                <dd className="font-medium mt-0.5">{projet.clientele_cible_libelle}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">Objectif principal</dt>
-                <dd className="font-medium mt-0.5">{projet.objectif_mission_libelle}</dd>
-              </div>
-            </dl>
-          </div>
-
-          {/* Calendrier */}
-          <div className="carte">
-            <h2 className="mb-4 flex items-center gap-2">
-              <Calendar size={16} /> Calendrier
-            </h2>
-            <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
-              <div>
-                <dt className="text-slate-500">Début prévu</dt>
-                <dd className="font-medium mt-0.5">{formaterDate(projet.date_debut_prevue)}</dd>
-              </div>
-              <div>
-                <dt className="text-slate-500">Fin prévue</dt>
-                <dd className="font-medium mt-0.5">{formaterDate(projet.date_fin_prevue)}</dd>
-              </div>
-              {projet.date_debut_reelle && (
-                <div>
-                  <dt className="text-slate-500">Début réel</dt>
-                  <dd className="font-medium mt-0.5">{formaterDate(projet.date_debut_reelle)}</dd>
-                </div>
-              )}
-              {projet.date_fin_reelle && (
-                <div>
-                  <dt className="text-slate-500">Fin réelle</dt>
-                  <dd className="font-medium mt-0.5">{formaterDate(projet.date_fin_reelle)}</dd>
-                </div>
-              )}
-            </dl>
-          </div>
+          {/* Contexte compact */}
+          <ContexteCompact projet={projet} />
 
           {/* Lots */}
           {projet.lots.length > 0 && (
             <div className="carte">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="flex items-center gap-2">
-                  <FolderOpen size={16} /> Lots ({projet.lots.length})
-                </h2>
-              </div>
+              <h2 className="mb-4 flex items-center gap-2">
+                <FolderOpen size={16} /> Lots ({projet.lots.length})
+              </h2>
               <div className="space-y-2">
                 {projet.lots.map((lot) => (
-                  <div key={lot.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
+                  <div key={lot.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: "var(--fond-entree)" }}>
                     <div>
-                      <span className="font-mono text-xs text-slate-500 mr-2">Lot {lot.numero}</span>
+                      <span className="font-mono text-xs mr-2" style={{ color: "var(--texte-3)" }}>Lot {lot.numero}</span>
                       <span className="font-medium text-sm">{lot.intitule}</span>
                       {lot.description && (
-                        <p className="text-xs text-slate-400 mt-0.5">{lot.description}</p>
+                        <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>{lot.description}</p>
                       )}
                     </div>
                     {lot.montant_estime != null && (
-                      <span className="font-mono text-sm text-slate-700">
+                      <span className="font-mono text-sm" style={{ color: "var(--texte-2)" }}>
                         {formaterMontant(lot.montant_estime)}
                       </span>
                     )}
@@ -407,189 +326,6 @@ export function DetailProjet({ id }: { id: string }) {
               </div>
             </div>
           )}
-
-          <div className="carte">
-            <h2 className="mb-4">Contexte métier et GED projet</h2>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <div className="rounded-xl bg-slate-50 p-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Documents attendus</h3>
-                <ul className="space-y-2 text-sm text-slate-600">
-                  {projet.processus_recommande.documents_attendus.map((ligne) => (
-                    <li key={ligne}>• {ligne}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-xl bg-amber-50 p-4">
-                <h3 className="text-sm font-semibold text-amber-800 mb-3">Points de contrôle</h3>
-                <ul className="space-y-2 text-sm text-slate-700">
-                  {projet.processus_recommande.points_de_controle.map((ligne) => (
-                    <li key={ligne}>• {ligne}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-xl bg-emerald-50 p-4">
-                <h3 className="text-sm font-semibold text-emerald-800 mb-3">Documents à générer</h3>
-                <ul className="space-y-2 text-sm text-slate-700">
-                  {projet.processus_recommande.documents_a_generer.map((ligne) => (
-                    <li key={ligne}>• {ligne}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-            {projet.contexte_projet && (
-              <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-700">Client et mission</h3>
-                  <dl className="space-y-2 text-sm text-slate-700">
-                    <div>
-                      <dt className="text-slate-500">Famille client</dt>
-                      <dd className="font-medium">{projet.contexte_projet.famille_client.libelle}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Sous-type</dt>
-                      <dd className="font-medium">{projet.contexte_projet.sous_type_client.libelle}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Contexte contractuel</dt>
-                      <dd className="font-medium">{projet.contexte_projet.contexte_contractuel.libelle}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Mission principale</dt>
-                      <dd className="font-medium">{projet.contexte_projet.mission_principale.libelle}</dd>
-                    </div>
-                  </dl>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-700">Paramètres de mission</h3>
-                  <dl className="space-y-2 text-sm text-slate-700">
-                    <div>
-                      <dt className="text-slate-500">Nature du marché</dt>
-                      <dd className="font-medium">{projet.contexte_projet.nature_marche}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Partie contractante</dt>
-                      <dd className="font-medium">{projet.contexte_projet.partie_contractante || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Rôle LBH</dt>
-                      <dd className="font-medium">{projet.contexte_projet.role_lbh || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-slate-500">Méthode d&apos;estimation</dt>
-                      <dd className="font-medium">{projet.contexte_projet.methode_estimation || "—"}</dd>
-                    </div>
-                  </dl>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-700">Sous-missions activées</h3>
-                  <ul className="space-y-2 text-sm text-slate-700">
-                    {projet.contexte_projet.sous_missions.length ? projet.contexte_projet.sous_missions.map((ligne) => (
-                      <li key={ligne.code}>
-                        <p>• {ligne.libelle}</p>
-                        {ligne.types_livrables?.length ? (
-                          <div className="mt-1 flex flex-wrap gap-1.5 pl-4">
-                            {ligne.types_livrables.map((type) => (
-                              <span key={type} className="rounded-full border border-primaire-200 bg-primaire-50 px-2 py-0.5 text-[11px] font-medium text-primaire-800">
-                                {type.replace(/_/g, " ")}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </li>
-                    )) : <li>Aucune sous-mission activée.</li>}
-                  </ul>
-                </div>
-              </div>
-            )}
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              <div className="rounded-xl bg-white p-4 border border-slate-200">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Méthodes ordonnées</h3>
-                <ul className="space-y-3 text-sm text-slate-700">
-                  {projet.processus_recommande.methodes_estimation.map((ligne, index) => (
-                    <li key={ligne.code}>
-                      <p className="font-medium">{index + 1}. {ligne.libelle}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{ligne.objectif}</p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-xl bg-white p-4 border border-slate-200">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Livrables prioritaires</h3>
-                <ul className="space-y-2 text-sm text-slate-700">
-                  {projet.processus_recommande.livrables_prioritaires.map((ligne) => (
-                    <li key={ligne}>• {ligne}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-xl bg-white p-4 border border-slate-200">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Indicateurs clefs</h3>
-                <ul className="space-y-2 text-sm text-slate-700">
-                  {projet.processus_recommande.indicateurs_clefs.map((ligne) => (
-                    <li key={ligne}>• {ligne}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-            {projet.mode_variation_prix && projet.mode_variation_prix.type_evolution !== "aucune" ? (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Variation de prix</h3>
-                <dl className="grid gap-3 lg:grid-cols-3 text-sm">
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Type</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.type_evolution}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Cadre</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.cadre_juridique}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Indice / index</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.indice_reference || "—"}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Prix initial</dt><dd className="mt-1 font-medium text-slate-900">{formaterDate(projet.mode_variation_prix.date_prix_initial || null)}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Remise d&apos;offre</dt><dd className="mt-1 font-medium text-slate-900">{formaterDate(projet.mode_variation_prix.date_remise_offre || null)}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Démarrage</dt><dd className="mt-1 font-medium text-slate-900">{formaterDate(projet.mode_variation_prix.date_demarrage || null)}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Périodicité</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.periodicite_revision || "—"}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Part fixe</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.part_fixe || "—"}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Dernière valeur officielle</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.reference_officielle ? `${projet.mode_variation_prix.reference_officielle.valeur} · ${formaterDate(projet.mode_variation_prix.reference_officielle.date_valeur)}` : "—"}</dd></div>
-                  <div><dt className="text-xs uppercase tracking-wide text-slate-500">Territoire</dt><dd className="mt-1 font-medium text-slate-900">{projet.mode_variation_prix.reference_officielle?.territoire || "—"}</dd></div>
-                </dl>
-                {projet.mode_variation_prix.clause_applicable ? (
-                  <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-                    {projet.mode_variation_prix.clause_applicable}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            {projet.contexte_projet && Object.keys(projet.contexte_projet.donnees_entree || {}).length > 0 && (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Données d&apos;entrée métier</h3>
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {Object.entries(projet.contexte_projet.donnees_entree).map(([cle, valeur]) => (
-                    <div key={cle} className="rounded-lg bg-slate-50 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{cle.replace(/_/g, " ")}</p>
-                      <p className="mt-1 text-sm font-medium text-slate-800">{formaterValeurContexte(valeur)}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Dossiers GED du projet</h3>
-              <div className="grid gap-3 lg:grid-cols-2">
-                {projet.dossiers_ged.map((dossier) => (
-                  <div key={dossier.code} className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-sm font-medium text-slate-800">{dossier.intitule}</p>
-                    <p className="mt-1 text-xs text-slate-500">{dossier.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Automatismes et sources</h3>
-              <ul className="space-y-2 text-sm text-slate-700 mb-4">
-                {projet.processus_recommande.automatismes.map((source) => (
-                  <li key={source}>• {source}</li>
-                ))}
-              </ul>
-              <ul className="space-y-2 text-sm text-slate-700">
-                {projet.processus_recommande.sources_methodologiques.map((source) => (
-                  <li key={source}>• {source}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
         </div>
 
         {/* Colonne droite : synthèse financière + équipe */}
@@ -601,16 +337,16 @@ export function DetailProjet({ id }: { id: string }) {
             </h2>
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <dt className="text-slate-500">Montant estimé HT</dt>
+                <dt style={{ color: "var(--texte-3)" }}>Montant estimé HT</dt>
                 <dd className="font-mono font-medium">{formaterMontant(projet.montant_estime)}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-slate-500">Montant du marché HT</dt>
+                <dt style={{ color: "var(--texte-3)" }}>Montant du marché HT</dt>
                 <dd className="font-mono font-medium">{formaterMontant(projet.montant_marche)}</dd>
               </div>
-              <div className="flex justify-between border-t border-slate-100 pt-3">
-                <dt className="text-slate-500">Honoraires prévus HT</dt>
-                <dd className="font-mono font-medium text-primaire-700">
+              <div className="flex justify-between pt-3" style={{ borderTop: "1px solid var(--bordure)" }}>
+                <dt style={{ color: "var(--texte-3)" }}>Honoraires prévus HT</dt>
+                <dd className="font-mono font-medium" style={{ color: "var(--c-base)" }}>
                   {formaterMontant(projet.honoraires_prevus)}
                 </dd>
               </div>
@@ -623,7 +359,7 @@ export function DetailProjet({ id }: { id: string }) {
               <Users size={16} /> Équipe ({projet.intervenants.length})
             </h2>
             {projet.intervenants.length === 0 ? (
-              <p className="text-sm text-slate-400">Aucun intervenant affecté.</p>
+              <p className="text-sm" style={{ color: "var(--texte-3)" }}>Aucun intervenant affecté.</p>
             ) : (
               <ul className="space-y-2">
                 {projet.intervenants.map((intervenant, idx) => (
@@ -637,10 +373,322 @@ export function DetailProjet({ id }: { id: string }) {
           </div>
 
           {/* Métadonnées */}
-          <div className="carte text-xs text-slate-400 space-y-1">
+          <div className="carte text-xs space-y-1" style={{ color: "var(--texte-3)" }}>
             <p>Créé le {formaterDate(projet.date_creation)}</p>
             <p>Modifié le {formaterDate(projet.date_modification)}</p>
           </div>
+        </div>
+      </div>
+
+      {/* Modal contexte détaillé */}
+      <ModalContexte projet={projet} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Contexte compact avec bouton "Voir les détails"
+// ---------------------------------------------------------------------------
+
+function ContexteCompact({ projet }: { projet: ProjetDetail }) {
+  return (
+    <div className="carte">
+      <div className="flex items-center justify-between mb-4">
+        <h2>Contexte du projet</h2>
+        <button
+          type="button"
+          onClick={() => {
+            const evt = new CustomEvent("ouvrir-modal-contexte");
+            window.dispatchEvent(evt);
+          }}
+          className="inline-flex items-center gap-1 text-xs font-medium rounded-lg px-3 py-1.5 transition"
+          style={{ color: "var(--c-base)", background: "var(--c-clair)", border: "1px solid var(--c-leger)" }}
+        >
+          <Info size={12} /> Voir les détails <ChevronRight size={12} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        {projet.contexte_projet && (
+          <>
+            <div>
+              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Famille client</p>
+              <p className="font-medium">{projet.contexte_projet.famille_client.libelle}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Contexte contractuel</p>
+              <p className="font-medium">{projet.contexte_projet.contexte_contractuel.libelle}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Mission principale</p>
+              <p className="font-medium">{projet.contexte_projet.mission_principale.libelle}</p>
+            </div>
+            {projet.contexte_projet.phase_intervention && (
+              <div>
+                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Phase d&apos;intervention</p>
+                <p className="font-medium">{projet.contexte_projet.phase_intervention.libelle}</p>
+              </div>
+            )}
+            {projet.contexte_projet.sous_missions.length > 0 && (
+              <div className="col-span-2">
+                <p className="text-xs uppercase tracking-wide mb-1.5" style={{ color: "var(--texte-3)" }}>Sous-missions</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {projet.contexte_projet.sous_missions.map((sm) => (
+                    <span key={sm.code} className="rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}>
+                      {sm.libelle}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {!projet.contexte_projet && (
+          <div className="col-span-2">
+            <p className="text-sm" style={{ color: "var(--texte-3)" }}>Aucun contexte métier renseigné.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modal contexte détaillé
+// ---------------------------------------------------------------------------
+
+function ModalContexte({ projet }: { projet: ProjetDetail }) {
+  const [ouvert, setOuvert] = useState(false);
+
+  // Écoute l'événement personnalisé du bouton ContexteCompact
+  useEffect(() => {
+    const handler = () => setOuvert(true);
+    window.addEventListener("ouvrir-modal-contexte", handler);
+    return () => window.removeEventListener("ouvrir-modal-contexte", handler);
+  }, []);
+
+  if (!ouvert) return null;
+
+  const c = projet.contexte_projet;
+  const pr = projet.processus_recommande;
+  const vp = projet.mode_variation_prix;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto"
+      style={{ background: "rgba(0,0,0,0.55)", paddingTop: "2rem", paddingBottom: "2rem" }}
+      onClick={(e) => { if (e.target === e.currentTarget) setOuvert(false); }}
+    >
+      <div
+        className="relative w-full max-w-4xl mx-4 rounded-2xl p-8 shadow-2xl space-y-8"
+        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold">Contexte détaillé du projet</h2>
+          <button
+            type="button"
+            onClick={() => setOuvert(false)}
+            className="rounded-lg p-2 transition hover:opacity-70"
+            style={{ color: "var(--texte-2)" }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Client et mission */}
+        {c && (
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Client et mission</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { label: "Famille client", valeur: c.famille_client.libelle },
+                { label: "Sous-type", valeur: c.sous_type_client.libelle },
+                { label: "Contexte contractuel", valeur: c.contexte_contractuel.libelle },
+                { label: "Mission principale", valeur: c.mission_principale.libelle },
+                { label: "Nature d'ouvrage", valeur: c.nature_ouvrage || "—" },
+                { label: "Nature du marché", valeur: c.nature_marche || "—" },
+                { label: "Partie contractante", valeur: c.partie_contractante || "—" },
+                { label: "Méthode d'estimation", valeur: c.methode_estimation || "—" },
+              ].map(({ label, valeur }) => (
+                <div key={label} className="rounded-xl p-3" style={{ background: "var(--fond-entree)" }}>
+                  <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--texte-3)" }}>{label}</p>
+                  <p className="text-sm font-medium">{valeur}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Missions associées */}
+            {c.missions_associees.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs uppercase tracking-wide mb-2" style={{ color: "var(--texte-3)" }}>Missions associées</p>
+                <div className="flex flex-wrap gap-2">
+                  {c.missions_associees.map((m) => (
+                    <span key={m.code} className="rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}>
+                      {m.libelle}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Sous-missions */}
+        {c && c.sous_missions.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Sous-missions activées</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {c.sous_missions.map((sm) => (
+                <div key={sm.code} className="rounded-xl p-3" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+                  <p className="text-sm font-medium mb-1">{sm.libelle}</p>
+                  {sm.types_livrables && sm.types_livrables.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {sm.types_livrables.map((t) => (
+                        <span key={t} className="rounded px-1.5 py-0.5 text-[11px]" style={{ background: "var(--fond-carte)", color: "var(--texte-3)" }}>
+                          {t.replace(/_/g, " ")}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Données d'entrée métier */}
+        {c && Object.keys(c.donnees_entree || {}).length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Données d&apos;entrée métier</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              {Object.entries(c.donnees_entree).map(([cle, valeur]) => (
+                <div key={cle} className="rounded-xl p-3" style={{ background: "var(--fond-entree)" }}>
+                  <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--texte-3)" }}>{cle.replace(/_/g, " ")}</p>
+                  <p className="text-sm font-medium">{formaterValeurContexte(valeur)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Processus recommandé */}
+        <section>
+          <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Processus recommandé</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {pr.methodes_estimation.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--texte-3)" }}>Méthodes d&apos;estimation</p>
+                <ol className="space-y-2 text-sm">
+                  {pr.methodes_estimation.map((m, i) => (
+                    <li key={m.code}>
+                      <p className="font-medium">{i + 1}. {m.libelle}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>{m.objectif}</p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+            {pr.livrables_prioritaires.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--texte-3)" }}>Livrables prioritaires</p>
+                <ul className="space-y-1.5 text-sm">
+                  {pr.livrables_prioritaires.map((l) => <li key={l}>• {l}</li>)}
+                </ul>
+              </div>
+            )}
+            {pr.points_de_controle.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--texte-3)" }}>Points de contrôle</p>
+                <ul className="space-y-1.5 text-sm">
+                  {pr.points_de_controle.map((p) => <li key={p}>• {p}</li>)}
+                </ul>
+              </div>
+            )}
+            {pr.documents_attendus.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--texte-3)" }}>Documents attendus</p>
+                <ul className="space-y-1.5 text-sm">
+                  {pr.documents_attendus.map((d) => <li key={d}>• {d}</li>)}
+                </ul>
+              </div>
+            )}
+            {pr.documents_a_generer.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--texte-3)" }}>Documents à générer</p>
+                <ul className="space-y-1.5 text-sm">
+                  {pr.documents_a_generer.map((d) => <li key={d}>• {d}</li>)}
+                </ul>
+              </div>
+            )}
+            {pr.indicateurs_clefs.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--texte-3)" }}>Indicateurs clefs</p>
+                <ul className="space-y-1.5 text-sm">
+                  {pr.indicateurs_clefs.map((i) => <li key={i}>• {i}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Dossiers GED */}
+        {projet.dossiers_ged.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Structure GED du projet</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              {projet.dossiers_ged.map((dossier) => (
+                <div key={dossier.code} className="rounded-xl p-3" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+                  <p className="text-sm font-medium">{dossier.intitule}</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--texte-3)" }}>{dossier.description}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Variation de prix */}
+        {vp && vp.type_evolution !== "aucune" && (
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Variation de prix</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {[
+                { label: "Type", valeur: vp.type_evolution },
+                { label: "Cadre juridique", valeur: vp.cadre_juridique },
+                { label: "Indice / index", valeur: vp.indice_reference || "—" },
+                { label: "Périodicité", valeur: vp.periodicite_revision || "—" },
+                { label: "Part fixe", valeur: vp.part_fixe || "—" },
+                { label: "Date prix initial", valeur: formaterDate(vp.date_prix_initial || null) },
+                { label: "Remise d'offre", valeur: formaterDate(vp.date_remise_offre || null) },
+                { label: "Démarrage", valeur: formaterDate(vp.date_demarrage || null) },
+              ].map(({ label, valeur }) => (
+                <div key={label} className="rounded-xl p-3" style={{ background: "var(--fond-entree)" }}>
+                  <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--texte-3)" }}>{label}</p>
+                  <p className="text-sm font-medium">{valeur}</p>
+                </div>
+              ))}
+            </div>
+            {vp.reference_officielle && (
+              <div className="mt-3 rounded-xl p-3 text-sm" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+                <span className="font-medium">Dernière valeur officielle : </span>
+                {vp.reference_officielle.valeur} · {vp.reference_officielle.territoire} · {formaterDate(vp.reference_officielle.date_valeur)}
+              </div>
+            )}
+            {vp.clause_applicable && (
+              <div className="mt-3 rounded-xl p-3 text-sm" style={{ background: "var(--fond-entree)" }}>
+                {vp.clause_applicable}
+              </div>
+            )}
+          </section>
+        )}
+
+        <div className="flex justify-end pt-2">
+          <button
+            type="button"
+            onClick={() => setOuvert(false)}
+            className="btn-secondaire"
+          >
+            Fermer
+          </button>
         </div>
       </div>
     </div>
