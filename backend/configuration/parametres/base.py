@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     "applications.supervision",
     "applications.site_public",
     "applications.ressources",
+    "applications.societe",
 ]
 
 # ============================================================

@@ -11,6 +11,7 @@ import {
   LayoutDashboard, FolderKanban, BookOpen,
   Activity, Globe, Users, Mail, Shield,
   ChevronLeft, Menu, FileSearch, TrendingUp, BarChart3, LineChart,
+  Briefcase,
 } from "lucide-react";
 import { obtenirMarqueAffichee, obtenirNomPlateforme } from "@/lib/site-public";
 
@@ -33,6 +34,7 @@ const GROUPES_MENU: GroupeMenu[] = [
     entrees: [
       { libelle: "Tableau de bord", chemin: "/tableau-de-bord", icone: LayoutDashboard },
       { libelle: "Projets", chemin: "/projets", icone: FolderKanban },
+      { libelle: "Société", chemin: "/societe", icone: Briefcase },
     ],
   },
   {

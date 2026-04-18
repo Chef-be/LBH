@@ -9,7 +9,7 @@ import {
 import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
   TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
-  MapPin, Building2, ExternalLink, Plus, FolderOpen,
+  MapPin, Building2, ExternalLink, Plus, FolderOpen, ReceiptText,
 } from "lucide-react";
 import { api } from "@/crochets/useApi";
 
@@ -544,6 +544,13 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
               <PenTool size={14} /> Nouvelle pièce écrite
             </Link>
           )}
+          <Link
+            href={`/societe/devis/nouveau?projet=${idProjet}`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+          >
+            <ReceiptText size={14} /> Créer un devis
+          </Link>
           <Link
             href={`/projets/${idProjet}/modifier`}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
