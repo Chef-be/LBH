@@ -78,7 +78,7 @@ export default function PageNouvelleFacture() {
             <input type="email" value={form.client_email} onChange={(e) => setForm({ ...form, client_email: e.target.value })} className="w-full rounded-lg px-3 py-2 text-sm" style={cs} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Date d'émission</label>
+            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Date d&apos;émission</label>
             <input type="date" value={form.date_emission} onChange={(e) => setForm({ ...form, date_emission: e.target.value })} className="w-full rounded-lg px-3 py-2 text-sm" style={cs} />
           </div>
           <div>
