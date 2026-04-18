@@ -40,6 +40,12 @@ urlpatterns = [
     path("<uuid:piece_id>/articles/", views.VueListeArticlesCCTP.as_view(), name="piece-articles-liste"),
     path("<uuid:piece_id>/articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="piece-article-detail"),
 
+    # Lignes DPGF / DQE structurées
+    path("<uuid:piece_id>/lignes-dpgf/", views.VueLignesDPGF.as_view(), name="lignes-dpgf-liste"),
+    path("<uuid:piece_id>/lignes-dpgf/<uuid:pk>/", views.VueDetailLigneDPGF.as_view(), name="ligne-dpgf-detail"),
+    path("<uuid:piece_id>/lignes-dpgf/reordonner/", views.vue_reordonner_lignes_dpgf, name="lignes-dpgf-reordonner"),
+    path("<uuid:piece_id>/synthese-dpgf/", views.vue_synthese_dpgf, name="piece-synthese-dpgf"),
+
     # Analyse automatique depuis un document GED → extraction CCTP
     path("analyser-document/<uuid:document_id>/", views.vue_analyser_document_cctp, name="analyser-document-cctp"),
 

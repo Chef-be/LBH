@@ -12,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, PrescriptionCCTP
+from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, PrescriptionCCTP, LigneDPGF
 from .office import (
     assurer_gabarit_bureautique,
     construire_url_editeur_collabora,
@@ -48,6 +48,7 @@ from .serialiseurs import (
     LotCCTPSerialiseur,
     PrescriptionCCTPSerialiseur,
     GenerateurCCTPCreationSerialiseur,
+    LigneDPGFSerialiseur,
 )
 
 
@@ -559,6 +560,89 @@ def vue_renumeroter_articles(request, pk):
     piece = generics.get_object_or_404(PieceEcrite, pk=pk)
     nb = renumeroter_articles_cctp(piece)
     return Response({"detail": f"{nb} article(s) renuméroté(s).", "nb_modifies": nb})
+
+
+# ---------------------------------------------------------------------------
+# A4b — DPGF / DQE lignes structurées
+# ---------------------------------------------------------------------------
+
+class VueLignesDPGF(generics.ListCreateAPIView):
+    """Liste et création des lignes DPGF/DQE pour une pièce écrite."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LigneDPGFSerialiseur
+
+    def get_queryset(self):
+        piece_id = self.kwargs["piece_id"]
+        return LigneDPGF.objects.filter(piece_ecrite_id=piece_id).order_by("ordre")
+
+    def perform_create(self, serializer):
+        piece_id = self.kwargs["piece_id"]
+        piece = generics.get_object_or_404(PieceEcrite, pk=piece_id)
+        serializer.save(piece_ecrite=piece)
+
+
+class VueDetailLigneDPGF(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, modification et suppression d'une ligne DPGF/DQE."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LigneDPGFSerialiseur
+
+    def get_queryset(self):
+        piece_id = self.kwargs["piece_id"]
+        return LigneDPGF.objects.filter(piece_ecrite_id=piece_id)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_reordonner_lignes_dpgf(request, piece_id):
+    """Réordonne les lignes DPGF en lot : accepte [{id, ordre}, ...]."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=piece_id)
+    mises_a_jour = request.data if isinstance(request.data, list) else []
+    a_modifier = []
+    for item in mises_a_jour:
+        try:
+            ligne = LigneDPGF.objects.get(pk=item["id"], piece_ecrite=piece)
+            ligne.ordre = int(item["ordre"])
+            a_modifier.append(ligne)
+        except (LigneDPGF.DoesNotExist, KeyError, TypeError, ValueError):
+            pass
+    if a_modifier:
+        LigneDPGF.objects.bulk_update(a_modifier, ["ordre"])
+    return Response({"detail": f"{len(a_modifier)} ligne(s) réordonnée(s)."})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_synthese_dpgf(request, piece_id):
+    """Retourne le récapitulatif par lot (totaux) pour une pièce DPGF/DQE."""
+    piece = generics.get_object_or_404(PieceEcrite, pk=piece_id)
+    lignes = LigneDPGF.objects.filter(piece_ecrite=piece).order_by("ordre")
+
+    lots: dict[str, dict] = {}
+    total_general = 0.0
+    lot_courant = ""
+
+    for ligne in lignes:
+        if ligne.type_ligne == "lot":
+            lot_courant = ligne.lot_code or ligne.designation
+            if lot_courant not in lots:
+                lots[lot_courant] = {
+                    "code": ligne.lot_code,
+                    "intitule": ligne.lot_intitule or ligne.designation,
+                    "total_ht": 0.0,
+                    "nb_articles": 0,
+                }
+        elif ligne.type_ligne == "article" and lot_courant:
+            montant = ligne.montant_ht or 0.0
+            lots.setdefault(lot_courant, {"code": lot_courant, "intitule": lot_courant, "total_ht": 0.0, "nb_articles": 0})
+            lots[lot_courant]["total_ht"] += montant
+            lots[lot_courant]["nb_articles"] += 1
+            total_general += montant
+
+    return Response({
+        "lots": list(lots.values()),
+        "total_ht": total_general,
+        "total_ttc": total_general * (1 + float(piece.projet.taux_tva if hasattr(piece.projet, "taux_tva") else 0)),
+    })
 
 
 # ---------------------------------------------------------------------------

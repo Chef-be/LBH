@@ -5,7 +5,7 @@ import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
 import { BoutonActionRapide, GroupeActionsRapides, LienActionRapide } from "@/composants/ui/ActionsRapides";
-import { FileText, Download, Eye, Pencil, Trash2, CheckCircle } from "lucide-react";
+import { FileText, Download, Eye, Pencil, Trash2, CheckCircle, Table2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -157,12 +157,21 @@ export function ListePiecesEcritesProjet({ projetId }: { projetId: string }) {
                     titre="Ouvrir la pièce écrite"
                     icone={Eye}
                   />
-                  <LienActionRapide
-                    href={`/projets/${projetId}/pieces-ecrites/${p.id}`}
-                    titre="Modifier la pièce écrite"
-                    icone={Pencil}
-                    variante="primaire"
-                  />
+                  {TYPES_TABLEUR.has(p.modele_type_document || "") ? (
+                    <LienActionRapide
+                      href={`/projets/${projetId}/pieces-ecrites/${p.id}/dpgf`}
+                      titre="Éditeur DPGF/DQE"
+                      icone={Table2}
+                      variante="primaire"
+                    />
+                  ) : (
+                    <LienActionRapide
+                      href={`/projets/${projetId}/pieces-ecrites/${p.id}`}
+                      titre="Modifier la pièce écrite"
+                      icone={Pencil}
+                      variante="primaire"
+                    />
+                  )}
                   <BoutonActionRapide
                     titre={TYPES_TABLEUR.has(p.modele_type_document || "") ? "Exporter en XLSX" : "Exporter en DOCX"}
                     icone={Download}

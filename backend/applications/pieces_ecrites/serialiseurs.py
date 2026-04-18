@@ -3,7 +3,7 @@
 import json
 
 from rest_framework import serializers
-from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, ChapitrePrescrip, PrescriptionCCTP, GenerateurCCTP
+from .models import ModeleDocument, PieceEcrite, ArticleCCTP, LotCCTP, ChapitrePrescrip, PrescriptionCCTP, GenerateurCCTP, LigneDPGF
 
 
 class ModeleDocumentSerialiseur(serializers.ModelSerializer):
@@ -184,6 +184,25 @@ class LotCCTPSerialiseur(serializers.ModelSerializer):
 
     def get_nb_articles(self, obj):
         return obj.articles.filter(est_dans_bibliotheque=True).count()
+
+
+class LigneDPGFSerialiseur(serializers.ModelSerializer):
+    montant_ht = serializers.SerializerMethodField()
+    type_libelle = serializers.CharField(source="get_type_ligne_display", read_only=True)
+
+    class Meta:
+        model = LigneDPGF
+        fields = [
+            "id", "piece_ecrite", "ordre", "type_ligne", "type_libelle",
+            "lot_code", "lot_intitule",
+            "numero", "designation", "unite",
+            "quantite", "prix_unitaire_ht", "montant_ht",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "montant_ht", "date_creation", "date_modification", "type_libelle"]
+
+    def get_montant_ht(self, obj):
+        return obj.montant_ht
 
 
 class GenerateurCCTPCreationSerialiseur(serializers.Serializer):

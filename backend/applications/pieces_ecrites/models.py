@@ -323,6 +323,66 @@ class PrescriptionCCTP(models.Model):
         return f"[{self.lot.code}] {self.intitule[:80]}"
 
 
+class LigneDPGF(models.Model):
+    """
+    Ligne d'un DPGF, BPU ou DQE — modèle structuré avec quantité et prix.
+    Permet la saisie ligne par ligne depuis l'interface web.
+    """
+
+    TYPES = [
+        ("lot",         "En-tête de lot"),
+        ("article",     "Article / Prestation"),
+        ("sous_total",  "Sous-total de chapitre"),
+        ("commentaire", "Commentaire / Note"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    piece_ecrite = models.ForeignKey(
+        PieceEcrite, on_delete=models.CASCADE,
+        related_name="lignes_dpgf", verbose_name="Pièce écrite",
+    )
+    ordre = models.PositiveIntegerField(default=0, verbose_name="Ordre")
+    type_ligne = models.CharField(
+        max_length=20, choices=TYPES, default="article",
+        verbose_name="Type de ligne",
+    )
+
+    # Regroupement lot
+    lot_code = models.CharField(max_length=20, blank=True, verbose_name="Code lot")
+    lot_intitule = models.CharField(max_length=200, blank=True, verbose_name="Intitulé lot")
+
+    # Données de la ligne
+    numero = models.CharField(max_length=30, blank=True, verbose_name="Numéro")
+    designation = models.CharField(max_length=500, verbose_name="Désignation")
+    unite = models.CharField(max_length=30, blank=True, verbose_name="Unité")
+    quantite = models.DecimalField(
+        max_digits=14, decimal_places=4,
+        null=True, blank=True, verbose_name="Quantité",
+    )
+    prix_unitaire_ht = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        null=True, blank=True, verbose_name="Prix unitaire HT (€)",
+    )
+
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    @property
+    def montant_ht(self):
+        if self.quantite is not None and self.prix_unitaire_ht is not None:
+            return float(self.quantite) * float(self.prix_unitaire_ht)
+        return None
+
+    class Meta:
+        db_table = "pieces_ecrites_ligne_dpgf"
+        verbose_name = "Ligne DPGF/DQE"
+        verbose_name_plural = "Lignes DPGF/DQE"
+        ordering = ["piece_ecrite", "ordre"]
+
+    def __str__(self):
+        return f"{self.numero} — {self.designation[:80]}"
+
+
 class GenerateurCCTP(models.Model):
     """
     Session de génération d'un CCTP multi-lots à partir de la bibliothèque.
