@@ -331,20 +331,20 @@ def vue_synthese_projet(requete, projet_id):
 
     # Activité récente (derniers documents et études modifiés)
     activite = []
-    for doc in docs_qs.select_related("createur").order_by("-date_modification")[:3]:
+    for doc in docs_qs.select_related("auteur").order_by("-date_modification")[:3]:
         activite.append({
             "type": "document",
             "libelle": doc.intitule,
             "statut": doc.statut,
-            "utilisateur": doc.createur.get_full_name() if hasattr(doc, "createur") and doc.createur else "—",
+            "utilisateur": doc.auteur.get_full_name() if hasattr(doc, "auteur") and doc.auteur else "—",
             "date": doc.date_modification.isoformat(),
         })
-    for etude in etudes.select_related("createur").order_by("-date_modification")[:3]:
+    for etude in etudes.order_by("-date_modification")[:3]:
         activite.append({
             "type": "etude",
             "libelle": etude.intitule,
             "statut": etude.statut,
-            "utilisateur": etude.createur.get_full_name() if hasattr(etude, "createur") and etude.createur else "—",
+            "utilisateur": "—",
             "date": etude.date_modification.isoformat(),
         })
     activite.sort(key=lambda x: x["date"], reverse=True)

@@ -114,6 +114,7 @@ class MetreDetailSerialiseur(serializers.ModelSerializer):
 class FondPlanSerialiseur(serializers.ModelSerializer):
     format_libelle = serializers.CharField(source="get_format_fichier_display", read_only=True)
     nb_zones = serializers.SerializerMethodField()
+    intitule = serializers.CharField(required=False, default="", allow_blank=True)
 
     class Meta:
         model = FondPlan
@@ -127,6 +128,18 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
 
     def get_nb_zones(self, obj):
         return obj.zones.count()
+
+    def create(self, validated_data):
+        # Génère l'intitulé depuis le nom du fichier si non fourni
+        if not validated_data.get("intitule"):
+            fichier = validated_data.get("fichier")
+            if fichier:
+                import os
+                nom = os.path.splitext(fichier.name)[0]
+                validated_data["intitule"] = nom[:200]
+            else:
+                validated_data["intitule"] = "Plan sans titre"
+        return super().create(validated_data)
 
 
 class ZoneMesureSerialiseur(serializers.ModelSerializer):

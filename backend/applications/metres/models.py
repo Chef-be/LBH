@@ -161,7 +161,7 @@ class FondPlan(models.Model):
         Metre, on_delete=models.CASCADE,
         related_name="fonds_plan", verbose_name="Métré associé",
     )
-    intitule = models.CharField(max_length=200, verbose_name="Intitulé du plan (ex: Niveau 0, Façade Sud)")
+    intitule = models.CharField(max_length=200, blank=True, verbose_name="Intitulé du plan (ex: Niveau 0, Façade Sud)")
     format_fichier = models.CharField(max_length=10, choices=FORMATS, verbose_name="Format")
     fichier = models.FileField(
         upload_to="metres/fonds-plan/%Y/%m/",
