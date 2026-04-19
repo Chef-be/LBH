@@ -191,6 +191,17 @@ class ArticleCCTP(models.Model):
     )
     tags = models.JSONField(default=list, blank=True, verbose_name="Tags")
 
+    STATUTS = [
+        ("brouillon", "Brouillon"),
+        ("a_completer", "À compléter — créé depuis le métré"),
+        ("valide", "Validé — article complet"),
+    ]
+    statut = models.CharField(
+        max_length=20, choices=STATUTS, default="brouillon",
+        verbose_name="Statut de complétion",
+        db_index=True,
+    )
+
     date_creation = models.DateTimeField(auto_now_add=True)
     date_modification = models.DateTimeField(auto_now=True)
 

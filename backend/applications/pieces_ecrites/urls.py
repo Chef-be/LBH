@@ -25,6 +25,7 @@ urlpatterns = [
 
     # Bibliothèque d'articles CCTP
     path("articles/auto-classifier/", views.vue_auto_classifier_articles, name="articles-auto-classifier"),
+    path("articles/creation-rapide/", views.vue_creation_rapide_article_cctp, name="articles-creation-rapide"),
     path("articles/", views.VueListeArticlesCCTP.as_view(), name="articles-cctp-bibliotheque"),
     path("articles/<uuid:pk>/", views.VueDetailArticleCCTP.as_view(), name="article-cctp-detail"),
 

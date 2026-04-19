@@ -368,12 +368,15 @@ class VueListeArticlesCCTP(generics.ListCreateAPIView):
     def get_queryset(self):
         piece_id = self.kwargs.get("piece_id")
         if piece_id:
-            qs = ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot")
+            qs = ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot", "ligne_prix_reference")
         else:
-            qs = ArticleCCTP.objects.filter(est_dans_bibliotheque=True).select_related("lot")
+            qs = ArticleCCTP.objects.filter(est_dans_bibliotheque=True).select_related("lot", "ligne_prix_reference")
         lot_id = self.request.query_params.get("lot")
         if lot_id:
             qs = qs.filter(lot_id=lot_id)
+        statut = self.request.query_params.get("statut")
+        if statut:
+            qs = qs.filter(statut=statut)
         return qs
 
     def perform_create(self, serializer):
@@ -394,6 +397,83 @@ class VueDetailArticleCCTP(generics.RetrieveUpdateDestroyAPIView):
         if piece_id:
             return ArticleCCTP.objects.filter(piece_ecrite_id=piece_id).select_related("lot")
         return ArticleCCTP.objects.select_related("lot").all()
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_creation_rapide_article_cctp(request):
+    """
+    Crée rapidement un ArticleCCTP depuis le formulaire de ligne de métré.
+    Crée simultanément une LignePrixBibliotheque liée en statut 'brouillon'.
+    Corps : {intitule, unite (optionnel), nature (optionnel), lot_id (optionnel)}
+    """
+    from applications.bibliotheque.models import LignePrixBibliotheque
+    import re
+
+    intitule = (request.data.get("intitule") or "").strip()
+    if not intitule:
+        return Response({"detail": "L'intitulé est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+
+    unite = (request.data.get("unite") or "u").strip()[:20]
+    lot_id = request.data.get("lot_id")
+
+    lot = None
+    if lot_id:
+        try:
+            lot = LotCCTP.objects.get(pk=lot_id)
+        except LotCCTP.DoesNotExist:
+            pass
+
+    # Générer un code article depuis l'intitulé
+    code_base = re.sub(r"[^A-Z0-9]", "-", intitule.upper()[:30]).strip("-")
+    code_base = re.sub(r"-+", "-", code_base)
+    numero = f"A-{code_base[:20]}"
+
+    # Compter les articles existants pour éviter les doublons de numéro
+    nb_existants = ArticleCCTP.objects.filter(numero_article__startswith="A-").count()
+    if ArticleCCTP.objects.filter(numero_article=numero).exists():
+        numero = f"{numero}-{nb_existants + 1}"
+
+    # Créer la ligne de prix en bibliothèque en statut 'brouillon'
+    famille = (lot.intitule if lot else "À classer")[:100]
+    code_prix = f"PRIX-{code_base[:40]}"
+    if LignePrixBibliotheque.objects.filter(code=code_prix).exists():
+        code_prix = f"{code_prix}-{nb_existants + 1}"
+
+    ligne_prix = LignePrixBibliotheque.objects.create(
+        code=code_prix[:50],
+        famille=famille,
+        designation_longue=intitule,
+        designation_courte=intitule[:300],
+        unite=unite,
+        niveau="reference",
+        statut_validation="brouillon",
+        auteur=request.user,
+        observations_economiques="Créé automatiquement depuis le métré — à compléter dans la bibliothèque de prix.",
+        lot_cctp_reference=lot,
+    )
+
+    # Créer l'article CCTP lié
+    article = ArticleCCTP.objects.create(
+        intitule=intitule,
+        numero_article=numero,
+        corps_article="",
+        est_dans_bibliotheque=True,
+        statut="a_completer",
+        lot=lot,
+        ligne_prix_reference=ligne_prix,
+        source="Métré",
+        tags=["à_compléter"],
+    )
+
+    return Response(
+        {
+            "detail": "Article CCTP et fiche de prix créés. À compléter dans la bibliothèque.",
+            "article": ArticleCCTPSerialiseur(article).data,
+            "ligne_prix_id": str(ligne_prix.id),
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["POST"])

@@ -333,6 +333,17 @@ function ModalFormules({ onInserer, onFermer }: { onInserer: (texte: string, uni
 // Formulaire ligne de métré
 // ---------------------------------------------------------------------------
 
+interface ArticleCCTPSuggestion {
+  id: string;
+  intitule: string;
+  code_reference: string;
+  chapitre: string;
+  lot_intitule: string | null;
+  statut: string;
+  statut_libelle: string;
+  ligne_prix_designation: string | null;
+}
+
 interface FormLigneProps {
   initial: Partial<typeof VIDE_LIGNE>;
   metreId: string;
@@ -350,8 +361,48 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
   const [chargementCalcul, setChargementCalcul] = useState(false);
   const [modalFormules, setModalFormules] = useState(false);
 
+  // Autocomplete CCTP
+  const [suggestions, setSuggestions] = useState<ArticleCCTPSuggestion[]>([]);
+  const [chargementSuggestions, setChargementSuggestions] = useState(false);
+  const [afficherSuggestions, setAfficherSuggestions] = useState(false);
+  const [articleLie, setArticleLie] = useState<ArticleCCTPSuggestion | null>(null);
+  const [creationCCTP, setCreationCCTP] = useState(false);
+  const [succesCCTP, setSuccesCCTP] = useState<string | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
   const maj = (k: keyof typeof VIDE_LIGNE, v: string) => setForm((p) => ({ ...p, [k]: v }));
 
+  // Fermer le dropdown si clic extérieur
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node)) {
+        setAfficherSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Recherche d'articles CCTP (debounced, min 2 chars)
+  useEffect(() => {
+    const q = form.designation.trim();
+    if (q.length < 2) { setSuggestions([]); setAfficherSuggestions(false); return; }
+    const t = window.setTimeout(async () => {
+      try {
+        setChargementSuggestions(true);
+        const r = await api.get<{ results?: ArticleCCTPSuggestion[]; count?: number } | ArticleCCTPSuggestion[]>(
+          `/api/pieces-ecrites/articles/?search=${encodeURIComponent(q)}&est_dans_bibliotheque=true`
+        );
+        const liste = Array.isArray(r) ? r : (r.results ?? []);
+        setSuggestions(liste.slice(0, 8));
+        setAfficherSuggestions(true);
+      } catch { setSuggestions([]); }
+      finally { setChargementSuggestions(false); }
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [form.designation]);
+
+  // Calcul aperçu
   useEffect(() => {
     if (!form.detail_calcul.trim()) { setApercuCalcul(null); return; }
     const t = window.setTimeout(async () => {
@@ -364,6 +415,33 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
     }, 300);
     return () => window.clearTimeout(t);
   }, [form.detail_calcul]);
+
+  const selectionnerArticle = (article: ArticleCCTPSuggestion) => {
+    maj("designation", article.intitule);
+    if (article.code_reference) maj("code_article", article.code_reference);
+    setArticleLie(article);
+    setAfficherSuggestions(false);
+    setSuggestions([]);
+  };
+
+  const creerArticleCCTP = async () => {
+    const intitule = form.designation.trim();
+    if (!intitule) return;
+    setCreationCCTP(true);
+    try {
+      const r = await api.post<{ article: ArticleCCTPSuggestion; detail: string }>(
+        "/api/pieces-ecrites/articles/creation-rapide/",
+        { intitule, unite: form.unite || "u" }
+      );
+      setArticleLie(r.article);
+      if (r.article.code_reference) maj("code_article", r.article.code_reference);
+      setSuccesCCTP("Article CCTP créé dans la bibliothèque — à compléter.");
+      setAfficherSuggestions(false);
+      setTimeout(() => setSuccesCCTP(null), 5000);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de créer l'article CCTP.");
+    } finally { setCreationCCTP(false); }
+  };
 
   const insererFormule = (texte: string, unite: string) => {
     const actuel = form.detail_calcul.trim();
@@ -415,6 +493,11 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                 <AlertCircle className="w-4 h-4 shrink-0" />{erreur}
               </div>
             )}
+            {succesCCTP && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm">
+                <CheckCircle className="w-4 h-4 shrink-0" />{succesCCTP}
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -436,11 +519,109 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
               </div>
             </div>
 
-            <div>
-              <label className="libelle-champ">Désignation <span className="text-red-500">*</span></label>
-              <input type="text" className="champ-saisie w-full"
+            {/* Désignation avec autocomplete CCTP */}
+            <div className="relative" ref={suggestionsRef}>
+              <div className="flex items-center justify-between mb-1">
+                <label className="libelle-champ !mb-0">
+                  Désignation <span className="text-red-500">*</span>
+                </label>
+                {chargementSuggestions && (
+                  <span className="text-xs text-slate-400">Recherche…</span>
+                )}
+              </div>
+              <input
+                type="text"
+                className="champ-saisie w-full"
                 placeholder="Terrassements généraux en déblai — tout venant"
-                value={form.designation} onChange={(e) => maj("designation", e.target.value)} />
+                value={form.designation}
+                onChange={(e) => {
+                  maj("designation", e.target.value);
+                  setArticleLie(null);
+                }}
+                onFocus={() => { if (suggestions.length > 0) setAfficherSuggestions(true); }}
+                autoComplete="off"
+              />
+
+              {/* Article lié */}
+              {articleLie && (
+                <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                  <span className="text-xs text-green-700 flex-1">
+                    Article CCTP lié
+                    {articleLie.lot_intitule && <> — {articleLie.lot_intitule}</>}
+                    {articleLie.statut === "a_completer" && (
+                      <span className="ml-1.5 text-amber-600 font-medium">· à compléter dans la bibliothèque</span>
+                    )}
+                  </span>
+                  <button type="button" onClick={() => setArticleLie(null)} className="text-green-500 hover:text-green-700">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* Dropdown suggestions */}
+              {afficherSuggestions && (
+                <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                  {suggestions.length > 0 ? (
+                    <>
+                      <div className="px-3 py-2 bg-slate-50 border-b border-slate-100">
+                        <p className="text-xs font-medium text-slate-500">Articles CCTP dans la bibliothèque</p>
+                      </div>
+                      <ul className="max-h-56 overflow-y-auto divide-y divide-slate-50">
+                        {suggestions.map((art) => (
+                          <li key={art.id}>
+                            <button
+                              type="button"
+                              className="w-full text-left px-3 py-2.5 hover:bg-primaire-50 transition"
+                              onClick={() => selectionnerArticle(art)}
+                            >
+                              <p className="text-sm font-medium text-slate-800 truncate">{art.intitule}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {art.code_reference && (
+                                  <span className="text-xs font-mono text-slate-400">{art.code_reference}</span>
+                                )}
+                                {art.lot_intitule && (
+                                  <span className="text-xs text-slate-400">{art.lot_intitule}</span>
+                                )}
+                                {art.statut === "a_completer" && (
+                                  <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">à compléter</span>
+                                )}
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="px-3 py-2 border-t border-slate-100 bg-slate-50">
+                        <button
+                          type="button"
+                          disabled={creationCCTP}
+                          onClick={creerArticleCCTP}
+                          className="flex items-center gap-1.5 text-xs text-primaire-600 hover:text-primaire-700 disabled:opacity-50"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          {creationCCTP ? "Création…" : `Créer « ${form.designation.trim().substring(0, 40)} » dans la bibliothèque`}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-3">
+                      <p className="text-xs text-slate-500 mb-2">Aucun article CCTP trouvé pour cette désignation.</p>
+                      <button
+                        type="button"
+                        disabled={creationCCTP || form.designation.trim().length < 3}
+                        onClick={creerArticleCCTP}
+                        className="flex items-center gap-1.5 text-xs font-medium text-primaire-600 hover:text-primaire-700 disabled:opacity-50"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {creationCCTP ? "Création…" : `Créer cet article CCTP dans la bibliothèque`}
+                      </button>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Il sera classé « à compléter » et lié à une fiche de prix vierge.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
@@ -852,24 +1033,37 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     finaliserZone();
   };
 
-  const gererMolette = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
+  // Zoom via molette — utilise addEventListener natif avec passive:false
+  // pour pouvoir appeler e.preventDefault() et empêcher le défilement de page.
+  const zoomRef = useRef(zoom);
+  const offsetRef = useRef(offset);
+  zoomRef.current = zoom;
+  offsetRef.current = offset;
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const mx = (e.clientX - rect.left) * scaleX;
-    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
-    const facteur = e.deltaY < 0 ? 1.1 : 0.9;
-    setZoom((z) => {
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+      const facteur = e.deltaY < 0 ? 1.1 : 0.9;
+      const z = zoomRef.current;
+      const o = offsetRef.current;
       const nz = Math.min(5, Math.max(0.1, z * facteur));
-      setOffsetCanvas((o) => ({
+      setZoom(nz);
+      setOffsetCanvas({
         x: mx - (mx - o.x) * (nz / z),
         y: my - (my - o.y) * (nz / z),
-      }));
-      return nz;
-    });
-  };
+      });
+    };
+    canvas.addEventListener("wheel", handler, { passive: false });
+    return () => canvas.removeEventListener("wheel", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const gererMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (outil === "selection") {
@@ -909,6 +1103,15 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => {
+        const canvas = canvasRef.current;
+        if (canvas && canvas.width > 0 && img.width > 0 && img.height > 0) {
+          const fitZoom = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.92;
+          setZoom(fitZoom);
+          setOffsetCanvas({
+            x: (canvas.width - img.width * fitZoom) / 2,
+            y: (canvas.height - img.height * fitZoom) / 2,
+          });
+        }
         setFondPlan(img);
         setTimeout(() => setProgressionFond(null), 600);
       };
@@ -1087,7 +1290,6 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
             className="block w-full"
             onClick={gererClic}
             onContextMenu={gererClicDroit}
-            onWheel={gererMolette}
             onMouseDown={gererMouseDown}
             onMouseMove={gererMouseMove}
             onMouseUp={gererMouseUp}
@@ -1095,8 +1297,28 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
             style={{ cursor: outil === "selection" ? (isDragging.current ? "grabbing" : "grab") : "crosshair" }}
           />
           <div className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-500">
-            <span>{instructionOutil}</span>
-            <span>Zoom {Math.round(zoom * 100)}% — {echellePixelParMetre.toFixed(1)} px/m</span>
+            <span className="truncate">{instructionOutil}</span>
+            <div className="flex items-center gap-3 shrink-0">
+              {fondPlan && (
+                <button
+                  type="button"
+                  className="text-primaire-600 hover:text-primaire-700 font-medium"
+                  onClick={() => {
+                    const canvas = canvasRef.current;
+                    if (!canvas || !fondPlan) return;
+                    const fitZoom = Math.min(canvas.width / fondPlan.width, canvas.height / fondPlan.height) * 0.92;
+                    setZoom(fitZoom);
+                    setOffsetCanvas({
+                      x: (canvas.width - fondPlan.width * fitZoom) / 2,
+                      y: (canvas.height - fondPlan.height * fitZoom) / 2,
+                    });
+                  }}
+                >
+                  Centrer
+                </button>
+              )}
+              <span>Zoom {Math.round(zoom * 100)}% — {echellePixelParMetre.toFixed(1)} px/m</span>
+            </div>
           </div>
         </div>
 
