@@ -116,16 +116,28 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
     nb_zones = serializers.SerializerMethodField()
     intitule = serializers.CharField(required=False, default="", allow_blank=True)
     format_fichier = serializers.CharField(required=False, default="image")
+    # URL relative (/minio/...) — évite que DRF construise une URL absolue http://
+    # via request.build_absolute_uri() qui ignorait le proxy SSL/www.
+    url_fichier = serializers.SerializerMethodField()
 
     class Meta:
         model = FondPlan
         fields = [
             "id", "metre", "intitule", "format_fichier", "format_libelle",
-            "fichier", "echelle", "reference_calibration",
+            "fichier", "url_fichier", "echelle", "reference_calibration",
             "numero_page", "largeur_px", "hauteur_px", "miniature",
             "nb_zones", "date_creation",
         ]
-        read_only_fields = ["id", "date_creation", "nb_zones", "format_libelle"]
+        read_only_fields = ["id", "date_creation", "nb_zones", "format_libelle", "url_fichier"]
+
+    def get_url_fichier(self, obj):
+        """Retourne l'URL relative MinIO sans passer par build_absolute_uri."""
+        if obj.fichier:
+            try:
+                return obj.fichier.url
+            except Exception:
+                return None
+        return None
 
     def get_nb_zones(self, obj):
         return obj.zones.count()

@@ -777,7 +777,10 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [succes, setSucces] = useState<string | null>(null);
   const [modalHauteur, setModalHauteur] = useState<{ zoneId: string; hauteurActuelle: string } | null>(null);
   const isDragging = useRef(false);
+  const isMidDragging = useRef(false); // pan avec bouton milieu (tous outils)
   const lastMouse = useRef<PointCanvas>({ x: 0, y: 0 });
+  const espacePresse = useRef(false); // Space+drag pour panner sans changer d'outil
+  const [mesureEnCours, setMesureEnCours] = useState<string | null>(null); // dimension affichée en bas
 
   // Adapte le canvas à la taille du conteneur
   useEffect(() => {
@@ -922,7 +925,24 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       }
     });
 
-    // Tracé en cours (pointillés bleus)
+    // Ligne de calibration en cours
+    if (outil === "calibrer" && calibrationPoints.length >= 1) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#f59e0b";
+      ctx.fillStyle = "#f59e0b";
+      ctx.lineWidth = 2 / zoom;
+      ctx.setLineDash([6 / zoom, 3 / zoom]);
+      ctx.beginPath();
+      ctx.moveTo(calibrationPoints[0].x, calibrationPoints[0].y);
+      if (mousePos) ctx.lineTo(mousePos.x, mousePos.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Croix sur le 1er point
+      const r = 6 / zoom;
+      ctx.beginPath(); ctx.arc(calibrationPoints[0].x, calibrationPoints[0].y, r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Tracé en cours (pointillés)
     if (pointsEnCours.length > 0) {
       ctx.globalAlpha = 1;
       const couleurTrace = (outil === "soustraction_surface" || outil === "soustraction_longueur")
@@ -934,21 +954,58 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       ctx.beginPath();
       ctx.moveTo(pointsEnCours[0].x, pointsEnCours[0].y);
       pointsEnCours.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
-      // Ligne vers la souris
-      if (mousePos && outil !== "comptage") {
+      // Fermeture visuelle de la surface
+      if ((outil === "surface" || outil === "soustraction_surface") && pointsEnCours.length >= 3 && mousePos) {
+        ctx.lineTo(mousePos.x, mousePos.y);
+        // Aperçu fermeture
+        ctx.setLineDash([2 / zoom, 4 / zoom]);
+        ctx.lineTo(pointsEnCours[0].x, pointsEnCours[0].y);
+      } else if (mousePos && outil !== "comptage") {
         ctx.lineTo(mousePos.x, mousePos.y);
       }
       ctx.stroke();
       ctx.setLineDash([]);
-      pointsEnCours.forEach((p) => {
+      // Points de contrôle
+      pointsEnCours.forEach((p, i) => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, 4 / zoom, 0, Math.PI * 2);
         ctx.fill();
+        // Numéro du point
+        if (i === 0) {
+          ctx.fillStyle = "#1e293b";
+          ctx.font = `bold ${9 / zoom}px system-ui`;
+          ctx.textAlign = "center";
+          ctx.fillText("①", p.x, p.y - 6 / zoom);
+          ctx.fillStyle = couleurTrace;
+        }
       });
+
+      // Étiquette de mesure temps réel près de la souris
+      if (mousePos && echellePixelParMetre > 0) {
+        let label = "";
+        if (outil === "longueur" || outil === "soustraction_longueur") {
+          const longueurM = calculerLongueur([...pointsEnCours, mousePos]) / echellePixelParMetre;
+          label = `${longueurM.toFixed(2)} ml`;
+        } else if ((outil === "surface" || outil === "soustraction_surface") && pointsEnCours.length >= 2) {
+          const surfaceM2 = calculerSurface([...pointsEnCours, mousePos]) / (echellePixelParMetre * echellePixelParMetre);
+          label = `${surfaceM2.toFixed(2)} m²`;
+        }
+        if (label) {
+          const lx = mousePos.x + 12 / zoom;
+          const ly = mousePos.y - 8 / zoom;
+          ctx.font = `bold ${11 / zoom}px system-ui`;
+          ctx.textAlign = "left";
+          const w = ctx.measureText(label).width;
+          ctx.fillStyle = "rgba(15,23,42,0.75)";
+          ctx.fillRect(lx - 3 / zoom, ly - 12 / zoom, w + 6 / zoom, 16 / zoom);
+          ctx.fillStyle = "#f1f5f9";
+          ctx.fillText(label, lx, ly);
+        }
+      }
     }
 
     ctx.restore();
-  }, [fondPlan, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil]);
+  }, [fondPlan, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints]);
 
   useEffect(() => { dessiner(); }, [dessiner]);
 
@@ -1035,10 +1092,30 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
 
   // Zoom via molette — utilise addEventListener natif avec passive:false
   // pour pouvoir appeler e.preventDefault() et empêcher le défilement de page.
+  // Clamp offset pour garder au moins 60px de l'image toujours visible
+  const clampOffset = useCallback((ox: number, oy: number, z: number): PointCanvas => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: ox, y: oy };
+    const marge = 60; // px minimum visibles
+    const largeurContenu = fondPlan ? fondPlan.width * z : canvas.width;
+    const hauteurContenu = fondPlan ? fondPlan.height * z : canvas.height;
+    const xMin = marge - largeurContenu;
+    const xMax = canvas.width - marge;
+    const yMin = marge - hauteurContenu;
+    const yMax = canvas.height - marge;
+    return {
+      x: Math.min(xMax, Math.max(xMin, ox)),
+      y: Math.min(yMax, Math.max(yMin, oy)),
+    };
+  }, [fondPlan]);
+
   const zoomRef = useRef(zoom);
   const offsetRef = useRef(offset);
   zoomRef.current = zoom;
   offsetRef.current = offset;
+
+  const clampOffsetRef = useRef(clampOffset);
+  clampOffsetRef.current = clampOffset;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1050,15 +1127,15 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       const scaleY = canvas.height / rect.height;
       const mx = (e.clientX - rect.left) * scaleX;
       const my = (e.clientY - rect.top) * scaleY;
-      const facteur = e.deltaY < 0 ? 1.1 : 0.9;
+      const facteur = e.deltaY < 0 ? 1.12 : 0.9;
       const z = zoomRef.current;
       const o = offsetRef.current;
-      const nz = Math.min(5, Math.max(0.1, z * facteur));
+      const nz = Math.min(10, Math.max(0.05, z * facteur));
+      const nx = mx - (mx - o.x) * (nz / z);
+      const ny = my - (my - o.y) * (nz / z);
+      const clamped = clampOffsetRef.current(nx, ny, nz);
       setZoom(nz);
-      setOffsetCanvas({
-        x: mx - (mx - o.x) * (nz / z),
-        y: my - (my - o.y) * (nz / z),
-      });
+      setOffsetCanvas(clamped);
     };
     canvas.addEventListener("wheel", handler, { passive: false });
     return () => canvas.removeEventListener("wheel", handler);
@@ -1066,25 +1143,125 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   }, []);
 
   const gererMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (outil === "selection") {
+    lastMouse.current = { x: e.clientX, y: e.clientY };
+    // Bouton milieu → pan universel
+    if (e.button === 1) {
+      e.preventDefault();
+      isMidDragging.current = true;
+      return;
+    }
+    // Bouton gauche + espace pressée → pan universel
+    if (e.button === 0 && espacePresse.current) {
       isDragging.current = true;
-      lastMouse.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    // Bouton gauche en mode sélection → pan
+    if (e.button === 0 && outil === "selection") {
+      isDragging.current = true;
     }
   };
 
   const gererMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pt = coordCanvas(e);
     setMousePos(pt);
-    if (isDragging.current && outil === "selection") {
-      setOffsetCanvas((prev) => ({
-        x: prev.x + (e.clientX - lastMouse.current.x),
-        y: prev.y + (e.clientY - lastMouse.current.y),
-      }));
+
+    const isPanning = isDragging.current || isMidDragging.current;
+    if (isPanning) {
+      const dx = e.clientX - lastMouse.current.x;
+      const dy = e.clientY - lastMouse.current.y;
+      setOffsetCanvas((prev) => {
+        const nx = prev.x + dx;
+        const ny = prev.y + dy;
+        return clampOffset(nx, ny, zoomRef.current);
+      });
       lastMouse.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    lastMouse.current = { x: e.clientX, y: e.clientY };
+
+    // Mesure temps réel pendant le tracé
+    if (mousePos && pointsEnCours.length > 0) {
+      if (outil === "longueur" || outil === "soustraction_longueur") {
+        const longueurPx = calculerLongueur([...pointsEnCours, pt]);
+        const longueurM = longueurPx / echellePixelParMetre;
+        setMesureEnCours(`${longueurM.toFixed(3)} ml`);
+      } else if (outil === "surface" || outil === "soustraction_surface") {
+        if (pointsEnCours.length >= 2) {
+          const surfacePx = calculerSurface([...pointsEnCours, pt]);
+          const surfaceM2 = surfacePx / (echellePixelParMetre * echellePixelParMetre);
+          setMesureEnCours(`≈ ${surfaceM2.toFixed(3)} m²`);
+        }
+      } else if (outil === "calibrer" && calibrationPoints.length === 1) {
+        const dx = pt.x - calibrationPoints[0].x;
+        const dy = pt.y - calibrationPoints[0].y;
+        const pixels = Math.sqrt(dx * dx + dy * dy);
+        const m = parseFloat(longueurConnue);
+        if (m > 0) {
+          setMesureEnCours(`1m = ${(pixels / m).toFixed(1)} px/m`);
+        } else {
+          setMesureEnCours(`${pixels.toFixed(0)} px`);
+        }
+      } else {
+        setMesureEnCours(null);
+      }
+    } else {
+      setMesureEnCours(null);
     }
   };
 
-  const gererMouseUp = () => { isDragging.current = false; };
+  const gererMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 1) isMidDragging.current = false;
+    else isDragging.current = false;
+  };
+
+  // Espace pour activer temporairement le pan
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.code === "Space" && !e.repeat) espacePresse.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.code === "Space") espacePresse.current = false; };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, []);
+
+  const chargerImageDepuisUrl = (url: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`Impossible de charger : ${url.substring(0, 80)}`));
+      img.src = url;
+    });
+  };
+
+  const chargerPremierePage = async (url: string): Promise<HTMLImageElement> => {
+    const pdfjsLib = await import("pdfjs-dist");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    const tache = pdfjsLib.getDocument({ url, withCredentials: false });
+    const pdf = await tache.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2.0 });
+    const offscreen = document.createElement("canvas");
+    offscreen.width = viewport.width;
+    offscreen.height = viewport.height;
+    const ctx = offscreen.getContext("2d")!;
+    await page.render({ canvasContext: ctx, canvas: offscreen, viewport }).promise;
+    const dataUrl = offscreen.toDataURL("image/png");
+    return chargerImageDepuisUrl(dataUrl);
+  };
+
+  const appliquerImageSurCanvas = (img: HTMLImageElement) => {
+    const canvas = canvasRef.current;
+    if (canvas && canvas.width > 0 && img.width > 0 && img.height > 0) {
+      const fitZoom = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.92;
+      setZoom(fitZoom);
+      setOffsetCanvas({
+        x: (canvas.width - img.width * fitZoom) / 2,
+        y: (canvas.height - img.height * fitZoom) / 2,
+      });
+    }
+    setFondPlan(img);
+    setTimeout(() => setProgressionFond(null), 600);
+  };
 
   const uploaderFond = async (fichier: File) => {
     setChargementFond(true);
@@ -1094,31 +1271,28 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       const formData = new FormData();
       formData.append("fichier", fichier);
       formData.append("metre", metreId);
-      const reponse = await requeteApiAvecProgression<{ fichier?: string; url?: string }>(
+      const reponse = await requeteApiAvecProgression<{
+        fichier?: string; url?: string; url_fichier?: string; format_fichier?: string;
+      }>(
         `/api/metres/${metreId}/fonds-plan/`,
         { method: "POST", corps: formData, onProgression: setProgressionFond }
       );
-      const url = reponse.fichier ?? reponse.url ?? "";
+      // url_fichier = URL relative /minio/... (sans build_absolute_uri)
+      const url = reponse.url_fichier ?? reponse.fichier ?? reponse.url ?? "";
       if (!url) { setErreurFond("Aucune URL retournée par le serveur."); return; }
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        const canvas = canvasRef.current;
-        if (canvas && canvas.width > 0 && img.width > 0 && img.height > 0) {
-          const fitZoom = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.92;
-          setZoom(fitZoom);
-          setOffsetCanvas({
-            x: (canvas.width - img.width * fitZoom) / 2,
-            y: (canvas.height - img.height * fitZoom) / 2,
-          });
-        }
-        setFondPlan(img);
-        setTimeout(() => setProgressionFond(null), 600);
-      };
-      img.onerror = () => setErreurFond(`Impossible de charger l'image. URL: ${url.substring(0, 60)}…`);
-      img.src = url;
+
+      const estPDF = reponse.format_fichier === "pdf" || fichier.name.toLowerCase().endsWith(".pdf");
+
+      if (estPDF) {
+        // Rendu de la 1re page PDF via PDF.js → converti en image
+        const img = await chargerPremierePage(url);
+        appliquerImageSurCanvas(img);
+      } else {
+        const img = await chargerImageDepuisUrl(url);
+        appliquerImageSurCanvas(img);
+      }
     } catch (e) {
-      setErreurFond(e instanceof ErreurApi ? e.detail : "Impossible de téléverser le fond de plan.");
+      setErreurFond(e instanceof ErreurApi ? e.detail : String(e instanceof Error ? e.message : "Impossible de charger le fond de plan."));
       setProgressionFond(null);
     } finally { setChargementFond(false); }
   };
@@ -1183,13 +1357,15 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   ];
 
   const instructionOutil = {
-    selection: "Clic pour sélectionner une zone — Molette pour zoomer — Glisser pour déplacer",
-    surface: "Clic pour placer des points — Clic droit pour fermer le polygone",
-    soustraction_surface: "Surface à soustraire (rouge) — Clic droit pour fermer",
-    longueur: "Clic pour ajouter un segment — Clic droit pour terminer la polyligne",
-    soustraction_longueur: "Longueur à soustraire (rouge) — Clic droit pour terminer",
-    comptage: "Clic sur chaque élément — Clic droit pour terminer",
-    calibrer: "Tracez un segment de longueur connue (2 points)",
+    selection: "Glisser pour naviguer — Molette pour zoomer — Espace+Glisser ou Molette clic depuis n'importe quel outil",
+    surface: "Clic pour poser un point — Clic droit pour fermer le polygone",
+    soustraction_surface: "Surface à déduire (rouge) — Clic droit pour fermer",
+    longueur: "Clic pour ajouter un segment — Clic droit pour terminer",
+    soustraction_longueur: "Longueur à déduire (rouge) — Clic droit pour terminer",
+    comptage: "Clic sur chaque élément — Clic droit pour valider le comptage",
+    calibrer: longueurConnue
+      ? `Entrez la longueur connue → cliquez sur 2 points (${calibrationPoints.length}/2)`
+      : "Étape 1 : entrez la longueur connue dans la case à gauche",
   }[outil];
 
   return (
@@ -1275,10 +1451,20 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
             </button>
           ))}
           {outil === "calibrer" && (
-            <div className="xl:mt-2 space-y-1 w-10">
-              <input type="number" className="champ-saisie w-full text-xs py-1" placeholder="m"
-                value={longueurConnue} onChange={(e) => setLongueurConnue(e.target.value)} />
-              <p className="text-[10px] text-slate-400 text-center">{calibrationPoints.length}/2</p>
+            <div className="xl:mt-2 space-y-1.5">
+              <input
+                type="number" step="0.01" min="0.01"
+                className="champ-saisie w-14 text-xs py-1 text-center font-mono border-amber-300 focus:ring-amber-400"
+                placeholder="m"
+                title="Longueur connue en mètres"
+                value={longueurConnue}
+                onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
+              />
+              <div className="flex gap-1">
+                {[0, 1].map((i) => (
+                  <div key={i} className={`w-2.5 h-2.5 rounded-full border ${calibrationPoints.length > i ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"}`} />
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -1293,11 +1479,29 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
             onMouseDown={gererMouseDown}
             onMouseMove={gererMouseMove}
             onMouseUp={gererMouseUp}
-            onMouseLeave={() => { isDragging.current = false; setMousePos(null); }}
-            style={{ cursor: outil === "selection" ? (isDragging.current ? "grabbing" : "grab") : "crosshair" }}
+            onMouseLeave={() => {
+              isDragging.current = false;
+              isMidDragging.current = false;
+              setMousePos(null);
+              setMesureEnCours(null);
+            }}
+            style={{
+              cursor: (isDragging.current || isMidDragging.current)
+                ? "grabbing"
+                : outil === "selection" ? "grab"
+                : outil === "calibrer" ? "crosshair"
+                : "crosshair",
+            }}
           />
           <div className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-500">
-            <span className="truncate">{instructionOutil}</span>
+            <span className="truncate flex items-center gap-2">
+              {instructionOutil}
+              {mesureEnCours && (
+                <span className="ml-2 font-mono font-bold text-primaire-700 bg-primaire-50 border border-primaire-200 px-2 py-0.5 rounded">
+                  {mesureEnCours}
+                </span>
+              )}
+            </span>
             <div className="flex items-center gap-3 shrink-0">
               {fondPlan && (
                 <button
