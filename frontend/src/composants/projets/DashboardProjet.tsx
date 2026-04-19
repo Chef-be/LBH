@@ -11,7 +11,7 @@ import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
   TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
   MapPin, Building2, ExternalLink, Plus, FolderOpen, ReceiptText,
-  ChevronRight, AlertTriangle, Wand2, Settings2,
+  ChevronRight, AlertTriangle, Wand2, Settings2, Calculator, RefreshCw,
 } from "lucide-react";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { PanneauMissionsLivrables, MissionProjet } from "./PanneauMissionsLivrables";
@@ -71,6 +71,17 @@ interface PhaseSuggeree {
   phase_actuelle_libelle: string;
 }
 
+interface ResultatVariationPrix {
+  type_evolution: string;
+  indice_reference: string;
+  valeur_actuelle: number | null;
+  date_valeur_actuelle: string | null;
+  part_fixe: number;
+  coefficient: number | null;
+  formule_appliquee: string | null;
+  avertissement: string | null;
+}
+
 interface ProjetDetail {
   id: string;
   reference: string;
@@ -110,6 +121,19 @@ interface ProjetDetail {
   };
   dossiers_ged: Array<{ code: string; intitule: string; description: string }>;
   statuts_livrables: Record<string, string>;
+  mode_variation_prix?: {
+    type_evolution: string;
+    indice_reference: string;
+    part_fixe?: string | null;
+    date_prix_initial?: string | null;
+    reference_officielle?: {
+      code: string;
+      libelle: string;
+      territoire: string;
+      date_valeur: string;
+      valeur: number;
+    } | null;
+  } | null;
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -538,6 +562,13 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
 
   const [modaleDocumentOuverte, setModaleDocumentOuverte] = useState(false);
   const [modaleGestionMissionsOuverte, setModaleGestionMissionsOuverte] = useState(false);
+  const [resultatVariation, setResultatVariation] = useState<ResultatVariationPrix | null>(null);
+
+  const mutationCalculerVariation = useMutation({
+    mutationFn: () =>
+      api.post<ResultatVariationPrix>(`/api/projets/${projet.id}/variation-prix/calculer/`, {}),
+    onSuccess: (data) => setResultatVariation(data),
+  });
 
   const totalDevis = devisProjet.reduce((s, d) => s + parseFloat(d.montant_ttc || "0"), 0);
   const totalFacture = facturesProjet.reduce((s, f) => s + (parseFloat(f.montant_ttc || "0") - parseFloat(f.montant_restant || "0")), 0);
@@ -961,6 +992,75 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           projetId={idProjet}
           familleClient={familleClient}
         />
+      )}
+
+      {/* ── Variation de prix ── */}
+      {projet.mode_variation_prix && projet.mode_variation_prix.type_evolution !== "aucune" && (
+        <section
+          className="rounded-xl p-5"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Variation de prix — {projet.mode_variation_prix.type_evolution === "actualisation" ? "Actualisation" : "Révision"}
+            </h3>
+            <button
+              type="button"
+              onClick={() => mutationCalculerVariation.mutate()}
+              disabled={mutationCalculerVariation.isPending}
+              className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[color:var(--fond-entree)] disabled:opacity-60"
+              style={{ borderColor: "var(--bordure)", color: "var(--c-base)" }}
+            >
+              {mutationCalculerVariation.isPending
+                ? <><RefreshCw size={11} className="animate-spin" /> Calcul…</>
+                : <><Calculator size={11} /> Calculer</>
+              }
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <div>
+              <p className="text-xs" style={{ color: "var(--texte-3)" }}>Indice</p>
+              <p className="font-mono font-semibold" style={{ color: "var(--texte)" }}>
+                {projet.mode_variation_prix.indice_reference || "—"}
+              </p>
+            </div>
+            {projet.mode_variation_prix.reference_officielle && (
+              <>
+                <div>
+                  <p className="text-xs" style={{ color: "var(--texte-3)" }}>Valeur actuelle</p>
+                  <p className="font-mono font-semibold" style={{ color: "var(--texte)" }}>
+                    {projet.mode_variation_prix.reference_officielle.valeur}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs" style={{ color: "var(--texte-3)" }}>Publié le</p>
+                  <p className="text-sm" style={{ color: "var(--texte)" }}>
+                    {new Date(projet.mode_variation_prix.reference_officielle.date_valeur).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
+                  </p>
+                </div>
+              </>
+            )}
+            {projet.mode_variation_prix.part_fixe && projet.mode_variation_prix.part_fixe !== "0" && (
+              <div>
+                <p className="text-xs" style={{ color: "var(--texte-3)" }}>Part fixe</p>
+                <p className="font-semibold" style={{ color: "var(--texte)" }}>{projet.mode_variation_prix.part_fixe}%</p>
+              </div>
+            )}
+          </div>
+          {resultatVariation && (
+            <div
+              className="mt-3 rounded-lg p-3 text-xs space-y-1"
+              style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}
+            >
+              {resultatVariation.formule_appliquee && (
+                <p className="font-mono" style={{ color: "var(--texte-2)" }}>{resultatVariation.formule_appliquee}</p>
+              )}
+              {resultatVariation.avertissement && (
+                <p style={{ color: "var(--texte-3)" }}>{resultatVariation.avertissement}</p>
+              )}
+            </div>
+          )}
+        </section>
       )}
 
       {/* ── Graphique financier ── */}

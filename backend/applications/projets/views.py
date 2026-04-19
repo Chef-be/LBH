@@ -331,18 +331,20 @@ def vue_synthese_projet(requete, projet_id):
 
     # Activité récente (derniers documents et études modifiés)
     activite = []
-    for doc in docs_qs.order_by("-date_modification")[:3]:
+    for doc in docs_qs.select_related("createur").order_by("-date_modification")[:3]:
         activite.append({
             "type": "document",
-            "intitule": doc.intitule,
+            "libelle": doc.intitule,
             "statut": doc.statut,
+            "utilisateur": doc.createur.get_full_name() if hasattr(doc, "createur") and doc.createur else "—",
             "date": doc.date_modification.isoformat(),
         })
-    for etude in etudes.order_by("-date_modification")[:3]:
+    for etude in etudes.select_related("createur").order_by("-date_modification")[:3]:
         activite.append({
             "type": "etude",
-            "intitule": etude.intitule,
+            "libelle": etude.intitule,
             "statut": etude.statut,
+            "utilisateur": etude.createur.get_full_name() if hasattr(etude, "createur") and etude.createur else "—",
             "date": etude.date_modification.isoformat(),
         })
     activite.sort(key=lambda x: x["date"], reverse=True)
@@ -572,6 +574,85 @@ def vue_generer_depuis_modele(requete):
         }, status=201)
     except Exception as exc:
         raise ValidationError({"detail": str(exc)}) from exc
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_calculer_variation_prix(requete, projet_id):
+    """
+    POST /api/projets/<uuid>/variation-prix/calculer/
+    Calcule le coefficient d'actualisation ou de révision selon le mode configuré.
+    """
+    from applications.projets.referentiels import mode_variation_pour_projet, reference_indice_par_code
+
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    mode = mode_variation_pour_projet(projet)
+
+    if not mode or mode.get("type_evolution") == "aucune":
+        return Response({"detail": "Aucun mode de variation de prix configuré.", "coefficient": None})
+
+    type_evolution = mode.get("type_evolution", "aucune")
+    indice_code = mode.get("indice_reference", "")
+    part_fixe_str = mode.get("part_fixe", "") or "0"
+    try:
+        part_fixe = float(part_fixe_str) / 100.0
+    except (ValueError, TypeError):
+        part_fixe = 0.0
+
+    ref = reference_indice_par_code(indice_code) if indice_code else None
+    valeur_actuelle = None
+    if ref and ref.get("derniere_valeur"):
+        valeur_actuelle = ref["derniere_valeur"].get("valeur")
+
+    resultat = {
+        "type_evolution": type_evolution,
+        "indice_reference": indice_code,
+        "valeur_actuelle": valeur_actuelle,
+        "date_valeur_actuelle": ref["derniere_valeur"].get("date_valeur") if ref and ref.get("derniere_valeur") else None,
+        "part_fixe": float(part_fixe_str),
+        "coefficient": None,
+        "formule_appliquee": None,
+        "avertissement": None,
+    }
+
+    if valeur_actuelle is None:
+        resultat["avertissement"] = f"Indice {indice_code} introuvable ou sans valeur publiée."
+        return Response(resultat)
+
+    # Calcul du coefficient
+    formule_personnalisee = mode.get("formule_personnalisee", "")
+    if formule_personnalisee:
+        resultat["formule_appliquee"] = formule_personnalisee
+        resultat["avertissement"] = "La formule personnalisée nécessite une évaluation manuelle."
+    else:
+        # Formule standard : Ko = part_fixe + (1 - part_fixe) * (Io / I0)
+        # Sans I0 connu, on retourne I_actuel et la formule à titre indicatif
+        resultat["formule_appliquee"] = (
+            f"Ko = {part_fixe:.2f} + {(1 - part_fixe):.2f} × (I_actuel / I_initial)"
+        )
+        resultat["avertissement"] = (
+            "I_initial requis (date de prix initial) pour calculer Ko. "
+            f"Valeur actuelle {indice_code} : {valeur_actuelle}."
+        )
+
+    # Sauvegarder la valeur actuelle dans l'historique si souhaité
+    sauvegarder = requete.data.get("sauvegarder", False)
+    if sauvegarder and ref:
+        qualification = dict(projet.qualification_wizard or {})
+        mode_persiste = qualification.get("mode_variation_prix", {})
+        historique = list(mode_persiste.get("historique_valeurs", []))
+        historique.append({
+            "date": ref["derniere_valeur"]["date_valeur"],
+            "indice": indice_code,
+            "valeur": valeur_actuelle,
+            "enregistre_le": __import__("datetime").date.today().isoformat(),
+        })
+        mode_persiste["historique_valeurs"] = historique[-12:]  # 12 entrées max
+        qualification["mode_variation_prix"] = mode_persiste
+        projet.qualification_wizard = qualification
+        projet.save(update_fields=["qualification_wizard", "date_modification"])
+
+    return Response(resultat)
 
 
 @api_view(["GET", "PATCH"])

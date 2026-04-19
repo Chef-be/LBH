@@ -75,6 +75,14 @@ interface ProjetDetail {
   organisation: string | null;
   maitre_ouvrage: string | null;
   maitre_oeuvre: string | null;
+  commune?: string;
+  departement?: string;
+  montant_estime?: number | null;
+  montant_marche?: number | null;
+  honoraires_prevus?: number | null;
+  date_debut_prevue?: string | null;
+  date_fin_prevue?: string | null;
+  description?: string;
   contexte_projet: {
     famille_client: ReferentielOption;
     sous_type_client: ReferentielOption;
@@ -133,6 +141,15 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
   const [methodeEstimation, setMethodeEstimation] = useState("");
   const [sousMissionsSelectionnees, setSousMissionsSelectionnees] = useState<string[]>([]);
   const [donneesEntree, setDonneesEntree] = useState<Record<string, string | string[] | boolean>>({});
+  const [commune, setCommune] = useState("");
+  const [departement, setDepartement] = useState("");
+  const [montantEstime, setMontantEstime] = useState("");
+  const [montantMarche, setMontantMarche] = useState("");
+  const [honorairesPrevus, setHonorairesPrevus] = useState("");
+  const [dateDebutPrevue, setDateDebutPrevue] = useState("");
+  const [dateFinPrevue, setDateFinPrevue] = useState("");
+  const [description, setDescription] = useState("");
+
   const [variationPrix, setVariationPrix] = useState<ModeVariationPrix>({
     type_evolution: "aucune",
     cadre_juridique: "public",
@@ -196,6 +213,14 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
     setMissionPrincipaleId(projet.contexte_projet?.mission_principale.id || "");
     setPhaseInterventionId(projet.contexte_projet?.phase_intervention?.id || "");
     setNatureMarche(projet.contexte_projet?.nature_marche || "public");
+    setCommune(projet.commune || "");
+    setDepartement(projet.departement || "");
+    setMontantEstime(projet.montant_estime?.toString() || "");
+    setMontantMarche(projet.montant_marche?.toString() || "");
+    setHonorairesPrevus(projet.honoraires_prevus?.toString() || "");
+    setDateDebutPrevue(projet.date_debut_prevue || "");
+    setDateFinPrevue(projet.date_fin_prevue || "");
+    setDescription(projet.description || "");
     setPartieContractante(projet.contexte_projet?.partie_contractante || "");
     setRoleLbh(projet.contexte_projet?.role_lbh || "");
     setMethodeEstimation(projet.contexte_projet?.methode_estimation || "");
@@ -252,6 +277,14 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
           organisation: organisationId || null,
           maitre_ouvrage: maitreOuvrageId || null,
           maitre_oeuvre: maitreOeuvreId || null,
+          commune: commune || null,
+          departement: departement || null,
+          montant_estime: montantEstime ? parseFloat(montantEstime.replace(/\s/g, "").replace(",", ".")) : null,
+          montant_marche: montantMarche ? parseFloat(montantMarche.replace(/\s/g, "").replace(",", ".")) : null,
+          honoraires_prevus: honorairesPrevus ? parseFloat(honorairesPrevus.replace(/\s/g, "").replace(",", ".")) : null,
+          date_debut_prevue: dateDebutPrevue || null,
+          date_fin_prevue: dateFinPrevue || null,
+          description: description || "",
           contexte_projet_saisie: {
             famille_client: familleClientId,
             sous_type_client: sousTypeClientId,
@@ -314,6 +347,54 @@ export function FormulaireModifierProjet({ projetId }: { projetId: string }) {
           <label className="libelle-champ" htmlFor="intitule">Intitulé</label>
           <input id="intitule" className="champ-saisie" value={intitule} onChange={(e) => setIntitule(e.target.value)} />
           {erreurs.intitule && <p className="mt-1 text-xs text-red-500">{erreurs.intitule}</p>}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="libelle-champ" htmlFor="montant-estime">Budget estimé HT (€)</label>
+            <input id="montant-estime" className="champ-saisie" type="text" inputMode="decimal"
+              value={montantEstime} onChange={(e) => setMontantEstime(e.target.value)} placeholder="Ex : 500000" />
+          </div>
+          <div>
+            <label className="libelle-champ" htmlFor="montant-marche">Montant du marché HT (€)</label>
+            <input id="montant-marche" className="champ-saisie" type="text" inputMode="decimal"
+              value={montantMarche} onChange={(e) => setMontantMarche(e.target.value)} placeholder="Ex : 480000" />
+          </div>
+          <div>
+            <label className="libelle-champ" htmlFor="honoraires-prevus">Honoraires prévus HT (€)</label>
+            <input id="honoraires-prevus" className="champ-saisie" type="text" inputMode="decimal"
+              value={honorairesPrevus} onChange={(e) => setHonorairesPrevus(e.target.value)} placeholder="Ex : 18000" />
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="libelle-champ" htmlFor="date-debut">Date de début prévue</label>
+            <input id="date-debut" type="date" className="champ-saisie"
+              value={dateDebutPrevue} onChange={(e) => setDateDebutPrevue(e.target.value)} />
+          </div>
+          <div>
+            <label className="libelle-champ" htmlFor="date-fin">Date de fin prévue</label>
+            <input id="date-fin" type="date" className="champ-saisie"
+              value={dateFinPrevue} onChange={(e) => setDateFinPrevue(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="libelle-champ" htmlFor="commune">Commune</label>
+            <input id="commune" className="champ-saisie" value={commune} onChange={(e) => setCommune(e.target.value)} placeholder="Lyon" />
+          </div>
+          <div>
+            <label className="libelle-champ" htmlFor="departement">Département</label>
+            <input id="departement" className="champ-saisie" value={departement} onChange={(e) => setDepartement(e.target.value)} placeholder="69" />
+          </div>
+        </div>
+
+        <div>
+          <label className="libelle-champ" htmlFor="description">Description</label>
+          <textarea id="description" className="champ-saisie min-h-24"
+            value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">

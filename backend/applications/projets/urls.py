@@ -22,6 +22,7 @@ from .views import (
     vue_generer_depuis_modele,
     vue_appliquer_phase_suggeree,
     vue_statuts_livrables,
+    vue_calculer_variation_prix,
 )
 
 urlpatterns = [
@@ -41,6 +42,7 @@ urlpatterns = [
     path("<uuid:projet_id>/synthese/", vue_synthese_projet, name="projets-synthese"),
     path("<uuid:projet_id>/phase-suggeree/appliquer/", vue_appliquer_phase_suggeree, name="projets-phase-suggeree-appliquer"),
     path("<uuid:projet_id>/statuts-livrables/", vue_statuts_livrables, name="projets-statuts-livrables"),
+    path("<uuid:projet_id>/variation-prix/calculer/", vue_calculer_variation_prix, name="projets-variation-prix-calculer"),
     path("<uuid:projet_id>/lots/", VueLotsProjet.as_view(), name="projets-lots"),
     path("<uuid:projet_id>/intervenants/", VueIntervenantsProjet.as_view(), name="projets-intervenants"),
 ]
