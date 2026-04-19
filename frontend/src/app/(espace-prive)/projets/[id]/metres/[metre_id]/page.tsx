@@ -2,7 +2,8 @@
 
 import { useState, useEffect, use, useCallback, useRef } from "react";
 import Link from "next/link";
-import { api, ErreurApi, requeteApiAvecProgression } from "@/crochets/useApi";
+import { api, ErreurApi, requeteApiAvecProgression, type ProgressionTeleversement } from "@/crochets/useApi";
+import { OverlayTeleversement } from "@/composants/ui/EtatTeleversement";
 import {
   ArrowLeft, Plus, Pencil, Trash2, CheckCircle,
   AlertCircle, X, Save, ChevronRight, Calculator,
@@ -332,6 +333,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [fondPlan, setFondPlan] = useState<HTMLImageElement | null>(null);
   const [chargementFond, setChargementFond] = useState(false);
   const [erreurFond, setErreurFond] = useState<string | null>(null);
+  const [progressionFond, setProgressionFond] = useState<ProgressionTeleversement | null>(null);
   const [outil, setOutil] = useState<OutilCanvas>("selection");
   const [zoom, setZoom] = useState(1);
   const [offset, setOffsetCanvas] = useState<PointCanvas>({ x: 0, y: 0 });
@@ -546,19 +548,30 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const uploaderFond = async (fichier: File) => {
     setChargementFond(true);
     setErreurFond(null);
+    setProgressionFond(null);
     try {
       const formData = new FormData();
       formData.append("fichier", fichier);
       formData.append("metre", metreId);
-      const reponse = await requeteApiAvecProgression<{ url: string }>(
+      const reponse = await requeteApiAvecProgression<{ url: string; fichier?: string }>(
         `/api/metres/${metreId}/fonds-plan/`,
-        { method: "POST", corps: formData }
+        {
+          method: "POST",
+          corps: formData,
+          onProgression: setProgressionFond,
+        }
       );
+      const url = reponse.url ?? reponse.fichier ?? "";
       const img = new Image();
-      img.onload = () => setFondPlan(img);
-      img.src = reponse.url;
+      img.onload = () => {
+        setFondPlan(img);
+        setTimeout(() => setProgressionFond(null), 600);
+      };
+      img.onerror = () => setErreurFond("Impossible de charger l'image après téléversement.");
+      img.src = url;
     } catch (e) {
       setErreurFond(e instanceof ErreurApi ? e.detail : "Impossible de téléverser le fond de plan.");
+      setProgressionFond(null);
     } finally {
       setChargementFond(false);
     }
@@ -606,6 +619,10 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
 
   return (
     <div className="space-y-4">
+      <OverlayTeleversement
+        progression={progressionFond}
+        libelle={`Téléversement du fond de plan…`}
+      />
       {erreurFond && (
         <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm p-3">
           <AlertCircle className="w-4 h-4 shrink-0" />{erreurFond}

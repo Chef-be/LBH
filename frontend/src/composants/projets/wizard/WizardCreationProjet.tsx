@@ -9,7 +9,9 @@ import {
   ErreurApi,
   extraireListeResultats,
   requeteApiAvecProgression,
+  type ProgressionTeleversement,
 } from "@/crochets/useApi";
+import { OverlayTeleversement } from "@/composants/ui/EtatTeleversement";
 import type { OrganisationOption } from "@/composants/projets/ChampOrganisationRapide";
 
 import { IndicateurEtapes } from "./IndicateurEtapes";
@@ -194,6 +196,8 @@ export function WizardCreationProjet() {
   const [enSoumission, setEnSoumission] = useState(false);
   const [brouillonRestaure, setBrouillonRestaure] = useState(false);
   const [brouillonSavedAt, setBrouillonSavedAt] = useState<string | null>(null);
+  const [progression, setProgression] = useState<ProgressionTeleversement | null>(null);
+  const [libelleTeleversement, setLibelleTeleversement] = useState("");
   const referenceInitialeRef = useRef(etat.reference);
   const preanalyseAppliqueeIdRef = useRef<string | null>(null);
 
@@ -355,10 +359,12 @@ export function WizardCreationProjet() {
       formData.append("nature_ouvrage", etat.natureOuvrage);
       formData.append("nature_marche", etat.natureMarche);
 
+      setLibelleTeleversement("Analyse des documents sources…");
       const tache = await requeteApiAvecProgression<TachePreanalyseSources>(
         "/api/projets/preanalyse-sources/taches/",
-        { method: "POST", corps: formData, onProgression: () => {} }
+        { method: "POST", corps: formData, onProgression: setProgression }
       );
+      setTimeout(() => setProgression(null), 400);
       majChamp("preanalyseSourcesId", tache.id);
     } catch (err) {
       setErreurs((prev) => ({
@@ -429,18 +435,21 @@ export function WizardCreationProjet() {
       if (estArchiveZip(fichier)) {
         formData.append("fichier", fichier);
         formData.append("projet", projet.id);
+        setLibelleTeleversement(`Importation archive : ${fichier.name}`);
         await requeteApiAvecProgression("/api/documents/importer-archive/", {
-          method: "POST", corps: formData, onProgression: () => {},
+          method: "POST", corps: formData, onProgression: setProgression,
         });
       } else {
         formData.append("fichier", fichier);
         formData.append("projet", projet.id);
         formData.append("reference", referenceDocumentSource(projet.reference, fichier, i));
         formData.append("intitule", intituleDocumentSource(fichier));
+        setLibelleTeleversement(`Téléversement (${i + 1}/${etat.fichiersSourcesProjet.length}) : ${fichier.name}`);
         await requeteApiAvecProgression("/api/documents/", {
-          method: "POST", corps: formData, onProgression: () => {},
+          method: "POST", corps: formData, onProgression: setProgression,
         });
       }
+      setTimeout(() => setProgression(null), 300);
     }
   }
 
@@ -510,6 +519,7 @@ export function WizardCreationProjet() {
 
   return (
     <div className="min-h-screen" style={{ background: "var(--fond-app)" }}>
+      <OverlayTeleversement progression={progression} libelle={libelleTeleversement} />
       <div className="max-w-4xl mx-auto px-4 py-8">
 
         {/* En-tête */}

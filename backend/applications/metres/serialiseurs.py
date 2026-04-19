@@ -115,6 +115,7 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
     format_libelle = serializers.CharField(source="get_format_fichier_display", read_only=True)
     nb_zones = serializers.SerializerMethodField()
     intitule = serializers.CharField(required=False, default="", allow_blank=True)
+    format_fichier = serializers.CharField(required=False, default="image")
 
     class Meta:
         model = FondPlan
@@ -129,16 +130,27 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
     def get_nb_zones(self, obj):
         return obj.zones.count()
 
+    @staticmethod
+    def _detecter_format(nom_fichier: str) -> str:
+        import os
+        ext = os.path.splitext(nom_fichier)[1].lower()
+        if ext == ".pdf":
+            return "pdf"
+        if ext in (".dxf", ".dwg"):
+            return "dxf"
+        return "image"
+
     def create(self, validated_data):
+        import os
+        fichier = validated_data.get("fichier")
+        # Auto-détection du format depuis l'extension du fichier
+        if fichier:
+            validated_data["format_fichier"] = self._detecter_format(fichier.name)
         # Génère l'intitulé depuis le nom du fichier si non fourni
+        if not validated_data.get("intitule") and fichier:
+            validated_data["intitule"] = os.path.splitext(fichier.name)[0][:200]
         if not validated_data.get("intitule"):
-            fichier = validated_data.get("fichier")
-            if fichier:
-                import os
-                nom = os.path.splitext(fichier.name)[0]
-                validated_data["intitule"] = nom[:200]
-            else:
-                validated_data["intitule"] = "Plan sans titre"
+            validated_data["intitule"] = "Plan sans titre"
         return super().create(validated_data)
 
 

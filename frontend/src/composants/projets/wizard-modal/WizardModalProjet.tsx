@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { X, AlertCircle, Save } from "lucide-react";
-import { api, ErreurApi, extraireListeResultats, requeteApiAvecProgression } from "@/crochets/useApi";
+import { api, ErreurApi, extraireListeResultats, requeteApiAvecProgression, type ProgressionTeleversement } from "@/crochets/useApi";
+import { OverlayTeleversement } from "@/composants/ui/EtatTeleversement";
 import { useNotifications } from "@/contextes/FournisseurNotifications";
 import type { OrganisationOption } from "@/composants/projets/ChampOrganisationRapide";
 
@@ -110,6 +111,8 @@ export function WizardModalProjet({ ouvert, onFermer }: WizardModalProjetProps) 
   const [etapesValidees, setEtapesValidees] = useState<Set<number>>(new Set());
   const [brouillonRestauré, setBrouillonRestauré] = useState(false);
   const [horodatageSauvegarde, setHorodatageSauvegarde] = useState<string | null>(null);
+  const [progression, setProgression] = useState<ProgressionTeleversement | null>(null);
+  const [libelleTeleversement, setLibelleTeleversement] = useState("");
   const preanalyseAppliqueeRef = useRef<string | null>(null);
   const contenuRef = useRef<HTMLDivElement>(null);
 
@@ -238,10 +241,12 @@ export function WizardModalProjet({ ouvert, onFermer }: WizardModalProjetProps) 
       if (etat.contexteContractuelId) formData.append("contexte_contractuel", etat.contexteContractuelId);
       formData.append("nature_ouvrage", etat.natureOuvrage);
       formData.append("nature_marche", etat.natureMarche);
+      setLibelleTeleversement("Analyse des documents sources…");
       const tache = await requeteApiAvecProgression<TachePreanalyse>(
         "/api/projets/preanalyse-sources/taches/",
-        { method: "POST", corps: formData, onProgression: () => {} }
+        { method: "POST", corps: formData, onProgression: setProgression }
       );
+      setTimeout(() => setProgression(null), 400);
       majChamp("preanalyseSourcesId", tache.id);
     } catch (err) {
       setErreurs((prev) => ({ ...prev, analyse: err instanceof ErreurApi ? err.detail : "Analyse impossible." }));
@@ -305,10 +310,16 @@ export function WizardModalProjet({ ouvert, onFermer }: WizardModalProjetProps) 
         formData.append("reference", `${projet.reference}-SRC-${String(i + 1).padStart(2, "0")}`);
         formData.append("intitule", nettoyerNomDocument(fichier.name).replace(/^./, (c) => c.toUpperCase()));
       }
+      setLibelleTeleversement(
+        estZip
+          ? `Importation archive : ${fichier.name}`
+          : `Téléversement (${i + 1}/${etat.fichiersSourcesProjet.length}) : ${fichier.name}`
+      );
       await requeteApiAvecProgression(
         estZip ? "/api/documents/importer-archive/" : "/api/documents/",
-        { method: "POST", corps: formData, onProgression: () => {} }
+        { method: "POST", corps: formData, onProgression: setProgression }
       );
+      setTimeout(() => setProgression(null), 300);
     }
   }
 
@@ -398,6 +409,7 @@ export function WizardModalProjet({ ouvert, onFermer }: WizardModalProjetProps) 
 
   return (
     <>
+      <OverlayTeleversement progression={progression} libelle={libelleTeleversement} />
       {/* Overlay */}
       <div
         className="fixed inset-0 z-40 backdrop-blur-sm"
