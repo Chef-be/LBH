@@ -11,11 +11,12 @@ import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
   TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
   MapPin, Building2, ExternalLink, Plus, FolderOpen, ReceiptText,
-  ChevronRight, AlertTriangle, Wand2,
+  ChevronRight, AlertTriangle, Wand2, Settings2,
 } from "lucide-react";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { PanneauMissionsLivrables, MissionProjet } from "./PanneauMissionsLivrables";
 import { ModalGenererDocument } from "@/composants/documents/ModalGenererDocument";
+import { ModalGererMissionsProjet } from "./ModalGererMissionsProjet";
 import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
 import { useNotifications } from "@/contextes/FournisseurNotifications";
 
@@ -536,6 +537,7 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
     }));
 
   const [modaleDocumentOuverte, setModaleDocumentOuverte] = useState(false);
+  const [modaleGestionMissionsOuverte, setModaleGestionMissionsOuverte] = useState(false);
 
   const totalDevis = devisProjet.reduce((s, d) => s + parseFloat(d.montant_ttc || "0"), 0);
   const totalFacture = facturesProjet.reduce((s, f) => s + (parseFloat(f.montant_ttc || "0") - parseFloat(f.montant_restant || "0")), 0);
@@ -836,18 +838,47 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
       </section>
 
       {/* ── Missions & Livrables ── */}
-      {missionsProjet.length > 0 && (
+      {(missionsProjet.length > 0 || familleClient) && (
         <section>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
               Missions &amp; Livrables
             </h3>
+            {familleClient && (
+              <button
+                type="button"
+                onClick={() => setModaleGestionMissionsOuverte(true)}
+                className="flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-[color:var(--fond-entree)]"
+                style={{ borderColor: "var(--bordure)", color: "var(--texte-3)" }}
+              >
+                <Settings2 size={12} /> Gérer
+              </button>
+            )}
           </div>
-          <PanneauMissionsLivrables
-            missions={missionsProjet}
-            familleClient={familleClient}
-            onChangerStatutLivrable={changerStatutLivrable}
-          />
+          {missionsProjet.length > 0 ? (
+            <PanneauMissionsLivrables
+              missions={missionsProjet}
+              familleClient={familleClient}
+              onChangerStatutLivrable={changerStatutLivrable}
+            />
+          ) : (
+            <div
+              className="rounded-xl border py-10 flex flex-col items-center gap-3 text-center"
+              style={{ background: "var(--fond-entree)", borderColor: "var(--bordure)", borderStyle: "dashed" }}
+            >
+              <p className="text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+                Aucune mission associée à ce projet.
+              </p>
+              <button
+                type="button"
+                onClick={() => setModaleGestionMissionsOuverte(true)}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                style={{ background: "var(--c-clair)", color: "var(--c-base)" }}
+              >
+                <Settings2 size={12} /> Configurer les missions
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -907,6 +938,21 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           </button>
         </div>
       </section>
+
+      {/* ── Modal gestion missions ── */}
+      {modaleGestionMissionsOuverte && familleClient && (
+        <ModalGererMissionsProjet
+          projetId={projet.id}
+          familleClient={familleClient}
+          missionsActuelles={[...missionsCodes]}
+          statutsActuels={statutsLocaux}
+          onFermer={() => setModaleGestionMissionsOuverte(false)}
+          onSauvegarde={() => {
+            queryClient.invalidateQueries({ queryKey: ["projet", projet.id] });
+            queryClient.invalidateQueries({ queryKey: ["missions-livrables", familleClient] });
+          }}
+        />
+      )}
 
       {/* ── Modal génération document ── */}
       {modaleDocumentOuverte && (

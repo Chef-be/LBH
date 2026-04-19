@@ -9,10 +9,11 @@ import {
 } from "recharts";
 import {
   CheckCircle2, Circle, Clock, ChevronDown, ChevronUp,
-  AlertCircle, Download, RefreshCw, CalendarRange, Target,
+  AlertCircle, Download, RefreshCw, CalendarRange, Target, Settings2,
 } from "lucide-react";
 import { api } from "@/crochets/useApi";
 import type { MissionProjet } from "./PanneauMissionsLivrables";
+import { ModalGererMissionsProjet } from "./ModalGererMissionsProjet";
 
 /* ─────────────────────────────────────────────────────────────
    TYPES
@@ -338,6 +339,7 @@ function GraphiqueProgression({
 export function PlanningProjet({ projetId }: { projetId: string }) {
   const queryClient = useQueryClient();
   const [statutsLocaux, setStatutsLocaux] = useState<Record<string, string>>({});
+  const [modaleGestionOuverte, setModaleGestionOuverte] = useState(false);
 
   const { data: projet, isLoading: projetEnChargement } = useQuery<ProjetPlanning>({
     queryKey: ["projet", projetId],
@@ -408,23 +410,57 @@ export function PlanningProjet({ projetId }: { projetId: string }) {
 
   if (missions.length === 0) {
     return (
-      <div
-        className="rounded-2xl border py-16 flex flex-col items-center gap-4 text-center"
-        style={{ background: "var(--fond-entree)", borderColor: "var(--bordure)", borderStyle: "dashed" }}
-      >
-        <CalendarRange size={28} style={{ color: "var(--texte-3)" }} />
-        <div>
-          <p className="font-semibold text-sm" style={{ color: "var(--texte-2)" }}>Aucune mission configurée</p>
-          <p className="text-xs mt-1" style={{ color: "var(--texte-3)" }}>
-            Définissez des missions lors de la création ou modification du projet pour accéder au planning.
-          </p>
+      <>
+        <div
+          className="rounded-2xl border py-16 flex flex-col items-center gap-4 text-center"
+          style={{ background: "var(--fond-entree)", borderColor: "var(--bordure)", borderStyle: "dashed" }}
+        >
+          <CalendarRange size={28} style={{ color: "var(--texte-3)" }} />
+          <div>
+            <p className="font-semibold text-sm" style={{ color: "var(--texte-2)" }}>Aucune mission configurée</p>
+            <p className="text-xs mt-1 max-w-sm" style={{ color: "var(--texte-3)" }}>
+              Définissez les missions de ce projet pour accéder au planning et suivre l&apos;avancement des livrables.
+            </p>
+          </div>
+          {familleClient && (
+            <button
+              type="button"
+              onClick={() => setModaleGestionOuverte(true)}
+              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-all hover:opacity-90"
+              style={{ background: "var(--c-base)" }}
+            >
+              <Settings2 size={14} /> Configurer les missions
+            </button>
+          )}
         </div>
-      </div>
+        {modaleGestionOuverte && familleClient && (
+          <ModalGererMissionsProjet
+            projetId={projetId}
+            familleClient={familleClient}
+            missionsActuelles={[...missionsCodes]}
+            statutsActuels={statutsLocaux}
+            onFermer={() => setModaleGestionOuverte(false)}
+            onSauvegarde={() => queryClient.invalidateQueries({ queryKey: ["projet", projetId] })}
+          />
+        )}
+      </>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Bouton gérer les missions */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setModaleGestionOuverte(true)}
+          className="flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[color:var(--fond-entree)]"
+          style={{ borderColor: "var(--bordure)", color: "var(--texte-3)" }}
+        >
+          <Settings2 size={13} /> Gérer les missions
+        </button>
+      </div>
+
       {/* En-tête avec KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
@@ -535,6 +571,18 @@ export function PlanningProjet({ projetId }: { projetId: string }) {
           ))}
         </div>
       </div>
+
+      {/* Modal gestion des missions */}
+      {modaleGestionOuverte && familleClient && (
+        <ModalGererMissionsProjet
+          projetId={projetId}
+          familleClient={familleClient}
+          missionsActuelles={[...missionsCodes]}
+          statutsActuels={statutsLocaux}
+          onFermer={() => setModaleGestionOuverte(false)}
+          onSauvegarde={() => queryClient.invalidateQueries({ queryKey: ["projet", projetId] })}
+        />
+      )}
     </div>
   );
 }
