@@ -29,6 +29,242 @@ SOURCES_METHODOLOGIQUES = [
     "Guide de la maîtrise d'œuvre travaux, avril 2020",
 ]
 
+PHASES_PROJET_ORDONNEES = [
+    "faisabilite",
+    "programmation",
+    "esquisse",
+    "avp",
+    "pro",
+    "dce",
+    "ao",
+    "exe",
+    "reception",
+    "clos",
+]
+
+LIBELLES_PHASES_PROJET = {
+    "faisabilite": "Faisabilité",
+    "programmation": "Programmation",
+    "esquisse": "Esquisse / ESQ",
+    "avp": "Avant-projet sommaire / APS",
+    "pro": "Avant-projet définitif / APD / PRO",
+    "dce": "Dossier de consultation / DCE",
+    "ao": "Appel d'offres",
+    "exe": "Exécution / DET",
+    "reception": "Réception / AOR",
+    "clos": "Clos",
+}
+
+ALIASES_PHASES_PROJET = {
+    "faisabilite": "faisabilite",
+    "programmation": "programmation",
+    "analyse_programme": "programmation",
+    "note_budget": "programmation",
+    "estimation_previsionnelle": "programmation",
+    "verifier_enveloppe": "faisabilite",
+    "esq": "esquisse",
+    "esquisse": "esquisse",
+    "aps": "avp",
+    "apd": "pro",
+    "avp": "avp",
+    "avp_infrastructure": "avp",
+    "diagnostic_infrastructure": "faisabilite",
+    "etudes_preliminaires_infrastructure": "programmation",
+    "pro": "pro",
+    "pro_infrastructure": "pro",
+    "estimation_par_lot": "pro",
+    "estimation_infrastructure": "pro",
+    "mission_economique_transversale": "pro",
+    "redaction_cctp": "dce",
+    "redaction_bpu": "dce",
+    "redaction_dpgf": "dce",
+    "redaction_ccap": "dce",
+    "redaction_rc": "dce",
+    "redaction_pieces_marche_infrastructure": "dce",
+    "dce": "dce",
+    "act": "ao",
+    "act_infrastructure": "ao",
+    "rapport_analyse_offres": "ao",
+    "analyse_offres_infrastructure": "ao",
+    "reponse_appel_offres": "ao",
+    "prospection_ao": "ao",
+    "ao": "ao",
+    "exe": "exe",
+    "visa": "exe",
+    "det": "exe",
+    "opc": "exe",
+    "visa_infrastructure": "exe",
+    "det_infrastructure": "exe",
+    "opc_infrastructure": "exe",
+    "planning_execution": "exe",
+    "planning_previsionnel_travaux": "exe",
+    "planning_travaux_infrastructure": "exe",
+    "suivi_execution": "exe",
+    "aor": "reception",
+    "aor_infrastructure": "reception",
+    "reception": "reception",
+    "clos": "clos",
+}
+
+
+def normaliser_phase_projet(phase: str | None) -> str:
+    code = str(phase or "").strip().lower()
+    if not code:
+        return ""
+    return ALIASES_PHASES_PROJET.get(code, code if code in LIBELLES_PHASES_PROJET else "")
+
+
+def libelle_phase_projet(phase: str | None) -> str:
+    code = normaliser_phase_projet(phase)
+    return LIBELLES_PHASES_PROJET.get(code, "")
+
+
+def index_phase_projet(phase: str | None) -> int:
+    code = normaliser_phase_projet(phase)
+    return PHASES_PROJET_ORDONNEES.index(code) if code in PHASES_PROJET_ORDONNEES else -1
+
+
+def construire_suggestion_phase_projet(projet) -> dict[str, object]:
+    from applications.appels_offres.models import AppelOffres, OffreEntreprise
+    from applications.batiment.models import ProgrammeBatiment
+    from applications.documents.models import Document
+    from applications.economie.models import EtudeEconomique
+    from applications.execution.models import CompteRenduChantier, OrdreService, PlanningChantier, SituationTravaux, SuiviExecution
+    from applications.metres.models import Metre
+    from applications.pieces_ecrites.models import PieceEcrite
+    from applications.voirie.models import EtudeVoirie
+
+    phase_actuelle = normaliser_phase_projet(getattr(projet, "phase_actuelle", ""))
+    index_actuel = index_phase_projet(phase_actuelle)
+
+    documents = Document.objects.filter(projet=projet, est_version_courante=True)
+    documents_consultation = documents.filter(
+        type_document__code__in=["CCTP", "BPU", "DPGF", "DQE", "RC", "AE", "CCAP"]
+    ).count()
+    documents_reception = documents.filter(type_document__code__in=["PV_RECEPTION"]).count()
+
+    pieces_consultation = PieceEcrite.objects.filter(
+        projet=projet,
+        modele__type_document__in=["cctp", "dpgf", "bpu", "dqe", "rc", "ae", "ccap"],
+    ).count()
+    etudes_economiques = EtudeEconomique.objects.filter(projet=projet).count()
+    metres = Metre.objects.filter(projet=projet).count()
+    programmes_batiment = ProgrammeBatiment.objects.filter(projet=projet).count()
+    etudes_voirie = EtudeVoirie.objects.filter(projet=projet).count()
+
+    appels_offres = AppelOffres.objects.filter(projet=projet)
+    nb_appels_offres = appels_offres.count()
+    ao_en_preparation = appels_offres.filter(statut="preparation").count()
+    ao_actifs = appels_offres.exclude(statut="preparation").count()
+    nb_offres = OffreEntreprise.objects.filter(appel_offres__projet=projet).count()
+
+    suivis = SuiviExecution.objects.filter(projet=projet)
+    nb_suivis = suivis.count()
+    nb_plannings = PlanningChantier.objects.filter(suivi__projet=projet).count()
+    nb_comptes_rendus = CompteRenduChantier.objects.filter(suivi__projet=projet).count()
+    nb_situations = SituationTravaux.objects.filter(suivi__projet=projet).count()
+    nb_ordres_service = OrdreService.objects.filter(suivi__projet=projet).count()
+    situations_avancees = SituationTravaux.objects.filter(
+        suivi__projet=projet,
+        statut__in=["validee_moa", "payee"],
+    ).count()
+    comptes_rendus_finaux = CompteRenduChantier.objects.filter(
+        suivi__projet=projet,
+        avancement_physique_pct__gte=95,
+    ).count()
+
+    indices: list[str] = []
+    phase_suggeree = ""
+    raison = ""
+
+    if projet.statut in {"termine", "archive"} and projet.date_fin_reelle:
+        phase_suggeree = "clos"
+        raison = "Le projet est clôturé métier avec une date de fin réelle renseignée."
+        indices.extend(
+            [
+                f"Statut projet : {projet.get_statut_display()}",
+                f"Date de fin réelle : {projet.date_fin_reelle.isoformat()}",
+            ]
+        )
+    elif documents_reception or situations_avancees or comptes_rendus_finaux:
+        phase_suggeree = "reception"
+        raison = "Des indices de fin d'opération ou de réception ont été détectés."
+        if documents_reception:
+            indices.append(f"{documents_reception} document(s) de réception détecté(s)")
+        if situations_avancees:
+            indices.append(f"{situations_avancees} situation(s) validée(s) ou payée(s)")
+        if comptes_rendus_finaux:
+            indices.append(f"{comptes_rendus_finaux} compte(s) rendu(s) avec avancement >= 95 %")
+    elif nb_suivis or nb_plannings or nb_comptes_rendus or nb_situations or nb_ordres_service:
+        phase_suggeree = "exe"
+        raison = "Le projet possède déjà des éléments actifs de suivi d'exécution."
+        if nb_suivis:
+            indices.append(f"{nb_suivis} suivi(s) d'exécution")
+        if nb_plannings:
+            indices.append(f"{nb_plannings} planning(s) chantier")
+        if nb_comptes_rendus:
+            indices.append(f"{nb_comptes_rendus} compte(s) rendu(s) de chantier")
+        if nb_situations:
+            indices.append(f"{nb_situations} situation(s) de travaux")
+        if nb_ordres_service:
+            indices.append(f"{nb_ordres_service} ordre(s) de service")
+    elif ao_actifs or nb_offres:
+        phase_suggeree = "ao"
+        raison = "La consultation est engagée ou des offres ont déjà été reçues."
+        if nb_appels_offres:
+            indices.append(f"{nb_appels_offres} appel(s) d'offres")
+        if ao_actifs:
+            indices.append(f"{ao_actifs} consultation(s) hors préparation")
+        if nb_offres:
+            indices.append(f"{nb_offres} offre(s) entreprise reçue(s)")
+    elif pieces_consultation or documents_consultation or ao_en_preparation:
+        phase_suggeree = "dce"
+        raison = "Des pièces de consultation ou une préparation de consultation sont déjà présentes."
+        if pieces_consultation:
+            indices.append(f"{pieces_consultation} pièce(s) écrite(s) de consultation")
+        if documents_consultation:
+            indices.append(f"{documents_consultation} document(s) GED de type consultation")
+        if ao_en_preparation:
+            indices.append(f"{ao_en_preparation} appel(s) d'offres en préparation")
+    elif etudes_economiques or metres or etudes_voirie:
+        phase_suggeree = "pro"
+        raison = "Le projet contient déjà des productions d'estimation ou de quantification."
+        if etudes_economiques:
+            indices.append(f"{etudes_economiques} étude(s) économique(s)")
+        if metres:
+            indices.append(f"{metres} métré(s)")
+        if etudes_voirie:
+            indices.append(f"{etudes_voirie} étude(s) de voirie")
+    elif programmes_batiment:
+        phase_suggeree = "programmation"
+        raison = "Le projet est structuré par un programme bâtiment sans production aval détectée."
+        indices.append(f"{programmes_batiment} programme(s) bâtiment")
+    elif projet.montant_estime or projet.maitre_ouvrage_id or projet.description:
+        phase_suggeree = "faisabilite"
+        raison = "Le projet est qualifié mais aucun livrable de phase avancée n'a encore été détecté."
+        if projet.montant_estime:
+            indices.append("Montant estimé renseigné")
+        if projet.maitre_ouvrage_id:
+            indices.append("Maître d'ouvrage renseigné")
+        if projet.description:
+            indices.append("Description projet renseignée")
+    else:
+        phase_suggeree = "faisabilite"
+        raison = "Le projet existe mais ne contient pas encore d'indice suffisant pour une phase plus avancée."
+        indices.append("Aucun artefact métier avancé détecté")
+
+    index_suggere = index_phase_projet(phase_suggeree)
+    return {
+        "code": phase_suggeree,
+        "libelle": libelle_phase_projet(phase_suggeree),
+        "raison": raison,
+        "indices": indices[:6],
+        "differe": phase_suggeree != phase_actuelle,
+        "avancee_superieure": index_suggere > index_actuel,
+        "phase_actuelle": phase_actuelle,
+        "phase_actuelle_libelle": libelle_phase_projet(phase_actuelle),
+    }
+
 
 def _piece_documentaire(
     code: str,

@@ -137,7 +137,7 @@ class PrescriptionLieeSerialiseur(serializers.Serializer):
     lot_intitule = serializers.SerializerMethodField()
 
     def get_lot_numero(self, obj):
-        return obj.lot.numero if obj.lot_id else None
+        return obj.lot.code if obj.lot_id else None
 
     def get_lot_intitule(self, obj):
         return obj.lot.intitule if obj.lot_id else None
@@ -146,7 +146,7 @@ class PrescriptionLieeSerialiseur(serializers.Serializer):
 class LotCCTPResumeSerialiseur(serializers.Serializer):
     """Résumé d'un lot CCTP."""
     id = serializers.UUIDField()
-    numero = serializers.CharField()
+    numero = serializers.CharField(source="code")
     intitule = serializers.CharField()
     nb_prescriptions = serializers.SerializerMethodField()
 
@@ -215,7 +215,7 @@ class LignePrixBibliothequeCompletSerialiseur(LignePrixBibliothequeAvecSousDetai
                 "intitule": p.intitule,
                 "type_prescription": p.type_prescription,
                 "niveau": p.niveau,
-                "lot_numero": p.lot.numero if p.lot_id else None,
+                "lot_numero": p.lot.code if p.lot_id else None,
                 "lot_intitule": p.lot.intitule if p.lot_id else None,
             }
             for p in prescriptions
@@ -225,7 +225,7 @@ class LignePrixBibliothequeCompletSerialiseur(LignePrixBibliothequeAvecSousDetai
         if not obj.lot_cctp_reference_id:
             return None
         lot = obj.lot_cctp_reference
-        return {"id": str(lot.id), "numero": lot.numero, "intitule": lot.intitule}
+        return {"id": str(lot.id), "numero": lot.code, "intitule": lot.intitule}
 
     def get_repartition_ds(self, obj):
         repartition = _calculer_repartition_ds(obj)

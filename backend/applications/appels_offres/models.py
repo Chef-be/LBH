@@ -115,7 +115,8 @@ class AppelOffres(models.Model):
         help_text="{methode_prix: '...', ...}",
     )
     synthese_analyse = models.JSONField(
-        null=True, blank=True,
+        default=dict,
+        blank=True,
         verbose_name="Synthèse de l'analyse comparative",
     )
 

@@ -1,5 +1,6 @@
 """Vues API pour le site vitrine public — Plateforme LBH."""
 
+import html
 import logging
 import mimetypes
 
@@ -187,7 +188,23 @@ def vue_logo_pied_de_page(request):
 def vue_favicon(request):
     """Sert le favicon depuis le stockage objet."""
     config = ConfigurationSite.obtenir()
-    return _servir_champ_image(config.favicon if config else None)
+    if config and config.favicon:
+        reponse = _servir_champ_image(config.favicon)
+        if reponse.status_code != 404:
+            return reponse
+
+    libelle = (config.sigle or config.nom_bureau or "LBH") if config else "LBH"
+    texte = html.escape((libelle.strip() or "LBH")[:3].upper())
+    contenu = f"""
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="{texte}">
+      <rect width="64" height="64" rx="14" fill="#0f172a" />
+      <rect x="6" y="6" width="52" height="52" rx="10" fill="#1d4ed8" />
+      <text x="32" y="40" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">{texte}</text>
+    </svg>
+    """.strip().encode("utf-8")
+    reponse = HttpResponse(contenu, content_type="image/svg+xml")
+    reponse["Cache-Control"] = "public, max-age=3600"
+    return reponse
 
 
 # ---------------------------------------------------------------------------

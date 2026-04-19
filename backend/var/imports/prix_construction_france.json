@@ -5431,13 +5431,13 @@
     "https://prix-construction.info/espaces_urbains/Controle_de_qualite_et_essais/Structures_metalliques/Soudures/QMS010_Inspection_visuelle_des_soudures_da.html",
     "https://prix-construction.info/espaces_urbains/Controle_de_qualite_et_essais/Structures_metalliques/Soudures/QMS020_Essai_non_destructif_de_soudures_da.html"
   ],
-  "next_index": 0,
+  "next_index": 1600,
   "done": false,
   "totals": {
-    "fiches": 0,
-    "creees": 0,
-    "mises_a_jour": 0,
-    "articles_cctp": 0
+    "fiches": 1600,
+    "creees": 1569,
+    "mises_a_jour": 31,
+    "articles_cctp": 1600
   },
   "discovery": {
     "complete": true,

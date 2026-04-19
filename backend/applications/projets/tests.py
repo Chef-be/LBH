@@ -8,6 +8,8 @@ from applications.documents.models import DossierDocumentProjet, Document, TypeD
 from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
 from applications.projets.models import Projet, PreanalyseSourcesProjet
+from applications.pieces_ecrites.models import ModeleDocument, PieceEcrite
+from applications.appels_offres.models import AppelOffres
 
 
 class ApiProjetsTests(TestCase):
@@ -86,6 +88,13 @@ class ApiProjetsTests(TestCase):
         self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
         projet = Projet.objects.get(pk=reponse.data["id"])
         self.assertEqual(projet.qualification_wizard["niveau_definition"], "apd_pro")
+        self.assertIsNotNone(projet.date_debut_prevue)
+        self.assertTrue(
+            projet.intervenants.filter(
+                utilisateur=self.admin,
+                role="responsable",
+            ).exists()
+        )
         self.assertTrue(DossierDocumentProjet.objects.filter(projet=projet).exists())
         self.assertTrue(
             DossierDocumentProjet.objects.filter(
@@ -261,3 +270,66 @@ class ApiProjetsTests(TestCase):
         self.assertTrue(pieces["prescriptions_techniques"]["presence"])
         self.assertTrue(pieces["plans_conception"]["presence"])
         self.assertFalse(pieces["cadres_prix"]["presence"])
+
+    def test_detail_projet_expose_une_phase_suggeree_selon_les_artefacts_reels(self):
+        modele_cctp = ModeleDocument.objects.create(
+            code="MODELE-CCTP-TEST",
+            libelle="Modèle CCTP test",
+            type_document="cctp",
+        )
+        modele_dpgf = ModeleDocument.objects.create(
+            code="MODELE-DPGF-TEST",
+            libelle="Modèle DPGF test",
+            type_document="dpgf",
+        )
+        PieceEcrite.objects.create(
+            projet=self.projet,
+            modele=modele_cctp,
+            intitule="CCTP lot 01",
+        )
+        PieceEcrite.objects.create(
+            projet=self.projet,
+            modele=modele_dpgf,
+            intitule="DPGF lot 01",
+        )
+        AppelOffres.objects.create(
+            projet=self.projet,
+            intitule="Consultation lots séparés",
+            type_procedure="procedure_adaptee",
+            statut="preparation",
+        )
+
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["phase_suggeree"]["code"], "dce")
+        self.assertTrue(reponse.data["phase_suggeree"]["differe"])
+
+    def test_application_phase_suggeree_met_a_jour_la_phase_officielle(self):
+        modele_cctp = ModeleDocument.objects.create(
+            code="MODELE-CCTP-APPLY",
+            libelle="Modèle CCTP apply",
+            type_document="cctp",
+        )
+        PieceEcrite.objects.create(
+            projet=self.projet,
+            modele=modele_cctp,
+            intitule="CCTP lot 02",
+        )
+
+        reponse = self.client.post(f"/api/projets/{self.projet.id}/phase-suggeree/appliquer/", {}, format="json")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.projet.refresh_from_db()
+        self.assertEqual(self.projet.phase_actuelle, "dce")
+        self.assertEqual(reponse.data["projet"]["phase_actuelle"], "dce")
+
+    def test_synthese_normalise_les_codes_historiques_de_phase(self):
+        self.projet.phase_actuelle = "act"
+        self.projet.save(update_fields=["phase_actuelle"])
+
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/synthese/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["phase_code"], "ao")
+        self.assertEqual(reponse.data["phase_index"], 6)

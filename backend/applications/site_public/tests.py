@@ -87,6 +87,27 @@ class SitePublicConfigurationTests(TestCase):
         self.assertEqual(reponse.data["nom_bureau"], "LBH Economiste")
         self.assertEqual(reponse.data["meta_titre"], "")
 
+    def test_favicon_repond_avec_un_svg_par_defaut_si_aucun_media_n_est_configure(self):
+        self.configuration.favicon = None
+        self.configuration.logo = None
+        self.configuration.sigle = "LBH"
+        self.configuration.save(update_fields=["favicon", "logo", "sigle"])
+
+        self.client.force_authenticate(user=None)
+        reponse = self.client.get("/api/site/favicon/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK)
+        self.assertEqual(reponse["Content-Type"], "image/svg+xml")
+        self.assertIn(b"LBH", reponse.content)
+
+    def test_alias_legacy_api_config_retourne_la_configuration_publique(self):
+        self.client.force_authenticate(user=None)
+
+        reponse = self.client.get("/api/config")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertIn("nom_bureau", reponse.data)
+
 
 class SitePublicRealisationsTests(TestCase):
     def setUp(self):

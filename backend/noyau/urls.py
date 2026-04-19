@@ -9,12 +9,18 @@ from django.conf import settings
 from django.conf.urls.static import static
 from health_check.views import HealthCheckView
 
+from applications.site_public.views import vue_configuration
+
 # URL admin personnalisée (définie dans les paramètres, jamais /admin/ en production)
 _url_admin = getattr(settings, "ADMIN_URL", "administration-technique/")
 
 urlpatterns = [
     # Administration Django
     path(_url_admin, admin.site.urls),
+
+    # Alias historique de configuration publique
+    path("api/config", vue_configuration, name="config-legacy"),
+    path("api/config/", vue_configuration, name="config-legacy-slash"),
 
     # API — Authentification et comptes
     path("api/auth/", include("applications.comptes.urls")),

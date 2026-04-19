@@ -324,6 +324,7 @@ class ApiDocumentsTests(TestCase):
 
         self.assertEqual(reponse.status_code, 200)
         self.assertIn("WOPISrc=", reponse.data["url_editeur"])
+        self.assertNotIn("access_token=", reponse.data["url_editeur"])
         self.assertEqual(reponse.data["type_bureautique"], "texte")
 
     def test_creer_document_bureautique_cree_un_document_word(self):
