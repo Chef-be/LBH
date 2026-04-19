@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart2, BookText, Building2, FileText, FolderOpen,
+  BarChart2, BookText, Building2, CalendarRange, FileText, FolderOpen,
   Gavel, HardHat, LayoutDashboard, Ruler, TrendingUp,
 } from "lucide-react";
 
@@ -83,6 +83,12 @@ export function NavigationProjet({ idProjet, contexte = {} }: NavigationProjetPr
       href: `/projets/${idProjet}/pieces-ecrites`,
       badge: nbPiecesEcrites,
     }] : []),
+    {
+      id: "planning",
+      libelle: "Planning",
+      icone: CalendarRange,
+      href: `/projets/${idProjet}/planning`,
+    },
     {
       id: "documents",
       libelle: "Documents",

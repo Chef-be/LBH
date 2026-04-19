@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { X, AlertCircle, Save } from "lucide-react";
 import { api, ErreurApi, extraireListeResultats, requeteApiAvecProgression } from "@/crochets/useApi";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 import type { OrganisationOption } from "@/composants/projets/ChampOrganisationRapide";
 
 import { ProgressionWizard } from "./ProgressionWizard";
@@ -27,6 +28,10 @@ function genererReference() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function dateAujourdhuiIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function etatInitial(): EtatWizardModal {
   return {
     familleClientId: "", sousTypeClientId: "",
@@ -37,7 +42,7 @@ function etatInitial(): EtatWizardModal {
     missionsSelectionnees: [], phaseInterventionId: "",
     fichiersSourcesProjet: [], preanalyseSourcesId: null,
     resultatPreanalyse: null, champsPreremplis: new Set<string>(),
-    montantEstime: "", dateDebutPrevue: "", dateFinPrevue: "",
+    montantEstime: "", dateDebutPrevue: dateAujourdhuiIso(), dateFinPrevue: "",
     description: "", methodeEstimation: "", donneesEntree: {},
     variationPrix: {
       type_evolution: "ferme", cadre_juridique: "", indice_reference: "",
@@ -97,6 +102,7 @@ interface WizardModalProjetProps {
 
 export function WizardModalProjet({ ouvert, onFermer }: WizardModalProjetProps) {
   const router = useRouter();
+  const notifications = useNotifications();
   const [etape, setEtape] = useState(0);
   const [etat, setEtat] = useState<EtatWizardModal>(etatInitial);
   const [erreurs, setErreurs] = useState<Record<string, string>>({});
@@ -346,7 +352,19 @@ export function WizardModalProjet({ ouvert, onFermer }: WizardModalProjetProps) 
         await televerserFichiers(projet);
       }
 
+      // Initialiser les statuts de livrables sélectionnés
+      if (etat.missionsSelectionnees.length > 0) {
+        const statutsInitiaux: Record<string, string> = {};
+        etat.missionsSelectionnees.forEach((m) => {
+          m.livrablesCodes.forEach((lcode) => {
+            statutsInitiaux[`${m.missionCode}:${lcode}`] = "en_attente";
+          });
+        });
+        await api.patch(`/api/projets/${projet.id}/statuts-livrables/`, statutsInitiaux);
+      }
+
       supprimerBrouillon();
+      notifications.succes(`Projet ${projet.reference} créé.`);
       onFermer();
       router.push(`/projets/${projet.id}`);
     } catch (err) {
