@@ -16,6 +16,7 @@ urlpatterns = [
 
     # Bibliothèque de prescriptions CCTP — lots et générateur
     path("lots/", views.VueListeLotsTypesCCTP.as_view(), name="lots-cctp"),
+    path("prescriptions/", views.VueListePrescriptionsLot.as_view(), name="prescriptions-liste"),
     path("lots/<str:lot_numero>/prescriptions/", views.VueListePrescriptionsLot.as_view(), name="prescriptions-lot"),
     path("lots-cctp/", views.VueLotCCTPListeCreation.as_view(), name="lots-cctp-liste"),
     path("lots-cctp/<uuid:pk>/", views.VueLotCCTPDetail.as_view(), name="lots-cctp-detail"),
@@ -30,6 +31,7 @@ urlpatterns = [
     # Pièces écrites
     path("", views.VueListePiecesEcrites.as_view(), name="pieces-ecrites-liste"),
     path("<uuid:pk>/", views.VueDetailPieceEcrite.as_view(), name="piece-ecrite-detail"),
+    path("<uuid:pk>/session-bureautique/", views.vue_piece_ecrite_session_bureautique, name="piece-ecrite-session-bureautique"),
     path("<uuid:pk>/valider/", views.vue_valider_piece_ecrite, name="piece-ecrite-valider"),
     path("<uuid:pk>/generer/", views.vue_generer_piece_ecrite, name="piece-ecrite-generer"),
     path("<uuid:pk>/proposition-cctp/", views.vue_proposition_article_cctp, name="piece-ecrite-proposition-cctp"),

@@ -33,7 +33,7 @@ export default function PageNouvellePieceEcrite({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ type_document?: string; assistant?: string; intitule?: string }>;
+  searchParams: Promise<{ type?: string; type_document?: string; assistant?: string; intitule?: string }>;
 }) {
   const { id: projetId } = use(params);
   const recherche = use(searchParams);
@@ -70,12 +70,13 @@ export default function PageNouvellePieceEcrite({
   }, [modeleId]);
 
   useEffect(() => {
-    if (!recherche.type_document || modeles.length === 0 || modeleId) return;
-    const modeleCompatible = modeles.find((modele) => modele.type_document === recherche.type_document);
+    const typeDocument = recherche.type_document || recherche.type;
+    if (!typeDocument || modeles.length === 0 || modeleId) return;
+    const modeleCompatible = modeles.find((modele) => modele.type_document === typeDocument);
     if (modeleCompatible) {
       setModeleId(modeleCompatible.id);
     }
-  }, [modeleId, modeles, recherche.type_document]);
+  }, [modeleId, modeles, recherche.type, recherche.type_document]);
 
   const modeleActif = modeles.find((modele) => modele.id === modeleId) || null;
 

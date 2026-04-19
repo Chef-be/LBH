@@ -8,7 +8,7 @@ from django.http import FileResponse, HttpResponse
 from django.urls import reverse
 from rest_framework import generics, permissions, status, filters
 from rest_framework.decorators import api_view, authentication_classes, parser_classes, permission_classes
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
@@ -27,6 +27,15 @@ from .office import (
     type_mime_gabarit_modele,
     verifier_jeton_wopi_modele,
 )
+from applications.documents.office import (
+    assurer_fichier_bureautique_document,
+    construire_url_editeur_collabora_document,
+    creer_jeton_wopi_document,
+    extension_bureautique_document,
+    nom_affichage_document,
+    type_bureautique_document,
+)
+from applications.documents.services import est_document_bureautique_editable
 from .services import (
     analyser_cctp_depuis_document,
     construire_donnees_fusion_piece,
@@ -50,6 +59,30 @@ from .serialiseurs import (
     GenerateurCCTPCreationSerialiseur,
     LigneDPGFSerialiseur,
 )
+
+
+def _obtenir_modele_libre() -> ModeleDocument:
+    modele, _ = ModeleDocument.objects.get_or_create(
+        code="piece-libre-autre",
+        defaults={
+            "libelle": "Pièce libre",
+            "type_document": "autre",
+            "description": "Gabarit minimal utilisé lorsqu'une pièce écrite est créée sans modèle.",
+            "contenu_modele_html": "<p></p>",
+            "variables_fusion": [],
+            "est_actif": True,
+        },
+    )
+    champs_a_mettre_a_jour = []
+    if not modele.est_actif:
+        modele.est_actif = True
+        champs_a_mettre_a_jour.append("est_actif")
+    if not modele.contenu_modele_html:
+        modele.contenu_modele_html = "<p></p>"
+        champs_a_mettre_a_jour.append("contenu_modele_html")
+    if champs_a_mettre_a_jour:
+        modele.save(update_fields=champs_a_mettre_a_jour + ["date_modification"])
+    return modele
 
 
 class VueListeModelesDocuments(generics.ListCreateAPIView):
@@ -260,7 +293,10 @@ class VueListePiecesEcrites(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        piece = serializer.save(redacteur=self.request.user)
+        piece = serializer.save(
+            redacteur=self.request.user,
+            modele=serializer.validated_data.get("modele") or _obtenir_modele_libre(),
+        )
         if piece.modele_id:
             generer_piece_depuis_modele(piece)
 
@@ -283,6 +319,42 @@ class VueDetailPieceEcrite(generics.RetrieveUpdateDestroyAPIView):
         piece.statut = "archive"
         piece.save(update_fields=["statut"])
         return Response({"detail": "Pièce écrite archivée."})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_piece_ecrite_session_bureautique(request, pk):
+    piece = generics.get_object_or_404(
+        PieceEcrite.objects.select_related("document_ged"),
+        pk=pk,
+    )
+    document = piece.document_ged
+    if not document:
+        raise ValidationError(
+            "Cette pièce écrite n'est pas encore liée à un document GED éditable dans Collabora."
+        )
+    if not est_document_bureautique_editable(document.nom_fichier_origine, document.type_mime):
+        raise ValidationError("Le document GED lié n'est pas éditable dans Collabora.")
+
+    assurer_fichier_bureautique_document(document)
+    jeton = creer_jeton_wopi_document(document, request.user)
+    wopi_base = getattr(settings, "WOPI_BASE_URL", "").rstrip("/")
+    chemin_wopi = reverse("document-wopi-fichier", kwargs={"pk": document.pk})
+    wopi_src = (f"{wopi_base}{chemin_wopi}" if wopi_base else request.build_absolute_uri(chemin_wopi)).rstrip("/")
+    extension = extension_bureautique_document(document)
+    url_editeur = construire_url_editeur_collabora_document(wopi_src, jeton, extension)
+
+    return Response(
+        {
+            "url_editeur": url_editeur,
+            "nom_fichier": nom_affichage_document(document),
+            "type_bureautique": type_bureautique_document(document),
+            "extension": extension,
+            "access_token": jeton,
+            "access_token_ttl": 8 * 60 * 60 * 1000,
+            "fichier": request.build_absolute_uri(document.fichier.url) if document.fichier else None,
+        }
+    )
 
 
 class VueListeArticlesCCTP(generics.ListCreateAPIView):

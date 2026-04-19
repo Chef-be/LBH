@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from applications.comptes.models import Utilisateur
 from applications.bibliotheque.models import LignePrixBibliotheque
-from applications.documents.models import Document
+from applications.documents.models import Document, TypeDocument
 from applications.organisations.models import Organisation
 from applications.economie.models import EtudeEconomique, LignePrix
 from applications.pieces_ecrites.models import ArticleCCTP, ModeleDocument, PieceEcrite
@@ -446,6 +446,50 @@ class ApiModelesDocumentsTests(TestCase):
         document_enregistre = DocumentWord(BytesIO(reponse_contenu.content))
         self.assertIn("Projet : {nom_projet}", "\n".join(p.text for p in document_enregistre.paragraphs))
 
+    @patch("applications.documents.office.urllib_request.urlopen")
+    def test_session_bureautique_piece_reutilise_le_document_ged_associe(self, mock_urlopen):
+        mock_urlopen.return_value = FauxFluxHttp(
+            b"""
+            <wopi-discovery>
+              <net-zone name="external-https">
+                <app name="writer">
+                  <action ext="docx" name="edit" urlsrc="https://office.example.test/browser/cool.html?" />
+                </app>
+              </net-zone>
+            </wopi-discovery>
+            """
+        )
+        projet = Projet.objects.create(
+            reference="2026-0501",
+            intitule="Projet GED",
+            organisation=self.organisation,
+            responsable=self.admin,
+        )
+        type_document = TypeDocument.objects.create(code="CCTP-T", libelle="CCTP test")
+        document = Document.objects.create(
+            reference="DOC-001",
+            intitule="Document GED lié",
+            type_document=type_document,
+            projet=projet,
+            nom_fichier_origine="document-ged-lie.docx",
+            type_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            auteur=self.admin,
+        )
+        piece = PieceEcrite.objects.create(
+            projet=projet,
+            modele=self.modele,
+            intitule="Pièce avec GED",
+            redacteur=self.admin,
+            document_ged=document,
+        )
+
+        reponse = self.client.post(f"/api/pieces-ecrites/{piece.id}/session-bureautique/", {})
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertIn("WOPISrc=", reponse.data["url_editeur"])
+        self.assertIn(str(document.id), reponse.data["url_editeur"])
+        self.assertNotIn("access_token=", reponse.data["url_editeur"])
+
     def test_super_admin_peut_supprimer_physiquement_une_piece_ecrite(self):
         projet = Projet.objects.create(
             reference="2026-0500",
@@ -464,3 +508,44 @@ class ApiModelesDocumentsTests(TestCase):
 
         self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
         self.assertFalse(PieceEcrite.objects.filter(pk=piece.pk).exists())
+
+
+class ApiPiecesEcritesCreationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.organisation = Organisation.objects.create(
+            code="ORG-PE",
+            nom="Organisation pièces écrites",
+            type_organisation="bureau_etudes",
+        )
+        self.utilisateur = Utilisateur.objects.create_user(
+            courriel="pieces-ecrites@example.com",
+            password="motdepasse123",
+            prenom="Paul",
+            nom="Rédacteur",
+            organisation=self.organisation,
+        )
+        self.client.force_authenticate(self.utilisateur)
+        self.projet = Projet.objects.create(
+            reference="2026-0600",
+            intitule="Projet pièce libre",
+            organisation=self.organisation,
+            responsable=self.utilisateur,
+            cree_par=self.utilisateur,
+        )
+
+    def test_creation_piece_sans_modele_utilise_un_modele_libre(self):
+        reponse = self.client.post(
+            "/api/pieces-ecrites/",
+            {
+                "projet": str(self.projet.id),
+                "intitule": "Note libre de cadrage",
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        piece = PieceEcrite.objects.get(pk=reponse.data["id"])
+        self.assertIsNotNone(piece.modele_id)
+        self.assertEqual(piece.modele.code, "piece-libre-autre")
+        self.assertEqual(piece.modele.type_document, "autre")

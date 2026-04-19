@@ -187,13 +187,11 @@ def _discovery_urlsrc(extension: str) -> str:
 
 
 def construire_url_editeur_collabora(wopi_src: str, access_token: str, extension: str) -> str:
-    # access_token est inclus dans l'URL afin que le JS de cool.html puisse le lire et
-    # l'insérer dans le chemin WebSocket (/cool/{WOPISrc+token}/ws).
-    # Il est AUSSI transmis dans le corps du formulaire HTML (POST) pour que Collabora
-    # l'utilise lors des appels GetFile/PutFile (le token dans l'URL ne suffit pas pour ces appels).
+    # Le jeton WOPI est transmis dans le POST du formulaire caché.
+    # L'ajouter aussi à l'URL de cool.html a déjà provoqué des erreurs de résolution
+    # côté Collabora sur les appels WOPI dérivés (GetFile/PutFile).
     urlsrc = _discovery_urlsrc(extension.lstrip("."))
-    token_encode = urllib_parse.quote(access_token, safe="") if access_token else ""
-    parametres = f"WOPISrc={urllib_parse.quote(wopi_src, safe='')}&lang=fr&access_token={token_encode}&access_token_ttl=28800000"
+    parametres = f"WOPISrc={urllib_parse.quote(wopi_src, safe='')}&lang=fr"
     return f"{urlsrc}{parametres}"
 
 

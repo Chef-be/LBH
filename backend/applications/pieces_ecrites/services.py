@@ -257,7 +257,10 @@ def construire_donnees_fusion_piece(piece: PieceEcrite) -> dict[str, str]:
     ):
         donnees.setdefault(nom, _valeur_fusion_piece(piece, nom))
 
-    donnees["contenu_principal"] = _html_vers_texte(piece.contenu_html or generer_contenu_piece_depuis_articles(piece))
+    contenu_principal = piece.contenu_html or ""
+    if not contenu_principal and piece.articles.exists():
+        contenu_principal = generer_contenu_piece_depuis_articles(piece, donnees_fusion=donnees)
+    donnees["contenu_principal"] = _html_vers_texte(contenu_principal)
 
     return donnees
 
@@ -760,7 +763,10 @@ def _generer_rapport_analyse(piece: PieceEcrite) -> str:
     return "".join(sections)
 
 
-def generer_contenu_piece_depuis_articles(piece: PieceEcrite) -> str:
+def generer_contenu_piece_depuis_articles(
+    piece: PieceEcrite,
+    donnees_fusion: dict[str, str] | None = None,
+) -> str:
     """Génère le contenu HTML de la pièce depuis ses articles CCTP.
 
     Les variables de fusion ({{variable}}) présentes dans les corps d'articles
@@ -770,7 +776,7 @@ def generer_contenu_piece_depuis_articles(piece: PieceEcrite) -> str:
         "lot__ordre", "chapitre", "numero_article", "date_creation"
     )
     # Construire le dictionnaire de fusion une seule fois
-    donnees_fusion = construire_donnees_fusion_piece(piece)
+    donnees_fusion = donnees_fusion or construire_donnees_fusion_piece(piece)
 
     blocs = [
         f"<h1>{piece.intitule}</h1>",

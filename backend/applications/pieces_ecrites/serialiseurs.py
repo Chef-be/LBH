@@ -128,6 +128,7 @@ class PieceEcriteDetailSerialiseur(serializers.ModelSerializer):
         extra_kwargs = {
             "redacteur": {"required": False, "allow_null": True},
             "lot": {"required": False, "allow_null": True},
+            "modele": {"required": False, "allow_null": True},
         }
 
     def get_redacteur_nom(self, obj):

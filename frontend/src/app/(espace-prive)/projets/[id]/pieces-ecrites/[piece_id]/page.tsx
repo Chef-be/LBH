@@ -50,6 +50,7 @@ interface PieceEcrite {
   contenu_html: string;
   variables_personnalisees: Record<string, string>;
   fichier_genere?: string | null;
+  document_ged?: string | null;
   redacteur_nom: string | null;
   articles: ArticleCCTP[];
   date_modification: string;
@@ -920,9 +921,13 @@ export default function PageDetailPieceEcrite({
             </button>
             <button
               onClick={ouvrirCollabora}
-              disabled={chargementCollabora}
+              disabled={chargementCollabora || !piece.document_ged}
               className="btn-secondaire disabled:opacity-60"
-              title="Ouvrir dans l'éditeur bureautique Collabora"
+              title={
+                piece.document_ged
+                  ? "Ouvrir dans l'éditeur bureautique Collabora"
+                  : "Générez d'abord un document GED lié pour ouvrir Collabora"
+              }
             >
               {chargementCollabora
                 ? <><RefreshCw className="w-4 h-4 animate-spin" />Collabora…</>
@@ -1543,7 +1548,7 @@ export default function PageDetailPieceEcrite({
                   <button
                     type="button"
                     onClick={ouvrirCollabora}
-                    disabled={chargementCollabora}
+                    disabled={chargementCollabora || !piece.document_ged}
                     className="btn-primaire disabled:opacity-60"
                   >
                     {chargementCollabora
@@ -1558,7 +1563,11 @@ export default function PageDetailPieceEcrite({
                   <div className="text-center">
                     <Monitor className="mx-auto mb-3 h-10 w-10 text-slate-300" />
                     <p className="font-medium text-slate-500">Éditeur Collabora non chargé</p>
-                    <p className="mt-1 text-sm text-slate-400">Cliquez sur « Ouvrir l&apos;éditeur » pour lancer la session bureautique.</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {piece.document_ged
+                        ? "Cliquez sur « Ouvrir l'éditeur » pour lancer la session bureautique."
+                        : "Cette pièce doit d'abord être générée en document GED pour être ouverte dans Collabora."}
+                    </p>
                   </div>
                 </div>
               ) : (
