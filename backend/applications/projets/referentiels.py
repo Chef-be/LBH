@@ -574,6 +574,29 @@ def _trouver_option(options: list[dict[str, Any]], code: str) -> dict[str, Any] 
     return None
 
 
+def _mission_depuis_bdd(code: str) -> dict[str, Any] | None:
+    """Résout un code de mission depuis la base de données (MissionClient)."""
+    if not code:
+        return None
+    try:
+        from applications.projets.models import MissionClient
+        m = MissionClient.objects.filter(code=code).values("code", "libelle", "description").first()
+        if m:
+            return _option(m["code"], m["libelle"], m.get("description", ""))
+    except Exception:
+        pass
+    return None
+
+
+def _resoudre_mission(referentiel_statique: list[dict[str, Any]], code: str) -> dict[str, Any]:
+    """Cherche d'abord dans le référentiel statique, puis en BDD, puis retourne le code brut."""
+    return (
+        _trouver_option(referentiel_statique, code)
+        or _mission_depuis_bdd(code)
+        or _option(code, code)
+    )
+
+
 def contexte_projet_pour_projet(projet) -> dict[str, Any] | None:
     qualification = getattr(projet, "qualification_wizard", {}) or {}
     contexte = qualification.get("contexte_projet") or {}
@@ -598,13 +621,15 @@ def contexte_projet_pour_projet(projet) -> dict[str, Any] | None:
         nature_ouvrage=contexte_normalise["nature_ouvrage"],
     )
 
+    missions_statiques = referentiels["missions_principales"]
+
     return {
         "famille_client": _trouver_option(referentiels["familles_client"], contexte_normalise["famille_client"]) or _option(contexte_normalise["famille_client"], contexte_normalise["famille_client"] or "—"),
         "sous_type_client": _trouver_option(referentiels["sous_types_client"], contexte_normalise["sous_type_client"]) or _option(contexte_normalise["sous_type_client"], contexte_normalise["sous_type_client"] or "—"),
         "contexte_contractuel": _trouver_option(referentiels["contextes_contractuels"], contexte_normalise["contexte_contractuel"]) or _option(contexte_normalise["contexte_contractuel"], contexte_normalise["contexte_contractuel"] or "—"),
-        "mission_principale": _trouver_option(referentiels["missions_principales"], contexte_normalise["mission_principale"]) or _option(contexte_normalise["mission_principale"], contexte_normalise["mission_principale"] or "—"),
+        "mission_principale": _resoudre_mission(missions_statiques, contexte_normalise["mission_principale"]) if contexte_normalise["mission_principale"] else _option("", "—"),
         "missions_associees": [
-            _trouver_option(referentiels["missions_principales"], code) or _option(code, code)
+            _resoudre_mission(missions_statiques, code)
             for code in contexte_normalise["missions_associees"]
         ],
         "phase_intervention": _trouver_option(referentiels["phases_intervention"], contexte_normalise["phase_intervention"]) if contexte_normalise["phase_intervention"] else None,
@@ -615,7 +640,7 @@ def contexte_projet_pour_projet(projet) -> dict[str, Any] | None:
         "methode_estimation": contexte_normalise["methode_estimation"],
         "donnees_entree": contexte_normalise["donnees_entree"],
         "sous_missions": [
-            _trouver_option(referentiels["sous_missions"], code) or _option(code, code)
+            _trouver_option(referentiels["sous_missions"], code) or _mission_depuis_bdd(code) or _option(code, code)
             for code in contexte_normalise["sous_missions"]
         ],
     }
