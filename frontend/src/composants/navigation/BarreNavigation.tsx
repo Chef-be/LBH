@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { LogOut, Sun, Moon, Monitor, ChevronRight } from "lucide-react";
+import { LogOut, Sun, Moon, Monitor, ChevronRight, Bell, CheckCheck, X } from "lucide-react";
 import { useSessionStore } from "@/crochets/useSession";
 import { useTheme } from "@/contextes/FournisseurTheme";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 import type { ModeTheme } from "@/contextes/FournisseurConfiguration";
 import Link from "next/link";
 
@@ -115,6 +117,142 @@ function BasculeTheme() {
   );
 }
 
+function CentreNotifications() {
+  const {
+    notifications,
+    nombreNonLues,
+    marquerCommeLue,
+    marquerToutesCommeLues,
+    supprimerNotification,
+  } = useNotifications();
+  const [ouvert, setOuvert] = useState(false);
+  const conteneurRef = useRef<HTMLDivElement>(null);
+  const notificationsRecentes = useMemo(() => notifications.slice(0, 8), [notifications]);
+
+  useEffect(() => {
+    if (!ouvert) return;
+    const handler = (event: MouseEvent) => {
+      if (conteneurRef.current && !conteneurRef.current.contains(event.target as Node)) {
+        setOuvert(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ouvert]);
+
+  const formaterDate = (dateCreation: number) =>
+    new Intl.DateTimeFormat("fr-FR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(dateCreation));
+
+  return (
+    <div ref={conteneurRef} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOuvert((precedent) => {
+            const prochain = !precedent;
+            if (prochain) marquerToutesCommeLues();
+            return prochain;
+          });
+        }}
+        className="relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors hover:bg-black/5"
+        style={{ color: "var(--texte-3)" }}
+        title="Notifications"
+        aria-label="Notifications"
+      >
+        <Bell size={16} />
+        {nombreNonLues > 0 && (
+          <span
+            className="absolute -right-1 -top-1 min-w-[1.2rem] rounded-full px-1 py-0.5 text-center text-[10px] font-bold text-white"
+            style={{ background: "#dc2626" }}
+          >
+            {nombreNonLues > 9 ? "9+" : nombreNonLues}
+          </span>
+        )}
+      </button>
+
+      {ouvert && (
+        <div
+          className="absolute right-0 top-11 z-40 w-80 overflow-hidden rounded-2xl border shadow-2xl"
+          style={{ background: "var(--fond-carte)", borderColor: "var(--bordure)" }}
+        >
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "var(--bordure)" }}>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Notifications</p>
+              <p className="text-xs" style={{ color: "var(--texte-3)" }}>
+                {notifications.length} élément{notifications.length > 1 ? "s" : ""} récent{notifications.length > 1 ? "s" : ""}
+              </p>
+            </div>
+            {notifications.length > 0 && (
+              <button
+                type="button"
+                onClick={marquerToutesCommeLues}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors hover:bg-black/5"
+                style={{ color: "var(--c-base)" }}
+              >
+                <CheckCheck size={13} />
+                Tout lire
+              </button>
+            )}
+          </div>
+
+          <div className="max-h-96 overflow-y-auto">
+            {notificationsRecentes.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm" style={{ color: "var(--texte-3)" }}>
+                Aucune notification pour le moment.
+              </div>
+            ) : (
+              notificationsRecentes.map((notification) => (
+                <div
+                  key={notification.id}
+                  className="flex items-start gap-3 border-b px-4 py-3"
+                  style={{
+                    borderColor: "var(--bordure)",
+                    background: notification.lue ? "transparent" : "color-mix(in srgb, var(--c-leger) 55%, transparent)",
+                  }}
+                  onMouseEnter={() => marquerCommeLue(notification.id)}
+                >
+                  <span
+                    className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{
+                      background:
+                        notification.type === "succes" ? "#16a34a" :
+                        notification.type === "erreur" ? "#dc2626" :
+                        notification.type === "alerte" ? "#d97706" :
+                        "#0284c7",
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm leading-snug" style={{ color: "var(--texte)" }}>
+                      {notification.message}
+                    </p>
+                    <p className="mt-1 text-[11px]" style={{ color: "var(--texte-3)" }}>
+                      {formaterDate(notification.dateCreation)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => supprimerNotification(notification.id)}
+                    className="rounded p-1 transition-colors hover:bg-black/5"
+                    style={{ color: "var(--texte-3)" }}
+                    aria-label="Supprimer la notification"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Composant principal
 // ---------------------------------------------------------------------------
@@ -149,6 +287,7 @@ export function BarreNavigation() {
       {/* Actions droite */}
       <div className="flex items-center gap-3 shrink-0">
         <BasculeTheme />
+        <CentreNotifications />
 
         {utilisateur && (
           <div className="flex items-center gap-2">

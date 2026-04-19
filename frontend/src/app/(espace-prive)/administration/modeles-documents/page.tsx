@@ -11,6 +11,8 @@ import {
   FileText,
   Info,
   Layers,
+  Maximize2,
+  Minimize2,
   PanelLeft,
   PanelLeftClose,
   PanelRight,
@@ -26,6 +28,8 @@ import {
 } from "lucide-react";
 import { api, ErreurApi, requeteApiAvecProgression, type ProgressionTeleversement } from "@/crochets/useApi";
 import { EtatTeleversement } from "@/composants/ui/EtatTeleversement";
+import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -180,6 +184,7 @@ function formaterDate(iso: string | null | undefined) {
 // ---------------------------------------------------------------------------
 
 export default function PageAdministrationModelesDocuments() {
+  const notifications = useNotifications();
   const identifiantIframe = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const cibleIframe = `collabora-modele-${identifiantIframe}`;
   const formulaireBureautiqueRef = useRef<HTMLFormElement | null>(null);
@@ -200,10 +205,12 @@ export default function PageAdministrationModelesDocuments() {
   const [groupeOuvert, setGroupeOuvert] = useState<string>("Projet");
   const [panneauDroit, setPanneauDroit] = useState<"proprietes" | "variables" | "gabarit">("variables");
   const [panneauDroitVisible, setPanneauDroitVisible] = useState(true);
+  const [modeFocusBureautique, setModeFocusBureautique] = useState(false);
   const [panneauGaucheVisible, setPanneauGaucheVisible] = useState(() => {
     if (typeof window === "undefined") return true;
     return localStorage.getItem("modeles-panneau-gauche") !== "ferme";
   });
+  const [confirmationSuppressionOuverte, setConfirmationSuppressionOuverte] = useState(false);
 
   // -------------------------------------------------------------------------
   // Chargement
@@ -389,15 +396,19 @@ export default function PageAdministrationModelesDocuments() {
 
   async function supprimerModele() {
     if (!edition.id) return;
-    if (!window.confirm(`Supprimer définitivement le modèle « ${edition.libelle} » ?`)) return;
     try {
       await api.supprimer(`/api/pieces-ecrites/modeles/${edition.id}/`);
       await chargerModeles();
       demarrerNouveauModele();
       setSucces("Modèle supprimé.");
       setTimeout(() => setSucces(null), 3000);
+      notifications.succes(`Modèle ${edition.libelle} supprimé.`);
     } catch (e) {
-      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de supprimer le modèle.");
+      const message = e instanceof ErreurApi ? e.detail : "Impossible de supprimer le modèle.";
+      setErreur(message);
+      notifications.erreur(message);
+    } finally {
+      setConfirmationSuppressionOuverte(false);
     }
   }
 
@@ -411,8 +422,20 @@ export default function PageAdministrationModelesDocuments() {
 
   const totalVariables = VARIABLES_SYSTEME.reduce((acc, g) => acc + g.variables.length, 0) + edition.variables_fusion.length;
 
+  useEffect(() => {
+    if (!estBureautiqueOuvert) {
+      setModeFocusBureautique(false);
+    }
+  }, [estBureautiqueOuvert]);
+
   return (
-    <div className="-m-6 flex h-[calc(100vh-56px)] flex-col overflow-hidden">
+    <div
+      className={`flex flex-col overflow-hidden ${
+        modeFocusBureautique && estBureautiqueOuvert
+          ? "fixed inset-0 z-50 h-screen bg-slate-100"
+          : "-m-6 h-[calc(100vh-56px)]"
+      }`}
+    >
       {/* ------------------------------------------------------------------ */}
       {/* Barre supérieure                                                     */}
       {/* ------------------------------------------------------------------ */}
@@ -435,14 +458,16 @@ export default function PageAdministrationModelesDocuments() {
           {erreur && (
             <span className="max-w-xs rounded-xl bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700">{erreur}</span>
           )}
-          <button
-            type="button"
-            onClick={() => setPanneauGaucheVisible((v) => !v)}
-            className="btn-secondaire py-1.5 text-xs"
-            title={panneauGaucheVisible ? "Masquer la liste" : "Afficher la liste"}
-          >
-            {panneauGaucheVisible ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
-          </button>
+          {!modeFocusBureautique && (
+            <button
+              type="button"
+              onClick={() => setPanneauGaucheVisible((v) => !v)}
+              className="btn-secondaire py-1.5 text-xs"
+              title={panneauGaucheVisible ? "Masquer la liste" : "Afficher la liste"}
+            >
+              {panneauGaucheVisible ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+            </button>
+          )}
           <button type="button" onClick={demarrerNouveauModele} className="btn-primaire">
             <Plus size={15} /> Nouveau modèle
           </button>
@@ -459,7 +484,7 @@ export default function PageAdministrationModelesDocuments() {
         {/* ============================================================== */}
         {/* Panneau gauche — liste des modèles                              */}
         {/* ============================================================== */}
-        {panneauGaucheVisible && <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 transition-all">
+        {panneauGaucheVisible && !modeFocusBureautique && <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50 transition-all">
           <div className="shrink-0 border-b border-slate-200 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
               {modeles.length} modèle{modeles.length !== 1 ? "s" : ""}
@@ -550,6 +575,17 @@ export default function PageAdministrationModelesDocuments() {
                     )}
                     {chargementBureautique ? "Connexion…" : estBureautiqueOuvert ? "Relancer" : `Ouvrir ${libelleEditeur(edition.type_document)}`}
                   </button>
+                  {estBureautiqueOuvert && (
+                    <button
+                      type="button"
+                      onClick={() => setModeFocusBureautique((precedent) => !precedent)}
+                      className="btn-secondaire py-1.5 text-xs"
+                      title={modeFocusBureautique ? "Quitter le mode focus" : "Passer en mode focus"}
+                    >
+                      {modeFocusBureautique ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                      {modeFocusBureautique ? "Quitter le focus" : "Mode focus"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setPanneauDroitVisible((v) => !v)}
@@ -636,7 +672,7 @@ export default function PageAdministrationModelesDocuments() {
         {/* ============================================================== */}
         {/* Panneau droit — propriétés + variables                          */}
         {/* ============================================================== */}
-        {panneauDroitVisible && <aside className="flex w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
+        {panneauDroitVisible && !modeFocusBureautique && <aside className="flex w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
           {/* Navigation du panneau */}
           <div className="flex shrink-0 border-b border-slate-200">
             {(["proprietes", "variables", "gabarit"] as const).map((p) => (
@@ -730,7 +766,7 @@ export default function PageAdministrationModelesDocuments() {
                   {edition.id && (
                     <button
                       type="button"
-                      onClick={supprimerModele}
+                      onClick={() => setConfirmationSuppressionOuverte(true)}
                       className="btn-secondaire w-full justify-center text-red-600 hover:border-red-300 hover:bg-red-50"
                     >
                       <Trash2 size={15} /> Supprimer
@@ -956,6 +992,17 @@ export default function PageAdministrationModelesDocuments() {
           )}
         </aside>}
       </div>
+
+      <ModalConfirmation
+        ouverte={confirmationSuppressionOuverte}
+        titre="Supprimer le modèle"
+        message={edition.libelle ? `Supprimer définitivement le modèle « ${edition.libelle} » ?` : "Supprimer définitivement ce modèle ?"}
+        libelleBoutonConfirmer="Supprimer"
+        variante="danger"
+        chargement={enregistrement}
+        onAnnuler={() => setConfirmationSuppressionOuverte(false)}
+        onConfirmer={supprimerModele}
+      />
     </div>
   );
 }

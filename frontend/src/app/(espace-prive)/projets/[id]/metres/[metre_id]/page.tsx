@@ -551,7 +551,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       formData.append("fichier", fichier);
       formData.append("metre", metreId);
       const reponse = await requeteApiAvecProgression<{ url: string }>(
-        "/api/metres/fonds-plan/",
+        `/api/metres/${metreId}/fonds-plan/`,
         { method: "POST", corps: formData }
       );
       const img = new Image();

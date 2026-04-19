@@ -4,6 +4,8 @@ import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
+import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
 import {
   Upload, FileText, CheckCircle2, AlertCircle, Clock,
   RefreshCw, BookOpen, ChevronDown, ChevronRight,
@@ -219,9 +221,10 @@ function CarteDevis({
   onSupprimer,
 }: {
   devis: DevisAnalyse;
-  onSupprimer: (id: string) => void;
+  onSupprimer: () => void;
 }) {
   const queryClient = useQueryClient();
+  const notifications = useNotifications();
   const config = STATUT_CONFIG[devis.statut];
   const Icone = config.icone;
   const [deplie, setDeplie] = useState(false);
@@ -242,9 +245,9 @@ function CarteDevis({
       );
       queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
       queryClient.invalidateQueries({ queryKey: ["devis-lignes", devis.id] });
-      alert(`${res.capitalise} ligne(s) capitalisée(s) en bibliothèque.`);
+      notifications.succes(`${res.capitalise} ligne(s) capitalisée(s) en bibliothèque.`);
     } catch (e) {
-      alert(e instanceof ErreurApi ? e.detail : "Erreur lors de la capitalisation.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Erreur lors de la capitalisation.");
     } finally {
       setCapitalEnCours(false);
     }
@@ -254,8 +257,9 @@ function CarteDevis({
     try {
       await api.post(`/api/ressources/devis/${devis.id}/relancer/`, {});
       queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
+      notifications.info("L'analyse du devis a été relancée.");
     } catch (e) {
-      alert(e instanceof ErreurApi ? e.detail : "Erreur.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Erreur.");
     }
   };
 
@@ -304,7 +308,7 @@ function CarteDevis({
           <button
             type="button"
             className="rounded p-1 hover:bg-red-50 text-slate-400 hover:text-red-500"
-            onClick={() => onSupprimer(devis.id)}
+            onClick={onSupprimer}
           >
             <X className="h-4 w-4" />
           </button>
@@ -355,6 +359,7 @@ type EtatPrevisualisation = "vide" | "chargement" | "pret";
 
 export default function AnalyseurDevis() {
   const queryClient = useQueryClient();
+  const notifications = useNotifications();
 
   const [fichierSelectionne, setFichierSelectionne] = useState<File | null>(null);
   const [etatPreview, setEtatPreview] = useState<EtatPrevisualisation>("vide");
@@ -370,6 +375,8 @@ export default function AnalyseurDevis() {
   });
   const [erreurUpload, setErreurUpload] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [devisASupprimer, setDevisASupprimer] = useState<DevisAnalyse | null>(null);
+  const [suppressionEnCours, setSuppressionEnCours] = useState(false);
 
   const { data: devisData, isLoading } = useQuery({
     queryKey: ["devis-liste"],
@@ -451,6 +458,7 @@ export default function AnalyseurDevis() {
     try {
       await api.post("/api/ressources/devis/", data);
       queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
+      notifications.succes("Analyse lancée. Le devis apparaîtra dans la liste et se mettra à jour automatiquement.");
       // Réinitialiser
       setFichierSelectionne(null);
       setEtatPreview("vide");
@@ -463,13 +471,18 @@ export default function AnalyseurDevis() {
     }
   };
 
-  const supprimerDevis = async (id: string) => {
-    if (!window.confirm("Supprimer ce devis et ses lignes extraites ?")) return;
+  const supprimerDevis = async () => {
+    if (!devisASupprimer) return;
+    setSuppressionEnCours(true);
     try {
-      await api.supprimer(`/api/ressources/devis/${id}/`);
+      await api.supprimer(`/api/ressources/devis/${devisASupprimer.id}/`);
       queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
+      notifications.succes("Devis supprimé.");
     } catch (e) {
-      alert(e instanceof ErreurApi ? e.detail : "Suppression impossible.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Suppression impossible.");
+    } finally {
+      setSuppressionEnCours(false);
+      setDevisASupprimer(null);
     }
   };
 
@@ -716,10 +729,21 @@ export default function AnalyseurDevis() {
           </div>
         ) : (
           devisList.map((devis) => (
-            <CarteDevis key={devis.id} devis={devis} onSupprimer={supprimerDevis} />
+            <CarteDevis key={devis.id} devis={devis} onSupprimer={() => setDevisASupprimer(devis)} />
           ))
         )}
       </div>
+
+      <ModalConfirmation
+        ouverte={Boolean(devisASupprimer)}
+        titre="Supprimer le devis"
+        message="Supprimer ce devis et ses lignes extraites ? Cette action retire aussi les résultats d'analyse associés."
+        libelleBoutonConfirmer="Supprimer"
+        variante="danger"
+        chargement={suppressionEnCours}
+        onAnnuler={() => setDevisASupprimer(null)}
+        onConfirmer={supprimerDevis}
+      />
     </div>
   );
 }

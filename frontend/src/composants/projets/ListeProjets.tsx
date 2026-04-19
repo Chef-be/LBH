@@ -6,7 +6,9 @@ import Link from "next/link";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 import { BoutonActionRapide, GroupeActionsRapides, LienActionRapide } from "@/composants/ui/ActionsRapides";
+import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
 import { Search, SlidersHorizontal, Eye, Pencil, Trash2 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -71,14 +73,14 @@ const LIBELLES_TYPE: Record<string, string> = {
 
 export function ListeProjets() {
   const queryClient = useQueryClient();
+  const notifications = useNotifications();
   const utilisateur = useSessionStore((etat) => etat.utilisateur);
   const estSuperAdmin = Boolean(utilisateur?.est_super_admin);
   const [recherche, setRecherche] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("");
   const [page, setPage] = useState(1);
   const [suppressionId, setSuppressionId] = useState<string | null>(null);
-  const [succes, setSucces] = useState<string | null>(null);
-  const [erreur, setErreur] = useState<string | null>(null);
+  const [projetASupprimer, setProjetASupprimer] = useState<Projet | null>(null);
 
   const params = new URLSearchParams();
   if (recherche) params.set("search", recherche);
@@ -93,21 +95,17 @@ export function ListeProjets() {
 
   const projets = data?.results ?? [];
 
-  const supprimerProjet = async (projet: Projet) => {
-    const confirmation = window.confirm(
-      `Supprimer définitivement le projet ${projet.reference} et ses éléments liés ? Cette action est irréversible.`
-    );
-    if (!confirmation) return;
-
-    setSuppressionId(projet.id);
-    setErreur(null);
+  const confirmerSuppressionProjet = async () => {
+    if (!projetASupprimer) return;
+    setSuppressionId(projetASupprimer.id);
     try {
-      await api.supprimer(`/api/projets/${projet.id}/`);
-      setSucces(`Projet ${projet.reference} supprimé.`);
+      await api.supprimer(`/api/projets/${projetASupprimer.id}/`);
+      notifications.succes(`Projet ${projetASupprimer.reference} supprimé.`);
       queryClient.invalidateQueries({ queryKey: ["projets"] });
     } catch (e) {
-      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de supprimer le projet.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Impossible de supprimer le projet.");
     } finally {
+      setProjetASupprimer(null);
       setSuppressionId(null);
     }
   };
@@ -140,17 +138,6 @@ export function ListeProjets() {
           </select>
         </div>
       </div>
-
-      {succes && (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-          {succes}
-        </div>
-      )}
-      {erreur && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {erreur}
-        </div>
-      )}
 
       {/* Tableau */}
       {isLoading ? (
@@ -232,7 +219,7 @@ export function ListeProjets() {
                           icone={Trash2}
                           variante="danger"
                           disabled={suppressionId === projet.id}
-                          onClick={() => supprimerProjet(projet)}
+                          onClick={() => setProjetASupprimer(projet)}
                         />
                       )}
                     </GroupeActionsRapides>
@@ -268,6 +255,21 @@ export function ListeProjets() {
           </div>
         </div>
       )}
+
+      <ModalConfirmation
+        ouverte={Boolean(projetASupprimer)}
+        titre="Supprimer le projet"
+        message={
+          projetASupprimer
+            ? `Supprimer définitivement le projet ${projetASupprimer.reference} et ses éléments liés ? Cette action est irréversible.`
+            : ""
+        }
+        libelleBoutonConfirmer="Supprimer"
+        variante="danger"
+        chargement={Boolean(projetASupprimer && suppressionId === projetASupprimer.id)}
+        onAnnuler={() => setProjetASupprimer(null)}
+        onConfirmer={confirmerSuppressionProjet}
+      />
     </div>
   );
 }

@@ -5,11 +5,14 @@ import { CheckCircle, XCircle, AlertTriangle, Info, X } from "lucide-react";
 
 type TypeNotification = "succes" | "erreur" | "alerte" | "info";
 
-interface Notification {
+export interface NotificationCentreItem {
   id: string;
   type: TypeNotification;
   message: string;
   duree: number;
+  dateCreation: number;
+  visibleToast: boolean;
+  lue: boolean;
 }
 
 interface ContexteNotifications {
@@ -18,6 +21,11 @@ interface ContexteNotifications {
   erreur: (message: string) => void;
   alerte: (message: string) => void;
   info: (message: string) => void;
+  notifications: NotificationCentreItem[];
+  nombreNonLues: number;
+  marquerCommeLue: (id: string) => void;
+  marquerToutesCommeLues: () => void;
+  supprimerNotification: (id: string) => void;
 }
 
 const ContexteNotif = createContext<ContexteNotifications | null>(null);
@@ -34,28 +42,62 @@ const CONFIG_TYPE: Record<TypeNotification, {
 };
 
 export function FournisseurNotifications({ children }: { children: React.ReactNode }) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<NotificationCentreItem[]>([]);
 
-  const retirer = useCallback((id: string) => {
+  const supprimerNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  const masquerToast = useCallback((id: string) => {
+    setNotifications((prev) => prev.map((notification) => (
+      notification.id === id ? { ...notification, visibleToast: false } : notification
+    )));
+  }, []);
+
+  const marquerCommeLue = useCallback((id: string) => {
+    setNotifications((prev) => prev.map((notification) => (
+      notification.id === id ? { ...notification, lue: true } : notification
+    )));
+  }, []);
+
+  const marquerToutesCommeLues = useCallback(() => {
+    setNotifications((prev) => prev.map((notification) => ({ ...notification, lue: true })));
   }, []);
 
   const notifier = useCallback(
     (type: TypeNotification, message: string, duree = 4500) => {
       const id = `notif-${Date.now()}-${Math.random()}`;
-      setNotifications((prev) => [...prev.slice(-4), { id, type, message, duree }]);
-      setTimeout(() => retirer(id), duree);
+      setNotifications((prev) => [
+        { id, type, message, duree, dateCreation: Date.now(), visibleToast: true, lue: false },
+        ...prev.slice(0, 29),
+      ]);
+      setTimeout(() => masquerToast(id), duree);
     },
-    [retirer]
+    [masquerToast]
   );
 
   const succes = useCallback((m: string) => notifier("succes", m), [notifier]);
   const erreur = useCallback((m: string) => notifier("erreur", m, 6000), [notifier]);
   const alerte = useCallback((m: string) => notifier("alerte", m), [notifier]);
   const info   = useCallback((m: string) => notifier("info",   m), [notifier]);
+  const notificationsToast = notifications.filter((notification) => notification.visibleToast);
+  const nombreNonLues = notifications.reduce((total, notification) => total + (notification.lue ? 0 : 1), 0);
 
   return (
-    <ContexteNotif.Provider value={{ notifier, succes, erreur, alerte, info }}>
+    <ContexteNotif.Provider
+      value={{
+        notifier,
+        succes,
+        erreur,
+        alerte,
+        info,
+        notifications,
+        nombreNonLues,
+        marquerCommeLue,
+        marquerToutesCommeLues,
+        supprimerNotification,
+      }}
+    >
       {children}
 
       {/* Zone toasts — coin inférieur droit */}
@@ -65,7 +107,7 @@ export function FournisseurNotifications({ children }: { children: React.ReactNo
         aria-live="polite"
         aria-label="Notifications"
       >
-        {notifications.map((notif) => {
+        {notificationsToast.map((notif) => {
           const { icone: Icone, couleurIcone, barreColor } = CONFIG_TYPE[notif.type];
           return (
             <div key={notif.id} className="toast relative overflow-hidden">
@@ -74,7 +116,7 @@ export function FournisseurNotifications({ children }: { children: React.ReactNo
                 {notif.message}
               </p>
               <button
-                onClick={() => retirer(notif.id)}
+                onClick={() => masquerToast(notif.id)}
                 className="shrink-0 flex items-center justify-center w-6 h-6 rounded transition-colors"
                 style={{ color: "var(--texte-3)" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fond-app)")}

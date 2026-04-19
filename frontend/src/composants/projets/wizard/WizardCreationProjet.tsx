@@ -45,6 +45,10 @@ function genererReference() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function dateAujourdhuiIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function etatInitial(): EtatWizard {
   return {
     familleClientId: "",
@@ -65,7 +69,7 @@ function etatInitial(): EtatWizard {
     commune: "",
     departement: "",
     montantEstime: "",
-    dateDebutPrevue: "",
+    dateDebutPrevue: dateAujourdhuiIso(),
     dateFinPrevue: "",
     description: "",
     fichiersSourcesProjet: [],

@@ -147,6 +147,13 @@ const SECTIONS: SectionAdmin[] = [
         couleur: "text-orange-600 bg-orange-50",
       },
       {
+        chemin: "/administration/phases-etudes",
+        icone: Settings,
+        titre: "Phases d'études",
+        description: "Phases types, durées prévisionnelles, spécialités et profils utilisés pour l'auto-affectation des études.",
+        couleur: "text-teal-700 bg-teal-50",
+      },
+      {
         chemin: "/administration/modeles-documents",
         icone: FileCog,
         titre: "Modèles de documents",
