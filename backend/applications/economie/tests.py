@@ -9,12 +9,16 @@ from rest_framework.test import APIClient
 
 from applications.batiment.models import LocalProgramme, ProgrammeBatiment
 from applications.bibliotheque.models import LignePrixBibliotheque, SousDetailPrix
+from applications.comptes.models import ProfilDroit
 from applications.economie.models import (
     AffectationProfilProjet,
     AchatEtudePrix,
     ConventionCollective,
+    EtudeEconomique,
     EtudePrix,
+    JournalPhaseEtudeEconomique,
     LignePrixEtude,
+    PhaseEtudeEconomique,
     ProfilMainOeuvre,
     ReferenceSocialeLocalisation,
     RegleConventionnelleProfil,
@@ -23,6 +27,126 @@ from applications.economie.models import (
 from applications.metres.models import LigneMetre, Metre
 from applications.organisations.models import Organisation
 from applications.projets.models import Projet
+
+
+class PlanificationEtudeEconomiqueTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        utilisateur_model = get_user_model()
+
+        self.organisation = Organisation.objects.create(
+            code="ORG-ECO-PLANIF",
+            nom="Organisation planification",
+            type_organisation="bureau_etudes",
+            est_active=True,
+        )
+        self.profil_charge = ProfilDroit.objects.create(
+            code="CHARGE_AFFAIRES",
+            libelle="Chargé d'affaires",
+            ordre_affichage=10,
+        )
+        self.profil_economiste = ProfilDroit.objects.create(
+            code="ECONOMISTE_SR",
+            libelle="Économiste senior",
+            ordre_affichage=20,
+        )
+        self.createur = utilisateur_model.objects.create_user(
+            courriel="planif-createur@example.com",
+            password="secret-test-123",
+            prenom="Claire",
+            nom="Création",
+            organisation=self.organisation,
+            est_staff=True,
+            profil=self.profil_charge,
+        )
+        self.charge_affaires = utilisateur_model.objects.create_user(
+            courriel="charge-affaires@example.com",
+            password="secret-test-123",
+            prenom="Charles",
+            nom="Affaires",
+            organisation=self.organisation,
+            profil=self.profil_charge,
+            fonction="Chargé d'affaires",
+        )
+        self.economiste = utilisateur_model.objects.create_user(
+            courriel="economiste@example.com",
+            password="secret-test-123",
+            prenom="Emma",
+            nom="Économie",
+            organisation=self.organisation,
+            profil=self.profil_economiste,
+            fonction="Économiste senior",
+        )
+        self.client.force_authenticate(self.createur)
+        self.projet = Projet.objects.create(
+            reference="",
+            intitule="Projet planification étude",
+            type_projet="etude",
+            statut="en_cours",
+            phase_actuelle="pro",
+            organisation=self.organisation,
+            maitre_ouvrage=self.organisation,
+            responsable=self.createur,
+            cree_par=self.createur,
+            clientele_cible="moe_conception",
+            objectif_mission="estimation_moe",
+            commune="Mamoudzou",
+            departement="976",
+        )
+
+    def test_creation_etude_initialise_les_phases(self):
+        reponse = self.client.post(
+            "/api/economie/",
+            {
+                "projet": str(self.projet.id),
+                "intitule": "Étude économique planifiée",
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        etude = EtudeEconomique.objects.get(pk=reponse.data["id"])
+        self.assertGreaterEqual(etude.phases_planification.count(), 4)
+        self.assertEqual(reponse.data["phases"][0]["code"], "cadrage")
+
+    def test_auto_affectation_et_motif_sur_phase_assignee(self):
+        etude = EtudeEconomique.objects.create(
+            projet=self.projet,
+            intitule="Étude affectation",
+            cree_par=self.createur,
+        )
+
+        reponse_auto = self.client.post(f"/api/economie/{etude.id}/auto-affecter-phases/", {}, format="json")
+
+        self.assertEqual(reponse_auto.status_code, status.HTTP_200_OK, reponse_auto.data)
+        self.assertGreaterEqual(len(reponse_auto.data["affectees"]), 1)
+
+        phase = PhaseEtudeEconomique.objects.filter(
+            etude=etude,
+            utilisateur_assigne=self.economiste,
+        ).first()
+        self.assertIsNotNone(phase)
+
+        self.client.force_authenticate(self.economiste)
+        reponse_sans_motif = self.client.patch(
+            f"/api/economie/{etude.id}/phases/{phase.id}/",
+            {"duree_revisee_jours": "3.50"},
+            format="json",
+        )
+        self.assertEqual(reponse_sans_motif.status_code, status.HTTP_400_BAD_REQUEST, reponse_sans_motif.data)
+
+        reponse_avec_motif = self.client.patch(
+            f"/api/economie/{etude.id}/phases/{phase.id}/",
+            {
+                "duree_revisee_jours": "3.50",
+                "motif_ajustement": "Complexité supplémentaire relevée lors de l'analyse.",
+            },
+            format="json",
+        )
+        self.assertEqual(reponse_avec_motif.status_code, status.HTTP_200_OK, reponse_avec_motif.data)
+        phase.refresh_from_db()
+        self.assertEqual(str(phase.duree_revisee_jours), "3.50")
+        self.assertEqual(JournalPhaseEtudeEconomique.objects.filter(phase=phase).count(), 1)
 
 
 class WorkflowEtudePrixTests(TestCase):

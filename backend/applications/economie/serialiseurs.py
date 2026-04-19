@@ -13,6 +13,9 @@ from .models import (
     ReferenceSocialeLocalisation,
     ProfilMainOeuvre,
     AffectationProfilProjet,
+    ModelePhaseEtudeEconomique,
+    PhaseEtudeEconomique,
+    JournalPhaseEtudeEconomique,
 )
 
 
@@ -65,6 +68,7 @@ class EtudeEconomiqueDetailSerialiseur(serializers.ModelSerializer):
     """Sérialiseur complet avec lignes."""
     lignes = LignePrixSerialiseur(many=True, read_only=True)
     projet_reference = serializers.CharField(source="projet.reference", read_only=True)
+    phases = serializers.SerializerMethodField()
 
     class Meta:
         model = EtudeEconomique
@@ -76,6 +80,7 @@ class EtudeEconomiqueDetailSerialiseur(serializers.ModelSerializer):
             "total_debourse_sec", "total_cout_direct",
             "total_cout_revient", "total_prix_vente",
             "total_marge_brute", "total_marge_nette", "taux_marge_nette_global",
+            "phases",
             "lignes",
             "date_creation", "date_modification",
         ]
@@ -85,6 +90,9 @@ class EtudeEconomiqueDetailSerialiseur(serializers.ModelSerializer):
             "total_marge_brute", "total_marge_nette", "taux_marge_nette_global",
             "date_creation", "date_modification",
         ]
+
+    def get_phases(self, obj):
+        return PhaseEtudeEconomiqueSerialiseur(obj.phases_planification.all(), many=True).data
 
 
 class LignePrixEtudeSerialiseur(serializers.ModelSerializer):
@@ -437,6 +445,110 @@ class AffectationProfilProjetSerialiseur(serializers.ModelSerializer):
             "clientele_libelle", "mode_facturation_libelle",
             "date_creation", "date_modification",
         ]
+
+
+class JournalPhaseEtudeEconomiqueSerialiseur(serializers.ModelSerializer):
+    auteur_nom = serializers.CharField(source="auteur.nom_complet", read_only=True)
+
+    class Meta:
+        model = JournalPhaseEtudeEconomique
+        fields = [
+            "id",
+            "auteur",
+            "auteur_nom",
+            "ancienne_duree_jours",
+            "nouvelle_duree_jours",
+            "motif",
+            "date_creation",
+        ]
+        read_only_fields = fields
+
+
+class ModelePhaseEtudeEconomiqueSerialiseur(serializers.ModelSerializer):
+    role_intervenant_libelle = serializers.CharField(source="get_role_intervenant_display", read_only=True)
+    profil_main_oeuvre_libelle = serializers.CharField(source="profil_main_oeuvre.libelle", read_only=True)
+
+    class Meta:
+        model = ModelePhaseEtudeEconomique
+        fields = [
+            "id",
+            "code",
+            "libelle",
+            "description",
+            "ordre",
+            "role_intervenant",
+            "role_intervenant_libelle",
+            "specialite_requise",
+            "niveau_intervention",
+            "duree_previsionnelle_jours",
+            "profil_main_oeuvre",
+            "profil_main_oeuvre_libelle",
+            "est_actif",
+            "date_creation",
+            "date_modification",
+        ]
+        read_only_fields = [
+            "id",
+            "role_intervenant_libelle",
+            "profil_main_oeuvre_libelle",
+            "date_creation",
+            "date_modification",
+        ]
+
+
+class PhaseEtudeEconomiqueSerialiseur(serializers.ModelSerializer):
+    role_intervenant_libelle = serializers.CharField(source="get_role_intervenant_display", read_only=True)
+    profil_main_oeuvre_libelle = serializers.CharField(source="profil_main_oeuvre.libelle", read_only=True)
+    utilisateur_assigne_nom = serializers.CharField(source="utilisateur_assigne.nom_complet", read_only=True)
+    duree_active_jours = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
+    journal = JournalPhaseEtudeEconomiqueSerialiseur(source="journal_ajustements", many=True, read_only=True)
+    motif_ajustement = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = PhaseEtudeEconomique
+        fields = [
+            "id",
+            "etude",
+            "modele",
+            "code",
+            "libelle",
+            "description",
+            "ordre",
+            "role_intervenant",
+            "role_intervenant_libelle",
+            "specialite_requise",
+            "niveau_intervention",
+            "duree_previsionnelle_jours",
+            "duree_revisee_jours",
+            "duree_active_jours",
+            "profil_main_oeuvre",
+            "profil_main_oeuvre_libelle",
+            "utilisateur_assigne",
+            "utilisateur_assigne_nom",
+            "statut",
+            "motif_dernier_ajustement",
+            "motif_ajustement",
+            "journal",
+            "date_creation",
+            "date_modification",
+        ]
+        read_only_fields = [
+            "id",
+            "role_intervenant_libelle",
+            "profil_main_oeuvre_libelle",
+            "utilisateur_assigne_nom",
+            "duree_active_jours",
+            "motif_dernier_ajustement",
+            "journal",
+            "date_creation",
+            "date_modification",
+        ]
+        extra_kwargs = {
+            "etude": {"required": False, "allow_null": True},
+            "modele": {"required": False, "allow_null": True},
+            "profil_main_oeuvre": {"required": False, "allow_null": True},
+            "utilisateur_assigne": {"required": False, "allow_null": True},
+        }
 
 
 class SimulationMainOeuvreEntreeSerialiseur(serializers.Serializer):

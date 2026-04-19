@@ -942,6 +942,179 @@ class AffectationProfilProjet(models.Model):
         return f"{self.profil.libelle} — {self.projet.reference}"
 
 
+class ModelePhaseEtudeEconomique(models.Model):
+    """Modèle administrable des phases d'une étude économique."""
+
+    ROLES_INTERVENANT = [
+        ("responsable", "Responsable"),
+        ("charge_affaires", "Chargé d'affaires"),
+        ("economiste", "Économiste"),
+        ("redacteur", "Rédacteur"),
+        ("verificateur", "Vérificateur"),
+        ("conducteur_travaux", "Conducteur de travaux"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.SlugField(max_length=80, unique=True, verbose_name="Code")
+    libelle = models.CharField(max_length=200, verbose_name="Libellé")
+    description = models.TextField(blank=True, verbose_name="Description")
+    ordre = models.PositiveSmallIntegerField(default=10, verbose_name="Ordre")
+    role_intervenant = models.CharField(
+        max_length=30,
+        choices=ROLES_INTERVENANT,
+        default="economiste",
+        verbose_name="Type d'intervenant",
+    )
+    specialite_requise = models.CharField(max_length=120, blank=True, verbose_name="Spécialité requise")
+    niveau_intervention = models.CharField(max_length=120, blank=True, verbose_name="Niveau d'intervention")
+    duree_previsionnelle_jours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=decimal.Decimal("1.00"),
+        verbose_name="Durée prévisionnelle (jours)",
+    )
+    profil_main_oeuvre = models.ForeignKey(
+        ProfilMainOeuvre,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modeles_phases_etudes",
+        verbose_name="Profil DHMO conseillé",
+    )
+    est_actif = models.BooleanField(default=True, verbose_name="Actif")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "economie_modele_phase_etude"
+        verbose_name = "Modèle de phase d'étude"
+        verbose_name_plural = "Modèles de phases d'étude"
+        ordering = ["ordre", "libelle"]
+
+    def __str__(self):
+        return self.libelle
+
+
+class PhaseEtudeEconomique(models.Model):
+    """Phase planifiée d'une étude économique avec intervenant et durée."""
+
+    STATUTS = [
+        ("a_planifier", "À planifier"),
+        ("planifiee", "Planifiée"),
+        ("en_cours", "En cours"),
+        ("terminee", "Terminée"),
+        ("bloquee", "Bloquée"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    etude = models.ForeignKey(
+        EtudeEconomique,
+        on_delete=models.CASCADE,
+        related_name="phases_planification",
+        verbose_name="Étude économique",
+    )
+    modele = models.ForeignKey(
+        ModelePhaseEtudeEconomique,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="phases_instances",
+        verbose_name="Modèle de phase",
+    )
+    code = models.SlugField(max_length=80, verbose_name="Code")
+    libelle = models.CharField(max_length=200, verbose_name="Libellé")
+    description = models.TextField(blank=True, verbose_name="Description")
+    ordre = models.PositiveSmallIntegerField(default=10, verbose_name="Ordre")
+    role_intervenant = models.CharField(
+        max_length=30,
+        choices=ModelePhaseEtudeEconomique.ROLES_INTERVENANT,
+        default="economiste",
+        verbose_name="Type d'intervenant",
+    )
+    specialite_requise = models.CharField(max_length=120, blank=True, verbose_name="Spécialité requise")
+    niveau_intervention = models.CharField(max_length=120, blank=True, verbose_name="Niveau d'intervention")
+    duree_previsionnelle_jours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=decimal.Decimal("1.00"),
+        verbose_name="Durée prévisionnelle (jours)",
+    )
+    duree_revisee_jours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Durée révisée (jours)",
+    )
+    profil_main_oeuvre = models.ForeignKey(
+        ProfilMainOeuvre,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="phases_etudes_economiques",
+        verbose_name="Profil DHMO conseillé",
+    )
+    utilisateur_assigne = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="phases_etudes_assignees",
+        verbose_name="Collaborateur assigné",
+    )
+    statut = models.CharField(max_length=20, choices=STATUTS, default="a_planifier")
+    motif_dernier_ajustement = models.TextField(blank=True, verbose_name="Motif du dernier ajustement")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "economie_phase_etude"
+        verbose_name = "Phase d'étude économique"
+        verbose_name_plural = "Phases d'études économiques"
+        ordering = ["ordre", "date_creation"]
+        unique_together = [("etude", "code", "ordre")]
+
+    def __str__(self):
+        return f"{self.etude.intitule} — {self.libelle}"
+
+    @property
+    def duree_active_jours(self):
+        return self.duree_revisee_jours if self.duree_revisee_jours is not None else self.duree_previsionnelle_jours
+
+
+class JournalPhaseEtudeEconomique(models.Model):
+    """Journal des modifications de durée des phases d'étude."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    phase = models.ForeignKey(
+        PhaseEtudeEconomique,
+        on_delete=models.CASCADE,
+        related_name="journal_ajustements",
+        verbose_name="Phase",
+    )
+    auteur = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="journal_phases_etudes",
+        verbose_name="Auteur",
+    )
+    ancienne_duree_jours = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    nouvelle_duree_jours = models.DecimalField(max_digits=8, decimal_places=2)
+    motif = models.TextField(verbose_name="Motif")
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "economie_journal_phase_etude"
+        verbose_name = "Journal de phase d'étude"
+        verbose_name_plural = "Journal des phases d'étude"
+        ordering = ["-date_creation"]
+
+    def __str__(self):
+        return f"{self.phase.libelle} — {self.date_creation:%d/%m/%Y %H:%M}"
+
+
 class TypeClientEconomie(models.TextChoices):
     MOA_PUBLIC       = "moa_public",       "Maître d'ouvrage public"
     MOE              = "moe",              "Maître d'œuvre"

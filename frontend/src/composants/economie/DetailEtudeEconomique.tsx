@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { api } from "@/crochets/useApi";
+import { api, ErreurApi } from "@/crochets/useApi";
+import { useSessionStore } from "@/crochets/useSession";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 import {
   ArrowLeft, RefreshCw, Copy, Euro, TrendingUp, TrendingDown, Minus,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Save, Wand2,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,42 @@ interface LignePrix {
   causes_non_rentabilite: string[];
 }
 
+interface JournalPhase {
+  id: string;
+  auteur_nom: string | null;
+  nouvelle_duree_jours: number | string;
+  motif: string;
+  date_creation: string;
+}
+
+interface PhaseEtude {
+  id: string;
+  code: string;
+  libelle: string;
+  description: string;
+  ordre: number;
+  role_intervenant: string;
+  role_intervenant_libelle: string;
+  specialite_requise: string;
+  niveau_intervention: string;
+  duree_previsionnelle_jours: number | string;
+  duree_revisee_jours: number | string | null;
+  duree_active_jours: number | string;
+  profil_main_oeuvre_libelle: string | null;
+  utilisateur_assigne: string | null;
+  utilisateur_assigne_nom: string | null;
+  statut: string;
+  motif_dernier_ajustement: string;
+  journal: JournalPhase[];
+}
+
+interface UtilisateurOption {
+  id: string;
+  nom_complet: string;
+  fonction: string;
+  profil_libelle: string | null;
+}
+
 interface EtudeDetail {
   id: string;
   intitule: string;
@@ -51,6 +89,7 @@ interface EtudeDetail {
   total_marge_brute: number;
   total_marge_nette: number;
   taux_marge_nette_global: number;
+  phases: PhaseEtude[];
   lignes: LignePrix[];
 }
 
@@ -78,6 +117,17 @@ function formaterPourcent(val: number | null | undefined) {
   return `${(Number(val) * 100).toFixed(1)} %`;
 }
 
+function formaterDateHeure(val: string | null | undefined) {
+  if (!val) return "—";
+  return new Date(val).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function IconeMarge({ taux }: { taux: number }) {
   if (taux >= 0.08) return <TrendingUp size={14} className="text-green-500" />;
   if (taux >= 0.03) return <Minus size={14} className="text-yellow-500" />;
@@ -96,11 +146,31 @@ export function DetailEtudeEconomique({
   etudeId: string;
 }) {
   const queryClient = useQueryClient();
+  const utilisateur = useSessionStore((etat) => etat.utilisateur);
+  const notifications = useNotifications();
   const [ligneOuverte, setLigneOuverte] = useState<string | null>(null);
+  const [phaseEnregistrementId, setPhaseEnregistrementId] = useState<string | null>(null);
+  const [phasesEdition, setPhasesEdition] = useState<Record<string, {
+    utilisateurAssigne: string;
+    dureePrevisionnelle: string;
+    dureeRevisee: string;
+    statut: string;
+    motif: string;
+  }>>({});
 
   const { data: etude, isLoading, isError } = useQuery<EtudeDetail>({
     queryKey: ["etude-economique", etudeId],
     queryFn: () => api.get<EtudeDetail>(`/api/economie/${etudeId}/`),
+  });
+  const { data: utilisateurs = [] } = useQuery<UtilisateurOption[]>({
+    queryKey: ["utilisateurs-actifs", projetId],
+    queryFn: async () => {
+      const reponse = await api.get<{ results?: UtilisateurOption[] } | UtilisateurOption[]>("/api/comptes/utilisateurs/");
+      const liste = Array.isArray(reponse) ? reponse : (reponse.results ?? []);
+      return liste.filter((element) => Boolean(element.id));
+    },
+    enabled: Boolean(utilisateur?.est_super_admin),
+    staleTime: 60_000,
   });
 
   const { mutate: recalculer, isPending: recalcul } = useMutation({
@@ -114,6 +184,113 @@ export function DetailEtudeEconomique({
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["etudes-economiques", projetId] }),
   });
+
+  const { mutate: autoAffecter, isPending: autoAffectationEnCours } = useMutation({
+    mutationFn: () => api.post<{ detail: string; non_trouvees?: string[] }>(`/api/economie/${etudeId}/auto-affecter-phases/`, {}),
+    onSuccess: async (reponse) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["etude-economique", etudeId] }),
+        queryClient.invalidateQueries({ queryKey: ["projet", projetId] }),
+        queryClient.invalidateQueries({ queryKey: ["projet-synthese", projetId] }),
+      ]);
+      const complement = reponse.non_trouvees?.length
+        ? ` Phases sans candidat : ${reponse.non_trouvees.join(", ")}.`
+        : "";
+      notifications.succes(`${reponse.detail}${complement}`);
+    },
+    onError: (erreur) => {
+      notifications.erreur(
+        erreur instanceof ErreurApi ? erreur.detail : "Affectation automatique impossible."
+      );
+    },
+  });
+
+  useEffect(() => {
+    if (!etude) return;
+    setPhasesEdition((precedent) => {
+      const suivant = { ...precedent };
+      etude.phases.forEach((phase) => {
+        suivant[phase.id] = {
+          utilisateurAssigne: phase.utilisateur_assigne ?? "",
+          dureePrevisionnelle: String(phase.duree_previsionnelle_jours ?? ""),
+          dureeRevisee: phase.duree_revisee_jours == null ? "" : String(phase.duree_revisee_jours),
+          statut: phase.statut,
+          motif: precedent[phase.id]?.motif ?? "",
+        };
+      });
+      return suivant;
+    });
+  }, [etude]);
+
+  function mettreAJourPhase(
+    phaseId: string,
+    champ: "utilisateurAssigne" | "dureePrevisionnelle" | "dureeRevisee" | "statut" | "motif",
+    valeur: string
+  ) {
+    setPhasesEdition((precedent) => ({
+      ...precedent,
+      [phaseId]: {
+        utilisateurAssigne: precedent[phaseId]?.utilisateurAssigne ?? "",
+        dureePrevisionnelle: precedent[phaseId]?.dureePrevisionnelle ?? "",
+        dureeRevisee: precedent[phaseId]?.dureeRevisee ?? "",
+        statut: precedent[phaseId]?.statut ?? "a_planifier",
+        motif: precedent[phaseId]?.motif ?? "",
+        [champ]: valeur,
+      },
+    }));
+  }
+
+  async function enregistrerPhase(phase: PhaseEtude) {
+    const edition = phasesEdition[phase.id];
+    if (!edition) return;
+
+    const payload: Record<string, unknown> = {};
+    if (edition.utilisateurAssigne !== (phase.utilisateur_assigne ?? "")) {
+      payload.utilisateur_assigne = edition.utilisateurAssigne || null;
+    }
+    if (edition.dureePrevisionnelle !== String(phase.duree_previsionnelle_jours ?? "")) {
+      payload.duree_previsionnelle_jours = edition.dureePrevisionnelle === "" ? null : edition.dureePrevisionnelle;
+    }
+    const dureeReviseeActuelle = phase.duree_revisee_jours == null ? "" : String(phase.duree_revisee_jours);
+    if (edition.dureeRevisee !== dureeReviseeActuelle) {
+      payload.duree_revisee_jours = edition.dureeRevisee === "" ? null : edition.dureeRevisee;
+    }
+    if (edition.statut !== phase.statut) {
+      payload.statut = edition.statut;
+    }
+    if (edition.motif.trim()) {
+      payload.motif_ajustement = edition.motif.trim();
+    }
+
+    if (Object.keys(payload).length === 0) {
+      notifications.info("Aucune modification à enregistrer sur cette phase.");
+      return;
+    }
+
+    setPhaseEnregistrementId(phase.id);
+    try {
+      await api.patch(`/api/economie/${etudeId}/phases/${phase.id}/`, payload);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["etude-economique", etudeId] }),
+        queryClient.invalidateQueries({ queryKey: ["projet", projetId] }),
+        queryClient.invalidateQueries({ queryKey: ["projet-synthese", projetId] }),
+      ]);
+      notifications.succes(`Phase « ${phase.libelle} » mise à jour.`);
+      setPhasesEdition((precedent) => ({
+        ...precedent,
+        [phase.id]: {
+          ...precedent[phase.id],
+          motif: "",
+        },
+      }));
+    } catch (erreur) {
+      notifications.erreur(
+        erreur instanceof ErreurApi ? erreur.detail : "Impossible d'enregistrer cette phase."
+      );
+    } finally {
+      setPhaseEnregistrementId(null);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -204,6 +381,202 @@ export function DetailEtudeEconomique({
         <span className="text-xs text-slate-400 ml-auto">
           {etude.lignes.length} ligne{etude.lignes.length > 1 ? "s" : ""}
         </span>
+      </div>
+
+      {/* Planification des phases */}
+      <div className="carte space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2">
+              <Wand2 size={16} /> Phases et intervenants
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Durées prévues, collaborateurs affectés et journal des ajustements de l&apos;étude.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => autoAffecter()}
+              disabled={autoAffectationEnCours}
+              className="btn-primaire text-xs flex items-center gap-1"
+            >
+              <Wand2 size={12} />
+              {autoAffectationEnCours ? "Affectation…" : "Auto-affecter"}
+            </button>
+            {utilisateur?.est_super_admin && (
+              <Link href="/administration/phases-etudes" className="btn-secondaire text-xs">
+                Administrer les modèles
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {etude.phases.length === 0 ? (
+          <p className="text-sm text-slate-500">Aucune phase n&apos;est encore définie pour cette étude.</p>
+        ) : (
+          <div className="space-y-4">
+            {etude.phases
+              .slice()
+              .sort((a, b) => a.ordre - b.ordre)
+              .map((phase) => {
+                const edition = phasesEdition[phase.id] ?? {
+                  utilisateurAssigne: phase.utilisateur_assigne ?? "",
+                  dureePrevisionnelle: String(phase.duree_previsionnelle_jours ?? ""),
+                  dureeRevisee: phase.duree_revisee_jours == null ? "" : String(phase.duree_revisee_jours),
+                  statut: phase.statut,
+                  motif: "",
+                };
+                const utilisateurPeutAjuster = Boolean(
+                  utilisateur?.est_super_admin || phase.utilisateur_assigne === utilisateur?.id
+                );
+
+                return (
+                  <div key={phase.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-semibold text-slate-900">{phase.ordre}. {phase.libelle}</h3>
+                          <span className="badge-neutre">{phase.role_intervenant_libelle}</span>
+                          <span className="badge-info">{phase.statut.replace(/_/g, " ")}</span>
+                        </div>
+                        {phase.description && (
+                          <p className="text-sm text-slate-500 mt-1">{phase.description}</p>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-xs text-slate-500 md:grid-cols-4">
+                        <div>
+                          <p className="uppercase tracking-wide">Spécialité</p>
+                          <p className="mt-1 text-sm font-medium text-slate-800">{phase.specialite_requise || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="uppercase tracking-wide">Niveau</p>
+                          <p className="mt-1 text-sm font-medium text-slate-800">{phase.niveau_intervention || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="uppercase tracking-wide">Affecté</p>
+                          <p className="mt-1 text-sm font-medium text-slate-800">{phase.utilisateur_assigne_nom || "Non affecté"}</p>
+                        </div>
+                        <div>
+                          <p className="uppercase tracking-wide">Durée active</p>
+                          <p className="mt-1 text-sm font-medium text-slate-800">{phase.duree_active_jours} j</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div>
+                          <label className="libelle-champ">Durée prévisionnelle (j)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            className="champ-saisie w-full"
+                            value={edition.dureePrevisionnelle}
+                            disabled={!utilisateur?.est_super_admin}
+                            onChange={(event) => mettreAJourPhase(phase.id, "dureePrevisionnelle", event.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="libelle-champ">Durée révisée (j)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            className="champ-saisie w-full"
+                            value={edition.dureeRevisee}
+                            disabled={!utilisateurPeutAjuster}
+                            onChange={(event) => mettreAJourPhase(phase.id, "dureeRevisee", event.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="libelle-champ">Collaborateur</label>
+                          <select
+                            className="champ-saisie w-full"
+                            value={edition.utilisateurAssigne}
+                            disabled={!utilisateur?.est_super_admin}
+                            onChange={(event) => mettreAJourPhase(phase.id, "utilisateurAssigne", event.target.value)}
+                          >
+                            <option value="">Non affecté</option>
+                            {utilisateurs.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.nom_complet}{option.fonction ? ` — ${option.fonction}` : ""}{option.profil_libelle ? ` (${option.profil_libelle})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="libelle-champ">Statut</label>
+                          <select
+                            className="champ-saisie w-full"
+                            value={edition.statut}
+                            disabled={!utilisateur?.est_super_admin}
+                            onChange={(event) => mettreAJourPhase(phase.id, "statut", event.target.value)}
+                          >
+                            <option value="a_planifier">À planifier</option>
+                            <option value="planifiee">Planifiée</option>
+                            <option value="en_cours">En cours</option>
+                            <option value="terminee">Terminée</option>
+                            <option value="bloquee">Bloquée</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <label className="libelle-champ">Motif d&apos;ajustement</label>
+                          <textarea
+                            className="champ-saisie min-h-[108px] w-full"
+                            placeholder={utilisateurPeutAjuster ? "Expliquer l'ajustement de charge, de durée ou d'affectation." : "Seul l'intervenant concerné ou l'administrateur peut saisir un motif."}
+                            value={edition.motif}
+                            disabled={!utilisateurPeutAjuster && !utilisateur?.est_super_admin}
+                            onChange={(event) => mettreAJourPhase(phase.id, "motif", event.target.value)}
+                          />
+                        </div>
+                        {phase.motif_dernier_ajustement && (
+                          <p className="text-xs text-slate-500">
+                            Dernier motif enregistré : {phase.motif_dernier_ajustement}
+                          </p>
+                        )}
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => enregistrerPhase(phase)}
+                            disabled={phaseEnregistrementId === phase.id || (!utilisateurPeutAjuster && !utilisateur?.est_super_admin)}
+                            className="btn-secondaire text-xs inline-flex items-center gap-1"
+                          >
+                            <Save size={12} />
+                            {phaseEnregistrementId === phase.id ? "Enregistrement…" : "Enregistrer la phase"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {phase.journal.length > 0 && (
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                          Journal des ajustements
+                        </p>
+                        <ul className="space-y-2 text-sm text-slate-600">
+                          {phase.journal.slice(0, 4).map((entree) => (
+                            <li key={entree.id} className="rounded-lg bg-slate-50 px-3 py-2">
+                              <span className="font-medium text-slate-800">{entree.auteur_nom || "Système"}</span>
+                              {" · "}
+                              <span>{entree.nouvelle_duree_jours} j</span>
+                              {" · "}
+                              <span>{formaterDateHeure(entree.date_creation)}</span>
+                              <p className="mt-1 text-xs text-slate-500">{entree.motif}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* Lignes de prix */}

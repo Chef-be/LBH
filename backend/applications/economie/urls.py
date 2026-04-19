@@ -9,6 +9,9 @@ urlpatterns = [
     path("<uuid:pk>/", views.VueDetailEtudeEconomique.as_view(), name="etude-detail"),
     path("<uuid:pk>/recalculer/", views.vue_recalculer_etude, name="etude-recalculer"),
     path("<uuid:pk>/dupliquer/", views.vue_dupliquer_etude, name="etude-dupliquer"),
+    path("<uuid:pk>/auto-affecter-phases/", views.vue_auto_affecter_phases_etude, name="etude-auto-affecter-phases"),
+    path("<uuid:etude_id>/phases/", views.VueListePhasesEtudeEconomique.as_view(), name="phases-etude-liste"),
+    path("<uuid:etude_id>/phases/<uuid:pk>/", views.VueDetailPhaseEtudeEconomique.as_view(), name="phase-etude-detail"),
 
     # Lignes de prix d'études économiques
     path("<uuid:etude_id>/lignes/", views.VueListeLignesPrix.as_view(), name="lignes-liste"),
@@ -48,6 +51,8 @@ urlpatterns = [
     path("profils-main-oeuvre/<uuid:pk>/simulation-defauts/", views.vue_recuperer_defauts_simulation_profil, name="profil-main-oeuvre-simulation-defauts"),
     path("affectations-profils/", views.VueListeAffectationsProfilsProjet.as_view(), name="affectations-profils-liste"),
     path("affectations-profils/<uuid:pk>/", views.VueDetailAffectationProfilProjet.as_view(), name="affectation-profil-detail"),
+    path("modeles-phases-etudes/", views.VueListeModelesPhasesEtudeEconomique.as_view(), name="modeles-phases-etudes-liste"),
+    path("modeles-phases-etudes/<uuid:pk>/", views.VueDetailModelePhaseEtudeEconomique.as_view(), name="modele-phase-etude-detail"),
     path("simulateur-main-oeuvre/", views.vue_simuler_cout_main_oeuvre, name="simulateur-main-oeuvre"),
     path("simulateur-main-oeuvre/export/pdf/", views.vue_exporter_simulation_main_oeuvre_pdf, name="simulateur-main-oeuvre-export-pdf"),
     path("simulateur-main-oeuvre/affecter/", views.vue_creer_affectation_depuis_simulation, name="simulateur-main-oeuvre-affecter"),

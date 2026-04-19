@@ -1,7 +1,15 @@
 """Administration Django pour l'économie de la construction — Plateforme LBH."""
 
 from django.contrib import admin
-from .models import EtudeEconomique, LignePrix, EtudePrix, LignePrixEtude
+from .models import (
+    EtudeEconomique,
+    LignePrix,
+    EtudePrix,
+    LignePrixEtude,
+    ModelePhaseEtudeEconomique,
+    PhaseEtudeEconomique,
+    JournalPhaseEtudeEconomique,
+)
 
 
 class LignePrixInline(admin.TabularInline):
@@ -13,6 +21,22 @@ class LignePrixInline(admin.TabularInline):
     ]
     readonly_fields = ["prix_vente_unitaire", "etat_rentabilite"]
     ordering = ["numero_ordre"]
+
+
+class PhaseEtudeEconomiqueInline(admin.TabularInline):
+    model = PhaseEtudeEconomique
+    extra = 0
+    fields = [
+        "ordre",
+        "libelle",
+        "role_intervenant",
+        "specialite_requise",
+        "duree_previsionnelle_jours",
+        "duree_revisee_jours",
+        "utilisateur_assigne",
+        "statut",
+    ]
+    ordering = ["ordre"]
 
 
 @admin.register(EtudeEconomique)
@@ -29,7 +53,7 @@ class EtudeEconomiqueAdmin(admin.ModelAdmin):
         "taux_marge_nette_global", "date_creation", "date_modification",
     ]
     raw_id_fields = ["projet", "lot", "etude_parente", "cree_par"]
-    inlines = [LignePrixInline]
+    inlines = [PhaseEtudeEconomiqueInline, LignePrixInline]
 
 
 @admin.register(LignePrix)
@@ -73,3 +97,46 @@ class EtudePrixAdmin(admin.ModelAdmin):
     ]
     raw_id_fields = ["projet", "organisation", "auteur", "validateur", "ligne_bibliotheque"]
     inlines = [LignePrixEtudeInline]
+
+
+@admin.register(ModelePhaseEtudeEconomique)
+class ModelePhaseEtudeEconomiqueAdmin(admin.ModelAdmin):
+    list_display = [
+        "libelle",
+        "code",
+        "ordre",
+        "role_intervenant",
+        "specialite_requise",
+        "duree_previsionnelle_jours",
+        "est_actif",
+    ]
+    list_filter = ["role_intervenant", "est_actif"]
+    search_fields = ["libelle", "code", "specialite_requise", "niveau_intervention"]
+    raw_id_fields = ["profil_main_oeuvre"]
+    ordering = ["ordre", "libelle"]
+
+
+@admin.register(PhaseEtudeEconomique)
+class PhaseEtudeEconomiqueAdmin(admin.ModelAdmin):
+    list_display = [
+        "libelle",
+        "etude",
+        "ordre",
+        "role_intervenant",
+        "utilisateur_assigne",
+        "duree_previsionnelle_jours",
+        "duree_revisee_jours",
+        "statut",
+    ]
+    list_filter = ["role_intervenant", "statut"]
+    search_fields = ["libelle", "etude__intitule", "etude__projet__reference", "specialite_requise"]
+    raw_id_fields = ["etude", "profil_main_oeuvre", "utilisateur_assigne", "modele"]
+    ordering = ["etude", "ordre"]
+
+
+@admin.register(JournalPhaseEtudeEconomique)
+class JournalPhaseEtudeEconomiqueAdmin(admin.ModelAdmin):
+    list_display = ["phase", "auteur", "ancienne_duree_jours", "nouvelle_duree_jours", "date_creation"]
+    search_fields = ["phase__libelle", "phase__etude__intitule", "motif"]
+    raw_id_fields = ["phase", "auteur"]
+    ordering = ["-date_creation"]

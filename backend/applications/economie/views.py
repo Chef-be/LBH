@@ -13,6 +13,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from applications.comptes.models import Utilisateur
+from applications.projets.models import Intervenant
 from .models import (
     EtudeEconomique,
     LignePrix,
@@ -25,6 +27,9 @@ from .models import (
     VarianteLocaleRegleConventionnelle,
     ProfilMainOeuvre,
     AffectationProfilProjet,
+    ModelePhaseEtudeEconomique,
+    PhaseEtudeEconomique,
+    JournalPhaseEtudeEconomique,
 )
 from .serialiseurs import (
     EtudeEconomiqueListeSerialiseur,
@@ -40,6 +45,8 @@ from .serialiseurs import (
     VarianteLocaleRegleConventionnelleSerialiseur,
     ProfilMainOeuvreSerialiseur,
     AffectationProfilProjetSerialiseur,
+    ModelePhaseEtudeEconomiqueSerialiseur,
+    PhaseEtudeEconomiqueSerialiseur,
     SimulationMainOeuvreEntreeSerialiseur,
     PlanActiviteEntreeSerialiseur,
 )
@@ -53,6 +60,145 @@ from .services import (
     proposer_achats_depuis_etude_prix,
     simuler_plan_activite,
 )
+
+
+ROLES_VERS_PROFILS = {
+    "responsable": {"DIRECTEUR_TECH", "ADMIN_BUREAU", "CHARGE_AFFAIRES"},
+    "charge_affaires": {"CHARGE_AFFAIRES", "DIRECTEUR_TECH", "ADMIN_BUREAU"},
+    "economiste": {"ECONOMISTE_SR", "ECONOMISTE_JR", "DIRECTEUR_TECH"},
+    "redacteur": {"REDACTEUR_TECH", "ECONOMISTE_SR", "ECONOMISTE_JR"},
+    "verificateur": {"DIRECTEUR_TECH", "ECONOMISTE_SR", "CHARGE_AFFAIRES"},
+    "conducteur_travaux": {"CONDUCTEUR_TRAVAUX", "CHARGE_AFFAIRES"},
+}
+
+
+def _initialiser_phases_etude(etude: EtudeEconomique) -> None:
+    if etude.phases_planification.exists():
+        return
+
+    modeles = list(ModelePhaseEtudeEconomique.objects.filter(est_actif=True).order_by("ordre", "libelle"))
+    if not modeles:
+        modeles = [
+            ModelePhaseEtudeEconomique(
+                code="cadrage",
+                libelle="Cadrage et collecte",
+                ordre=10,
+                role_intervenant="charge_affaires",
+                duree_previsionnelle_jours=Decimal("1.00"),
+            ),
+            ModelePhaseEtudeEconomique(
+                code="estimation",
+                libelle="Estimation et calcul",
+                ordre=20,
+                role_intervenant="economiste",
+                duree_previsionnelle_jours=Decimal("2.00"),
+            ),
+            ModelePhaseEtudeEconomique(
+                code="redaction",
+                libelle="Rédaction et restitution",
+                ordre=30,
+                role_intervenant="redacteur",
+                duree_previsionnelle_jours=Decimal("1.00"),
+            ),
+            ModelePhaseEtudeEconomique(
+                code="verification",
+                libelle="Vérification et visa interne",
+                ordre=40,
+                role_intervenant="verificateur",
+                duree_previsionnelle_jours=Decimal("0.50"),
+            ),
+        ]
+
+    phases = [
+        PhaseEtudeEconomique(
+            etude=etude,
+            modele=modele if not getattr(getattr(modele, "_state", None), "adding", False) else None,
+            code=modele.code,
+            libelle=modele.libelle,
+            description=modele.description,
+            ordre=modele.ordre,
+            role_intervenant=modele.role_intervenant,
+            specialite_requise=modele.specialite_requise,
+            niveau_intervention=modele.niveau_intervention,
+            duree_previsionnelle_jours=modele.duree_previsionnelle_jours,
+            profil_main_oeuvre=getattr(modele, "profil_main_oeuvre", None),
+        )
+        for modele in modeles
+    ]
+    PhaseEtudeEconomique.objects.bulk_create(phases)
+
+
+def _charge_planifiee_utilisateur(utilisateur: Utilisateur) -> Decimal:
+    charge = (
+        PhaseEtudeEconomique.objects.filter(
+            utilisateur_assigne=utilisateur,
+            etude__statut__in=["brouillon", "en_cours", "a_valider", "validee"],
+        )
+        .exclude(statut="terminee")
+        .values_list("duree_revisee_jours", "duree_previsionnelle_jours")
+    )
+    total = Decimal("0")
+    for revisee, previsionnelle in charge:
+        total += revisee if revisee is not None else previsionnelle or Decimal("0")
+    return total
+
+
+def _specialite_match(utilisateur: Utilisateur, phase: PhaseEtudeEconomique) -> bool:
+    specialite = (phase.specialite_requise or "").strip().lower()
+    if not specialite:
+        return True
+    fonction = (utilisateur.fonction or "").strip().lower()
+    profil_code = getattr(getattr(utilisateur, "profil", None), "code", "")
+    return specialite in fonction or specialite in profil_code.lower()
+
+
+def _niveaux_match(utilisateur: Utilisateur, phase: PhaseEtudeEconomique) -> bool:
+    niveau = (phase.niveau_intervention or "").strip().lower()
+    if not niveau:
+        return True
+    profil = getattr(utilisateur, "profil", None)
+    corpus = " ".join(
+        filter(
+            None,
+            [
+                (utilisateur.fonction or "").lower(),
+                getattr(profil, "code", "").lower(),
+                getattr(profil, "libelle", "").lower(),
+            ],
+        )
+    )
+    return niveau in corpus
+
+
+def _trouver_meilleur_utilisateur(etude: EtudeEconomique, phase: PhaseEtudeEconomique) -> Utilisateur | None:
+    utilisateurs = Utilisateur.objects.select_related("profil").filter(
+        est_actif=True,
+        organisation=etude.projet.organisation,
+    )
+    profils_autorises = ROLES_VERS_PROFILS.get(phase.role_intervenant, set())
+    if profils_autorises:
+        utilisateurs = utilisateurs.filter(profil__code__in=profils_autorises)
+
+    candidats = []
+    for utilisateur in utilisateurs:
+        if not _specialite_match(utilisateur, phase):
+            continue
+        if not _niveaux_match(utilisateur, phase):
+            continue
+        candidats.append((_charge_planifiee_utilisateur(utilisateur), utilisateur.nom_complet.lower(), utilisateur))
+
+    if not candidats:
+        return None
+    candidats.sort(key=lambda item: (item[0], item[1]))
+    return candidats[0][2]
+
+
+def _assurer_intervenant_projet(etude: EtudeEconomique, utilisateur: Utilisateur, role: str) -> None:
+    Intervenant.objects.get_or_create(
+        projet=etude.projet,
+        utilisateur=utilisateur,
+        defaults={"role": role},
+    )
 
 
 class VueListeEtudesEconomiques(generics.ListCreateAPIView):
@@ -81,7 +227,8 @@ class VueListeEtudesEconomiques(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(cree_par=self.request.user)
+        etude = serializer.save(cree_par=self.request.user)
+        _initialiser_phases_etude(etude)
 
 
 class VueDetailEtudeEconomique(generics.RetrieveUpdateDestroyAPIView):
@@ -92,7 +239,12 @@ class VueDetailEtudeEconomique(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         return EtudeEconomique.objects.select_related(
             "projet", "lot", "etude_parente"
-        ).prefetch_related("lignes")
+        ).prefetch_related(
+            "lignes",
+            "phases_planification__profil_main_oeuvre",
+            "phases_planification__utilisateur_assigne__profil",
+            "phases_planification__journal_ajustements__auteur",
+        )
 
     def destroy(self, request, *args, **kwargs):
         etude = self.get_object()
@@ -994,6 +1146,131 @@ class VueDetailAffectationProfilProjet(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AffectationProfilProjetSerialiseur
     queryset = AffectationProfilProjet.objects.select_related("projet", "profil")
+
+
+class VueListeModelesPhasesEtudeEconomique(generics.ListCreateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ModelePhaseEtudeEconomiqueSerialiseur
+    ordering = ["ordre", "libelle"]
+
+    def get_queryset(self):
+        qs = ModelePhaseEtudeEconomique.objects.select_related("profil_main_oeuvre")
+        actifs = self.request.query_params.get("actifs")
+        if actifs == "1":
+            qs = qs.filter(est_actif=True)
+        return qs
+
+
+class VueDetailModelePhaseEtudeEconomique(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ModelePhaseEtudeEconomiqueSerialiseur
+    queryset = ModelePhaseEtudeEconomique.objects.select_related("profil_main_oeuvre")
+
+
+class VueListePhasesEtudeEconomique(generics.ListCreateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PhaseEtudeEconomiqueSerialiseur
+    ordering = ["ordre", "date_creation"]
+
+    def get_queryset(self):
+        return PhaseEtudeEconomique.objects.filter(etude_id=self.kwargs["etude_id"]).select_related(
+            "modele",
+            "profil_main_oeuvre",
+            "utilisateur_assigne",
+            "utilisateur_assigne__profil",
+        ).prefetch_related("journal_ajustements__auteur")
+
+    def perform_create(self, serializer):
+        etude = generics.get_object_or_404(EtudeEconomique, pk=self.kwargs["etude_id"])
+        serializer.save(etude=etude)
+
+
+class VueDetailPhaseEtudeEconomique(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PhaseEtudeEconomiqueSerialiseur
+
+    def get_queryset(self):
+        return PhaseEtudeEconomique.objects.filter(etude_id=self.kwargs["etude_id"]).select_related(
+            "etude",
+            "modele",
+            "profil_main_oeuvre",
+            "utilisateur_assigne",
+            "utilisateur_assigne__profil",
+        ).prefetch_related("journal_ajustements__auteur")
+
+    def perform_update(self, serializer):
+        phase = self.get_object()
+        ancien_actif = phase.duree_active_jours
+        motif = self.request.data.get("motif_ajustement", "") or ""
+        utilisateur = self.request.user
+        duree_changee = "duree_previsionnelle_jours" in serializer.validated_data or "duree_revisee_jours" in serializer.validated_data
+
+        if (
+            duree_changee
+            and phase.utilisateur_assigne_id == utilisateur.id
+            and not utilisateur.est_super_admin
+            and not motif.strip()
+        ):
+            raise ValidationError({"motif_ajustement": "Un motif est requis pour modifier votre durée planifiée."})
+
+        instance = serializer.save(
+            motif_dernier_ajustement=motif.strip() if duree_changee and motif.strip() else phase.motif_dernier_ajustement
+        )
+
+        if duree_changee and motif.strip():
+            JournalPhaseEtudeEconomique.objects.create(
+                phase=instance,
+                auteur=utilisateur,
+                ancienne_duree_jours=ancien_actif,
+                nouvelle_duree_jours=instance.duree_active_jours,
+                motif=motif.strip(),
+            )
+        if instance.utilisateur_assigne_id:
+            _assurer_intervenant_projet(instance.etude, instance.utilisateur_assigne, instance.role_intervenant)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_auto_affecter_phases_etude(request, pk):
+    etude = generics.get_object_or_404(
+        EtudeEconomique.objects.select_related("projet", "projet__organisation"),
+        pk=pk,
+    )
+    _initialiser_phases_etude(etude)
+    phases = list(
+        etude.phases_planification.select_related("utilisateur_assigne", "utilisateur_assigne__profil").all()
+    )
+    affectees = []
+    non_trouvees = []
+    for phase in phases:
+        if phase.utilisateur_assigne_id:
+            _assurer_intervenant_projet(etude, phase.utilisateur_assigne, phase.role_intervenant)
+            continue
+        utilisateur = _trouver_meilleur_utilisateur(etude, phase)
+        if not utilisateur:
+            non_trouvees.append(phase.libelle)
+            continue
+        phase.utilisateur_assigne = utilisateur
+        if phase.statut == "a_planifier":
+            phase.statut = "planifiee"
+        phase.save(update_fields=["utilisateur_assigne", "statut", "date_modification"])
+        _assurer_intervenant_projet(etude, utilisateur, phase.role_intervenant)
+        affectees.append({
+            "phase": phase.libelle,
+            "utilisateur": utilisateur.nom_complet,
+        })
+
+    return Response(
+        {
+            "detail": f"{len(affectees)} phase(s) affectée(s) automatiquement.",
+            "affectees": affectees,
+            "non_trouvees": non_trouvees,
+            "phases": PhaseEtudeEconomiqueSerialiseur(
+                etude.phases_planification.select_related("utilisateur_assigne", "profil_main_oeuvre").all(),
+                many=True,
+            ).data,
+        }
+    )
 
 
 def _donnees_simulation_hydratees(donnees_validees: dict) -> dict:
