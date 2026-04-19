@@ -11,7 +11,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, MissionClient, LivrableType, ModeleDocument
 from .serialiseurs import (
     ProjetListeSerialiseur,
     ProjetDetailSerialiseur,
@@ -375,3 +375,149 @@ def vue_ressources_documentaires(requete):
                 })
 
     return Response({"fichiers": fichiers, "total": len(fichiers)})
+
+
+# ─── Missions / Livrables ─────────────────────────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_missions_livrables(requete):
+    """
+    GET /api/projets/missions-livrables/
+    Retourne la matrice des missions et leurs livrables associés,
+    filtrée par famille_client, sous_type_client et nature_ouvrage.
+    """
+    famille = requete.query_params.get("famille_client", "")
+    sous_type = requete.query_params.get("sous_type_client", "")
+    nature = requete.query_params.get("nature_ouvrage", "")
+
+    missions_qs = MissionClient.objects.filter(est_active=True).prefetch_related("livrables")
+
+    if famille:
+        missions_qs = missions_qs.filter(famille_client=famille)
+    if nature:
+        missions_qs = missions_qs.filter(
+            nature_ouvrage__in=[nature, "tous"]
+        )
+
+    missions = []
+    for m in missions_qs:
+        # Filtrage sous-types
+        if sous_type and m.sous_types_client and sous_type not in m.sous_types_client:
+            continue
+
+        livrables = [
+            {
+                "id": str(lv.id),
+                "code": lv.code,
+                "libelle": lv.libelle,
+                "type_document": lv.type_document,
+                "format_attendu": lv.format_attendu,
+                "icone": lv.icone,
+                "couleur": lv.couleur,
+            }
+            for lv in m.livrables.filter(est_active=True).order_by("ordre")
+        ]
+
+        missions.append({
+            "id": str(m.id),
+            "code": m.code,
+            "libelle": m.libelle,
+            "description": m.description,
+            "famille_client": m.famille_client,
+            "nature_ouvrage": m.nature_ouvrage,
+            "phases_concernees": m.phases_concernees,
+            "icone": m.icone,
+            "couleur": m.couleur,
+            "est_obligatoire": m.est_obligatoire,
+            "livrables": livrables,
+        })
+
+    return Response({"count": len(missions), "missions": missions})
+
+
+# ─── Modèles de documents ─────────────────────────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_modeles_documents(requete):
+    """
+    GET /api/projets/modeles-documents/
+    Retourne les modèles de documents disponibles,
+    filtrés par famille_client et/ou type_modele.
+    """
+    famille = requete.query_params.get("famille_client", "")
+    type_modele = requete.query_params.get("type_modele", "")
+
+    modeles_qs = ModeleDocument.objects.filter(est_actif=True).order_by("type_modele", "ordre")
+
+    if type_modele:
+        modeles_qs = modeles_qs.filter(type_modele=type_modele)
+
+    modeles = []
+    for modele in modeles_qs:
+        # Filtrage famille client
+        if famille and modele.familles_client and famille not in modele.familles_client:
+            continue
+
+        modeles.append({
+            "id": str(modele.id),
+            "code": modele.code,
+            "libelle": modele.libelle,
+            "type_modele": modele.type_modele,
+            "type_modele_libelle": modele.get_type_modele_display(),
+            "format_sortie": modele.format_sortie,
+            "description": modele.description,
+            "familles_client": modele.familles_client,
+            "variables_parametrables": modele.variables_parametrables,
+            "a_template": bool(modele.template_fichier),
+            "apercu_url": modele.apercu_image.url if modele.apercu_image else None,
+        })
+
+    return Response({"count": len(modeles), "modeles": modeles})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_generer_depuis_modele(requete):
+    """
+    POST /api/projets/modeles-documents/<uuid>/generer/
+    Génère un document dans la GED à partir d'un modèle paramétré.
+    """
+    modele_id = requete.data.get("modele_id")
+    projet_id = requete.data.get("projet_id")
+    variables = requete.data.get("variables", {})
+    dossier_id = requete.data.get("dossier_id")
+
+    if not modele_id or not projet_id:
+        raise ValidationError({"detail": "modele_id et projet_id sont obligatoires."})
+
+    modele = generics.get_object_or_404(ModeleDocument, pk=modele_id, est_actif=True)
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+
+    # Vérification des variables obligatoires
+    manquantes = [
+        v["code"] for v in modele.variables_parametrables
+        if v.get("obligatoire") and not variables.get(v["code"])
+    ]
+    if manquantes:
+        raise ValidationError({"variables": f"Variables obligatoires manquantes : {', '.join(manquantes)}"})
+
+    # Création d'un document bureautique via l'API Collabora existante
+    from applications.documents.views import creer_document_bureautique_depuis_modele
+    try:
+        document = creer_document_bureautique_depuis_modele(
+            modele=modele,
+            projet=projet,
+            variables=variables,
+            dossier_id=dossier_id,
+            auteur=requete.user,
+        )
+        return Response({
+            "id": str(document.id),
+            "reference": document.reference,
+            "intitule": document.intitule,
+            "detail": "Document généré avec succès.",
+        }, status=201)
+    except Exception as exc:
+        raise ValidationError({"detail": str(exc)}) from exc

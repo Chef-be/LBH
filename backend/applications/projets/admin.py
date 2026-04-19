@@ -3,7 +3,8 @@ Administration Django pour les projets — Plateforme LBH.
 """
 
 from django.contrib import admin
-from .models import Intervenant, Lot, Projet
+from django.utils.html import format_html
+from .models import Intervenant, Lot, Projet, MissionClient, LivrableType, ModeleDocument
 
 
 class LotInline(admin.TabularInline):
@@ -53,3 +54,97 @@ class AdminLot(admin.ModelAdmin):
     list_filter = ["projet__organisation"]
     search_fields = ["intitule", "projet__reference"]
     autocomplete_fields = ["projet"]
+
+
+# ─── Missions clients ─────────────────────────────────────────────────────────
+
+class LivrableInline(admin.TabularInline):
+    model = LivrableType.missions.through
+    extra = 0
+    verbose_name = "Livrable associé"
+    verbose_name_plural = "Livrables associés"
+
+
+@admin.register(MissionClient)
+class AdminMissionClient(admin.ModelAdmin):
+    list_display = [
+        "libelle", "famille_client_badge", "nature_ouvrage",
+        "est_obligatoire", "est_active", "ordre",
+    ]
+    list_filter = ["famille_client", "nature_ouvrage", "est_active", "est_obligatoire"]
+    search_fields = ["code", "libelle"]
+    ordering = ["famille_client", "ordre"]
+    prepopulated_fields = {"code": ("libelle",)}
+    inlines = [LivrableInline]
+    fieldsets = (
+        ("Identification", {"fields": ("code", "libelle", "description")}),
+        ("Classification client", {"fields": ("famille_client", "sous_types_client", "nature_ouvrage")}),
+        ("Paramètres mission", {"fields": ("phases_concernees", "est_obligatoire", "est_active")}),
+        ("Affichage", {"fields": ("icone", "couleur", "ordre")}),
+    )
+
+    def famille_client_badge(self, obj):
+        couleurs = {
+            "maitrise_ouvrage": "#3b82f6",
+            "maitrise_oeuvre": "#8b5cf6",
+            "entreprise": "#f59e0b",
+            "autre": "#6b7280",
+        }
+        couleur = couleurs.get(obj.famille_client, "#6b7280")
+        return format_html(
+            '<span style="background:{};color:white;padding:2px 8px;border-radius:9999px;font-size:11px">{}</span>',
+            couleur,
+            obj.get_famille_client_display(),
+        )
+    famille_client_badge.short_description = "Famille client"
+
+
+@admin.register(LivrableType)
+class AdminLivrableType(admin.ModelAdmin):
+    list_display = ["libelle", "type_document", "format_attendu", "est_active", "ordre"]
+    list_filter = ["type_document", "format_attendu", "est_active"]
+    search_fields = ["code", "libelle"]
+    ordering = ["ordre", "libelle"]
+    prepopulated_fields = {"code": ("libelle",)}
+    filter_horizontal = ["missions"]
+    fieldsets = (
+        ("Identification", {"fields": ("code", "libelle", "description")}),
+        ("Type et format", {"fields": ("type_document", "format_attendu")}),
+        ("Missions associées", {"fields": ("missions",)}),
+        ("Affichage", {"fields": ("icone", "couleur", "ordre", "est_active")}),
+    )
+
+
+# ─── Modèles de documents ─────────────────────────────────────────────────────
+
+@admin.register(ModeleDocument)
+class AdminModeleDocument(admin.ModelAdmin):
+    list_display = [
+        "libelle", "type_modele", "format_sortie",
+        "apercu_miniature", "est_actif", "ordre",
+    ]
+    list_filter = ["type_modele", "format_sortie", "est_actif"]
+    search_fields = ["code", "libelle"]
+    ordering = ["type_modele", "ordre"]
+    prepopulated_fields = {"code": ("libelle",)}
+    readonly_fields = ["date_creation", "date_modification", "apercu_miniature"]
+    fieldsets = (
+        ("Identification", {"fields": ("code", "libelle", "description")}),
+        ("Type et format", {"fields": ("type_modele", "format_sortie", "familles_client")}),
+        ("Fichiers", {"fields": ("template_fichier", "apercu_image", "apercu_miniature")}),
+        ("Variables paramétrables", {
+            "fields": ("variables_parametrables",),
+            "description": 'JSON: [{"code": "nom_projet", "libelle": "Nom du projet", "type": "texte", "obligatoire": true}]',
+        }),
+        ("Statut", {"fields": ("est_actif", "ordre")}),
+        ("Métadonnées", {"fields": ("date_creation", "date_modification"), "classes": ("collapse",)}),
+    )
+
+    def apercu_miniature(self, obj):
+        if obj.apercu_image:
+            return format_html(
+                '<img src="{}" style="max-height:80px;border-radius:4px;" />',
+                obj.apercu_image.url,
+            )
+        return "—"
+    apercu_miniature.short_description = "Aperçu"

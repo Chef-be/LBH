@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   RadialBarChart, RadialBar, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
 } from "recharts";
 import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
@@ -13,6 +14,7 @@ import {
   ChevronRight, AlertTriangle,
 } from "lucide-react";
 import { api } from "@/crochets/useApi";
+import { PanneauMissionsLivrables, MissionProjet } from "./PanneauMissionsLivrables";
 
 /* ────────────────────────────────────────────────────────────
    TYPES
@@ -304,6 +306,76 @@ function AccordeonProcessus({
 }
 
 /* ────────────────────────────────────────────────────────────
+   GRAPHIQUE FINANCIER
+────────────────────────────────────────────────────────────── */
+function GrafiqueFinancier({
+  montantEstime, montantMarche, totalDevis, totalFacture,
+}: {
+  montantEstime: number | null;
+  montantMarche: number | null;
+  totalDevis: number;
+  totalFacture: number;
+}) {
+  const donnees = [
+    { label: "Estimé", valeur: montantEstime ?? 0, couleur: "var(--c-base)" },
+    { label: "Marché", valeur: montantMarche ?? 0, couleur: "#8b5cf6" },
+    { label: "Devis", valeur: totalDevis, couleur: "#f59e0b" },
+    { label: "Facturé", valeur: totalFacture, couleur: "#10b981" },
+  ].filter((d) => d.valeur > 0);
+
+  if (donnees.length < 2) return null;
+
+  const max = Math.max(...donnees.map((d) => d.valeur));
+
+  return (
+    <div
+      className="rounded-xl p-5"
+      style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+    >
+      <p className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--texte-3)" }}>
+        Synthèse financière
+      </p>
+      <div className="h-40">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={donnees} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 10, fill: "var(--texte-3)" }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              domain={[0, max * 1.15]}
+              tickFormatter={(v: number) => v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${Math.round(v / 1_000)}k` : String(v)}
+              tick={{ fontSize: 9, fill: "var(--texte-3)" }}
+              axisLine={false}
+              tickLine={false}
+              width={36}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "var(--fond-carte)",
+                border: "1px solid var(--bordure)",
+                borderRadius: 8,
+                fontSize: 11,
+                color: "var(--texte)",
+              }}
+              formatter={(v) => [`${Number(v).toLocaleString("fr-FR")} €`, ""]}
+              cursor={{ fill: "var(--fond-entree)" }}
+            />
+            <Bar dataKey="valeur" radius={[4, 4, 0, 0]}>
+              {donnees.map((d, i) => (
+                <Cell key={i} fill={d.couleur} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
    COMPOSANT PRINCIPAL
 ────────────────────────────────────────────────────────────── */
 const STATUTS_DEVIS: Record<string, { couleur: string; label: string }> = {
@@ -353,6 +425,23 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
   const processus = projet.processus_recommande;
   const familleClient = contexte?.famille_client?.code || "";
   const natureOuvrage = contexte?.nature_ouvrage || "";
+
+  const missionsCodes = new Set([
+    ...(contexte?.missions_associees ?? []).map((m) => m.code),
+    ...(contexte?.sous_missions ?? []).map((s) => s.code),
+  ]);
+
+  const { data: missionsDonnees = [] } = useQuery<MissionProjet[]>({
+    queryKey: ["missions-livrables", familleClient],
+    queryFn: () => api.get<MissionProjet[]>(`/api/projets/missions-livrables/?famille_client=${familleClient}`),
+    enabled: !!familleClient && missionsCodes.size > 0,
+    staleTime: 300_000,
+  });
+
+  const missionsProjet = missionsDonnees.filter((m) => missionsCodes.has(m.code));
+
+  const totalDevis = devisProjet.reduce((s, d) => s + parseFloat(d.montant_ttc || "0"), 0);
+  const totalFacture = facturesProjet.reduce((s, f) => s + (parseFloat(f.montant_ttc || "0") - parseFloat(f.montant_restant || "0")), 0);
 
   const estEntreprise = familleClient === "entreprise";
   const estMOE = familleClient === "maitrise_oeuvre";
@@ -569,6 +658,21 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
         </div>
       </section>
 
+      {/* ── Missions & Livrables ── */}
+      {missionsProjet.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Missions &amp; Livrables
+            </h3>
+          </div>
+          <PanneauMissionsLivrables
+            missions={missionsProjet}
+            familleClient={familleClient}
+          />
+        </section>
+      )}
+
       {/* ── Actions rapides ── */}
       <section
         className="rounded-xl p-5"
@@ -617,6 +721,14 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           </Link>
         </div>
       </section>
+
+      {/* ── Graphique financier ── */}
+      <GrafiqueFinancier
+        montantEstime={projet.montant_estime}
+        montantMarche={projet.montant_marche}
+        totalDevis={totalDevis}
+        totalFacture={totalFacture}
+      />
 
       {/* ── Synthèse financière ── */}
       {(devisProjet.length > 0 || facturesProjet.length > 0) && (

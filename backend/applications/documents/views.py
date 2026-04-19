@@ -777,3 +777,128 @@ class VueDiffusionsDocument(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         doc = generics.get_object_or_404(Document, pk=self.kwargs["doc_id"])
         serializer.save(document=doc)
+
+
+# ─── Génération depuis modèle paramétré ──────────────────────────────────────
+
+def creer_document_bureautique_depuis_modele(modele, projet, variables, dossier_id, auteur):
+    """
+    Crée un document bureautique dans la GED à partir d'un ModeleDocument paramétré.
+    Si le modèle dispose d'un fichier template, le copie (substitution simple des variables).
+    Sinon crée un document vierge dans le format du modèle.
+    """
+    import shutil
+    from pathlib import Path
+
+    format_doc = modele.format_sortie  # docx, xlsx, odt, ods
+    intitule = variables.get("nom_projet") or modele.libelle
+    reference_doc = f"{projet.reference}-{modele.code.upper()[:20]}"[:100]
+
+    type_document = TypeDocument.objects.filter(
+        code=_code_type_document_depuis_modele(modele.type_modele)
+    ).first() or TypeDocument.objects.order_by("ordre_affichage").first()
+
+    dossier = None
+    if dossier_id:
+        dossier = DossierDocumentProjet.objects.filter(pk=dossier_id, projet=projet).first()
+
+    if not dossier and type_document:
+        cible = determiner_dossier_cible_document(
+            projet,
+            type_document_code=type_document.code,
+            contexte_generation="modele",
+        )
+        dossier = obtenir_ou_creer_dossier_document(
+            projet,
+            cible["code"],
+            parent_code=cible.get("parent_code"),
+            intitule=cible["intitule"],
+            parent_intitule=cible.get("parent_intitule"),
+        )
+
+    MIMES = {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "odt": "application/vnd.oasis.opendocument.text",
+        "ods": "application/vnd.oasis.opendocument.spreadsheet",
+    }
+
+    document = Document.objects.create(
+        reference=reference_doc,
+        intitule=intitule[:500],
+        type_document=type_document,
+        projet=projet,
+        dossier=dossier,
+        statut="brouillon",
+        origine="genere",
+        auteur=auteur,
+        nom_fichier_origine=f"{intitule}.{format_doc}",
+        type_mime=MIMES.get(format_doc, "application/octet-stream"),
+    )
+
+    # Copier le fichier template si disponible, sinon créer vierge
+    if modele.template_fichier:
+        try:
+            chemin_source = Path(modele.template_fichier.path)
+            if chemin_source.exists():
+                _copier_template_vers_document(chemin_source, document, variables)
+                return document
+        except Exception:
+            pass
+
+    # Fallback : créer un fichier bureautique vierge
+    assurer_fichier_bureautique_document(document)
+    return document
+
+
+def _code_type_document_depuis_modele(type_modele: str) -> str:
+    """Mappe le type de modèle vers un code TypeDocument existant."""
+    mapping = {
+        "cctp": "CCTP",
+        "dpgf": "DPGF",
+        "bpu": "BPU",
+        "os": "OS",
+        "decompte": "DGD",
+        "avenant": "AVENANT",
+        "rapport_analyse": "RAPPORT",
+        "cr_chantier": "CR",
+        "contrat": "CONTRAT",
+        "memoire_technique": "RAPPORT",
+        "note_estimation": "NOTE_CALCUL",
+        "planning": "PLANNING",
+    }
+    return mapping.get(type_modele, "AUTRE")
+
+
+def _copier_template_vers_document(chemin_source, document, variables: dict):
+    """Copie un fichier template vers le stockage MinIO du document avec substitution basique."""
+    import re
+    from io import BytesIO
+
+    ext = chemin_source.suffix.lower()
+    contenu = chemin_source.read_bytes()
+
+    # Substitution simple pour les fichiers textuels (ODF, etc.)
+    if ext in (".odt", ".ods"):
+        # Les ODF sont des ZIP — substitution dans content.xml
+        import zipfile
+        entree = BytesIO(contenu)
+        sortie = BytesIO()
+        with zipfile.ZipFile(entree, "r") as zin, zipfile.ZipFile(sortie, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename in ("content.xml", "styles.xml"):
+                    texte = data.decode("utf-8")
+                    for cle, valeur in variables.items():
+                        texte = re.sub(
+                            r"\{\{\s*" + re.escape(cle) + r"\s*\}\}",
+                            str(valeur),
+                            texte,
+                        )
+                    data = texte.encode("utf-8")
+                zout.writestr(item, data)
+        contenu = sortie.getvalue()
+
+    # Sauvegarder dans le storage du document
+    from django.core.files.base import ContentFile
+    document.fichier.save(document.nom_fichier_origine, ContentFile(contenu), save=True)

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { ListeProjets } from "@/composants/projets/ListeProjets";
-import { Plus } from "lucide-react";
+import { BoutonNouveauProjet } from "@/composants/projets/BoutonNouveauProjet";
 
 export const metadata: Metadata = {
   title: "Projets",
@@ -15,10 +14,7 @@ export default function PageProjets() {
           <h1>Projets</h1>
           <p className="text-slate-500 mt-1">Gestion de l&apos;ensemble des affaires et missions</p>
         </div>
-        <Link href="/projets/nouveau" className="btn-primaire">
-          <Plus size={16} />
-          Nouveau projet
-        </Link>
+        <BoutonNouveauProjet />
       </div>
 
       <ListeProjets />
