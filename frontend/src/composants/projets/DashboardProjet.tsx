@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   RadialBarChart, RadialBar, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
@@ -11,10 +11,13 @@ import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
   TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
   MapPin, Building2, ExternalLink, Plus, FolderOpen, ReceiptText,
-  ChevronRight, AlertTriangle,
+  ChevronRight, AlertTriangle, Wand2,
 } from "lucide-react";
-import { api } from "@/crochets/useApi";
+import { api, ErreurApi } from "@/crochets/useApi";
 import { PanneauMissionsLivrables, MissionProjet } from "./PanneauMissionsLivrables";
+import { ModalGenererDocument } from "@/composants/documents/ModalGenererDocument";
+import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 
 /* ────────────────────────────────────────────────────────────
    TYPES
@@ -44,7 +47,9 @@ interface SyntheseProjet {
   nb_documents: number;
   nb_etudes_economiques: number;
   total_prix_vente_etudes: number;
+  total_marge_nette_etudes?: number;
   phase_index: number;      // 0-9
+  phase_code: string;
   phase_libelle: string;
   activite_recente: Array<{
     date: string;
@@ -52,6 +57,17 @@ interface SyntheseProjet {
     libelle: string;
     utilisateur: string;
   }>;
+}
+
+interface PhaseSuggeree {
+  code: string;
+  libelle: string;
+  raison: string;
+  indices: string[];
+  differe: boolean;
+  avancee_superieure: boolean;
+  phase_actuelle: string;
+  phase_actuelle_libelle: string;
 }
 
 interface ProjetDetail {
@@ -63,6 +79,7 @@ interface ProjetDetail {
   type_libelle: string;
   phase_actuelle: string;
   phase_libelle: string;
+  phase_suggeree?: PhaseSuggeree | null;
   organisation_nom: string | null;
   maitre_ouvrage_nom: string | null;
   maitre_oeuvre_nom: string | null;
@@ -91,15 +108,24 @@ interface ProjetDetail {
     indicateurs_clefs: string[];
   };
   dossiers_ged: Array<{ code: string; intitule: string; description: string }>;
+  statuts_livrables: Record<string, string>;
 }
 
 /* ────────────────────────────────────────────────────────────
    HELPERS
 ────────────────────────────────────────────────────────────── */
-const PHASES_CYCLE = ["faisabilite", "esq", "aps", "apd", "pro", "act", "exe", "suivi", "aor", "clos"];
+const PHASES_CYCLE = ["faisabilite", "programmation", "esquisse", "avp", "pro", "dce", "ao", "exe", "reception", "clos"];
 const LABELS_PHASES: Record<string, string> = {
-  faisabilite: "Faisabilité", esq: "ESQ", aps: "APS", apd: "APD",
-  pro: "PRO", act: "ACT", exe: "EXE", suivi: "Suivi", aor: "AOR", clos: "Clos",
+  faisabilite: "Faisabilité",
+  programmation: "Programmation",
+  esquisse: "ESQ",
+  avp: "AVP",
+  pro: "PRO",
+  dce: "DCE",
+  ao: "AO",
+  exe: "EXE",
+  reception: "AOR",
+  clos: "Clos",
 };
 
 function formaterMontant(val: number | null, zero = "—"): string {
@@ -153,19 +179,24 @@ function GaugePhase({ phaseIndex, phaseLibelle }: { phaseIndex: number; phaseLib
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative w-32 h-16">
+      <div className="relative w-36 h-24">
         <ResponsiveContainer width="100%" height="100%">
           <RadialBarChart
             cx="50%" cy="100%"
-            innerRadius="65%" outerRadius="100%"
+            innerRadius="76%" outerRadius="100%"
             startAngle={180} endAngle={0}
             data={data}
           >
             <RadialBar dataKey="valeur" cornerRadius={4} background={{ fill: "var(--fond-entree)" }} />
           </RadialBarChart>
         </ResponsiveContainer>
-        <div className="absolute inset-0 flex items-end justify-center pb-0.5">
-          <span className="text-base font-bold" style={{ color: "var(--c-base)" }}>{pct}%</span>
+        <div className="absolute inset-x-0 bottom-3 flex justify-center">
+          <span
+            className="rounded-full px-2 py-0.5 text-sm font-bold leading-none"
+            style={{ color: "var(--c-base)", background: "var(--fond-carte)" }}
+          >
+            {pct}%
+          </span>
         </div>
       </div>
       <p className="text-xs font-semibold mt-1" style={{ color: "var(--texte)" }}>{phaseLibelle || "—"}</p>
@@ -258,11 +289,12 @@ function CarteModule({
    ACCORDÉON PROCESSUS
 ────────────────────────────────────────────────────────────── */
 function AccordeonProcessus({
-  titre, items, icone,
+  titre, items, icone, actions = [],
 }: {
   titre: string;
   items: string[];
   icone: React.ReactNode;
+  actions?: Array<{ href: string; libelle: string }>;
 }) {
   const [ouvert, setOuvert] = useState(false);
   if (items.length === 0) return null;
@@ -289,17 +321,30 @@ function AccordeonProcessus({
         {ouvert ? <ChevronUp size={14} style={{ color: "var(--texte-3)" }} /> : <ChevronDown size={14} style={{ color: "var(--texte-3)" }} />}
       </button>
       {ouvert && (
-        <ul
-          className="px-4 pb-4 pt-1 space-y-2 border-t"
-          style={{ borderColor: "var(--bordure)" }}
-        >
-          {items.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "var(--texte-2)" }}>
-              <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0" style={{ background: "var(--c-base)" }} />
-              {item}
-            </li>
-          ))}
-        </ul>
+        <div className="px-4 pb-4 pt-1 border-t space-y-3" style={{ borderColor: "var(--bordure)" }}>
+          <ul className="space-y-2">
+            {items.map((item, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "var(--texte-2)" }}>
+                <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0" style={{ background: "var(--c-base)" }} />
+                {item}
+              </li>
+            ))}
+          </ul>
+          {actions.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {actions.map((action) => (
+                <Link
+                  key={`${titre}-${action.href}-${action.libelle}`}
+                  href={action.href}
+                  className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                  style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
+                >
+                  {action.libelle}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -309,21 +354,37 @@ function AccordeonProcessus({
    GRAPHIQUE FINANCIER
 ────────────────────────────────────────────────────────────── */
 function GrafiqueFinancier({
-  montantEstime, montantMarche, totalDevis, totalFacture,
+  montantEstime, montantMarche, totalEtudes, totalDevis, totalFacture,
 }: {
   montantEstime: number | null;
   montantMarche: number | null;
+  totalEtudes: number;
   totalDevis: number;
   totalFacture: number;
 }) {
   const donnees = [
     { label: "Estimé", valeur: montantEstime ?? 0, couleur: "var(--c-base)" },
     { label: "Marché", valeur: montantMarche ?? 0, couleur: "#8b5cf6" },
+    { label: "Études", valeur: totalEtudes, couleur: "#0f766e" },
     { label: "Devis", valeur: totalDevis, couleur: "#f59e0b" },
     { label: "Facturé", valeur: totalFacture, couleur: "#10b981" },
   ].filter((d) => d.valeur > 0);
 
-  if (donnees.length < 2) return null;
+  if (donnees.length === 0) {
+    return (
+      <div
+        className="rounded-xl p-5"
+        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+      >
+        <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--texte-3)" }}>
+          Synthèse financière
+        </p>
+        <p className="text-sm" style={{ color: "var(--texte-2)" }}>
+          Aucune donnée financière consolidée n&apos;est encore disponible pour ce projet.
+        </p>
+      </div>
+    );
+  }
 
   const max = Math.max(...donnees.map((d) => d.valeur));
 
@@ -396,6 +457,11 @@ const STATUTS_FACTURE: Record<string, { couleur: string; label: string }> = {
 };
 
 export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
+  const queryClient = useQueryClient();
+  const notifications = useNotifications();
+  const [modalePhaseOuverte, setModalePhaseOuverte] = useState(false);
+  const [applicationPhaseEnCours, setApplicationPhaseEnCours] = useState(false);
+
   const { data: synthese } = useQuery<SyntheseProjet>({
     queryKey: ["projet-synthese", projet.id],
     queryFn: () => api.get<SyntheseProjet>(`/api/projets/${projet.id}/synthese/`),
@@ -438,10 +504,42 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
     staleTime: 300_000,
   });
 
-  const missionsProjet = missionsDonnees.filter((m) => missionsCodes.has(m.code));
+  // Statuts de livrables initiaux depuis le serveur, mis à jour localement
+  const [statutsLocaux, setStatutsLocaux] = useState<Record<string, string>>(
+    () => projet.statuts_livrables ?? {}
+  );
+
+  const mutationStatutLivrable = useMutation({
+    mutationFn: (payload: Record<string, string>) =>
+      api.patch<Record<string, string>>(`/api/projets/${projet.id}/statuts-livrables/`, payload),
+    onSuccess: (data) => setStatutsLocaux(data),
+  });
+
+  const changerStatutLivrable = useCallback(
+    (missionCode: string, livrableCode: string, statut: string) => {
+      const cle = `${missionCode}:${livrableCode}`;
+      setStatutsLocaux((prev) => ({ ...prev, [cle]: statut }));
+      mutationStatutLivrable.mutate({ [cle]: statut });
+    },
+    [mutationStatutLivrable]
+  );
+
+  // Injecter les statuts persistés dans les livrables de chaque mission
+  const missionsProjet: MissionProjet[] = missionsDonnees
+    .filter((m) => missionsCodes.has(m.code))
+    .map((m) => ({
+      ...m,
+      livrables: m.livrables.map((l) => ({
+        ...l,
+        statut: (statutsLocaux[`${m.code}:${l.code}`] as MissionProjet["livrables"][number]["statut"]) ?? l.statut,
+      })),
+    }));
+
+  const [modaleDocumentOuverte, setModaleDocumentOuverte] = useState(false);
 
   const totalDevis = devisProjet.reduce((s, d) => s + parseFloat(d.montant_ttc || "0"), 0);
   const totalFacture = facturesProjet.reduce((s, f) => s + (parseFloat(f.montant_ttc || "0") - parseFloat(f.montant_restant || "0")), 0);
+  const totalEtudes = synthese?.total_prix_vente_etudes ?? 0;
 
   const estEntreprise = familleClient === "entreprise";
   const estMOE = familleClient === "maitrise_oeuvre";
@@ -463,10 +561,89 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
     ["act", "rapport_analyse_offres", "reponse_appel_offres"].some((c) => codesMission.has(c));
   const afficherRentabilite = estEntreprise;
 
-  const phaseIndex = synthese?.phase_index ?? PHASES_CYCLE.indexOf(projet.phase_actuelle);
+  const phaseActuelle = projet.phase_actuelle || synthese?.phase_code || "";
+  const phaseIndex = synthese?.phase_index ?? PHASES_CYCLE.indexOf(phaseActuelle);
+  const phaseSuggeree = projet.phase_suggeree ?? null;
+  const afficherSuggestionPhase = Boolean(phaseSuggeree?.code && phaseSuggeree.differe);
+
+  async function appliquerPhaseSuggeree() {
+    setApplicationPhaseEnCours(true);
+    try {
+      const reponse = await api.post<{ detail: string }>(
+        `/api/projets/${projet.id}/phase-suggeree/appliquer/`,
+        {}
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["projet", projet.id] }),
+        queryClient.invalidateQueries({ queryKey: ["projet-synthese", projet.id] }),
+        queryClient.invalidateQueries({ queryKey: ["projets"] }),
+      ]);
+      notifications.succes(reponse.detail || `Phase mise à jour en ${phaseSuggeree?.libelle}.`);
+      setModalePhaseOuverte(false);
+    } catch (erreur) {
+      notifications.erreur(
+        erreur instanceof ErreurApi
+          ? erreur.detail
+          : "Impossible d'appliquer la phase suggérée."
+      );
+    } finally {
+      setApplicationPhaseEnCours(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
+      {afficherSuggestionPhase && phaseSuggeree && (
+        <section
+          className="rounded-2xl border p-5"
+          style={{
+            background: "color-mix(in srgb, var(--c-base) 8%, white)",
+            borderColor: "color-mix(in srgb, var(--c-base) 28%, var(--bordure))",
+          }}
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+                Phase suggérée
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="badge-neutre">
+                  {phaseSuggeree.phase_actuelle_libelle || "Non définie"}
+                </span>
+                <ChevronRight size={14} style={{ color: "var(--texte-3)" }} />
+                <span className="badge-info">{phaseSuggeree.libelle}</span>
+              </div>
+              <p className="text-sm leading-relaxed" style={{ color: "var(--texte-2)" }}>
+                {phaseSuggeree.raison}
+              </p>
+              {phaseSuggeree.indices.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {phaseSuggeree.indices.map((indice) => (
+                    <span
+                      key={indice}
+                      className="rounded-full px-2.5 py-1 text-xs"
+                      style={{
+                        background: "rgba(255, 255, 255, 0.72)",
+                        border: "1px solid var(--bordure)",
+                        color: "var(--texte-2)",
+                      }}
+                    >
+                      {indice}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setModalePhaseOuverte(true)}
+              className="btn-primaire"
+            >
+              Appliquer la suggestion
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* ── KPIs ── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -521,7 +698,7 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
             <p className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>
               Cycle de vie
             </p>
-            <TimelinePhases phaseActuelle={projet.phase_actuelle} />
+            <TimelinePhases phaseActuelle={phaseActuelle} />
           </div>
         </div>
 
@@ -669,6 +846,7 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           <PanneauMissionsLivrables
             missions={missionsProjet}
             familleClient={familleClient}
+            onChangerStatutLivrable={changerStatutLivrable}
           />
         </section>
       )}
@@ -719,13 +897,31 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           >
             Modifier le projet
           </Link>
+          <button
+            type="button"
+            onClick={() => setModaleDocumentOuverte(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+          >
+            <Wand2 size={14} /> Générer un document
+          </button>
         </div>
       </section>
+
+      {/* ── Modal génération document ── */}
+      {modaleDocumentOuverte && (
+        <ModalGenererDocument
+          onFermer={() => setModaleDocumentOuverte(false)}
+          projetId={idProjet}
+          familleClient={familleClient}
+        />
+      )}
 
       {/* ── Graphique financier ── */}
       <GrafiqueFinancier
         montantEstime={projet.montant_estime}
         montantMarche={projet.montant_marche}
+        totalEtudes={totalEtudes}
         totalDevis={totalDevis}
         totalFacture={totalFacture}
       />
@@ -851,16 +1047,28 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
             titre="Points de contrôle"
             items={processus.points_de_controle}
             icone={<Search size={14} />}
+            actions={[
+              { href: `/projets/${idProjet}/documents`, libelle: "Voir les documents" },
+              { href: `/projets/${idProjet}/modifier`, libelle: "Ajuster le calendrier" },
+            ]}
           />
           <AccordeonProcessus
             titre="Livrables prioritaires"
             items={processus.livrables_prioritaires}
             icone={<FileText size={14} />}
+            actions={[
+              ...(afficherPiecesEcrites ? [{ href: `/projets/${idProjet}/pieces-ecrites/nouvelle`, libelle: "Créer une pièce" }] : []),
+              { href: `/projets/${idProjet}/documents`, libelle: "Ajouter un document" },
+            ]}
           />
           <AccordeonProcessus
             titre="Méthodes d'estimation"
             items={processus.methodes_estimation.map((m) => `${m.libelle} — ${m.objectif}`)}
             icone={<BarChart2 size={14} />}
+            actions={[
+              { href: `/projets/${idProjet}/economie/nouvelle`, libelle: "Lancer une étude" },
+              ...(afficherAppelsOffres ? [{ href: `/projets/${idProjet}/appels-offres/nouveau`, libelle: "Créer un AO" }] : []),
+            ]}
           />
         </section>
       )}
@@ -895,6 +1103,26 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
           </ul>
         </section>
       )}
+
+      <ModalConfirmation
+        ouverte={modalePhaseOuverte}
+        titre="Appliquer la phase suggérée"
+        message={
+          phaseSuggeree
+            ? `La phase officielle passera à « ${phaseSuggeree.libelle} ». ${phaseSuggeree.raison}`
+            : "Appliquer la phase suggérée à ce projet ?"
+        }
+        libelleBoutonConfirmer="Appliquer"
+        libelleBoutonAnnuler="Conserver l'actuelle"
+        variante="info"
+        chargement={applicationPhaseEnCours}
+        onConfirmer={appliquerPhaseSuggeree}
+        onAnnuler={() => {
+          if (!applicationPhaseEnCours) {
+            setModalePhaseOuverte(false);
+          }
+        }}
+      />
     </div>
   );
 }

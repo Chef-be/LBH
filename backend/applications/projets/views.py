@@ -19,10 +19,27 @@ from .serialiseurs import (
     IntervenantSerialiseur,
     PreanalyseSourcesProjetSerialiseur,
 )
-from .services import construire_bilan_documentaire_projet, construire_processus_recommande
+from .services import (
+    construire_bilan_documentaire_projet,
+    construire_processus_recommande,
+    construire_suggestion_phase_projet,
+    index_phase_projet,
+    libelle_phase_projet,
+    normaliser_phase_projet,
+)
 from .referentiels import construire_parcours_projet, lister_references_indices_prix
 from .taches import executer_preanalyse_sources_projet, importer_sources_preanalyse_dans_projet
 from applications.documents.services import synchroniser_dossiers_projet
+
+
+def _assurer_intervenant_responsable(projet: Projet) -> None:
+    if not projet.responsable_id:
+        return
+    Intervenant.objects.get_or_create(
+        projet=projet,
+        utilisateur=projet.responsable,
+        defaults={"role": "responsable"},
+    )
 
 
 class VueListeProjets(generics.ListCreateAPIView):
@@ -68,6 +85,7 @@ class VueListeProjets(generics.ListCreateAPIView):
             responsable=self.request.user,
             cree_par=self.request.user,
         )
+        _assurer_intervenant_responsable(projet)
         synchroniser_dossiers_projet(projet)
         preanalyse_id = self.request.data.get("preanalyse_sources_id")
         if preanalyse_id:
@@ -101,6 +119,7 @@ class VueDetailProjet(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         projet = serializer.save()
+        _assurer_intervenant_responsable(projet)
         synchroniser_dossiers_projet(projet)
 
     def destroy(self, requete, *args, **kwargs):
@@ -291,8 +310,8 @@ def vue_synthese_projet(requete, projet_id):
     projet = generics.get_object_or_404(Projet, pk=projet_id)
 
     # Index de phase pour la jauge de progression (0 = début, 9 = clos)
-    phases_ordonnees = [code for code, _ in Projet.PHASES]
-    phase_index = phases_ordonnees.index(projet.phase_actuelle) if projet.phase_actuelle in phases_ordonnees else -1
+    phase_code = normaliser_phase_projet(projet.phase_actuelle)
+    phase_index = index_phase_projet(phase_code)
 
     nb_documents = Document.objects.filter(
         projet=projet, est_version_courante=True
@@ -336,10 +355,42 @@ def vue_synthese_projet(requete, projet_id):
         "total_prix_vente_etudes": total_prix_vente,
         "total_marge_nette_etudes": total_marge_nette,
         "phase_index": phase_index,
-        "nb_phases": len(phases_ordonnees),
-        "phase_libelle": dict(Projet.PHASES).get(projet.phase_actuelle, ""),
+        "nb_phases": len(Projet.PHASES),
+        "phase_code": phase_code,
+        "phase_libelle": libelle_phase_projet(phase_code),
         "activite_recente": activite[:5],
     })
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_appliquer_phase_suggeree(requete, projet_id):
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    suggestion = construire_suggestion_phase_projet(projet)
+    phase_code = suggestion.get("code") or ""
+
+    if not phase_code:
+        raise ValidationError({"detail": "Aucune phase suggérée ne peut être calculée pour ce projet."})
+
+    phase_actuelle = normaliser_phase_projet(projet.phase_actuelle)
+    if phase_code == phase_actuelle:
+        return Response(
+            {
+                "detail": f"La phase officielle est déjà « {libelle_phase_projet(phase_code)} ».",
+                "phase_actuelle": phase_code,
+                "phase_libelle": libelle_phase_projet(phase_code),
+            }
+        )
+
+    projet.phase_actuelle = phase_code
+    projet.save(update_fields=["phase_actuelle", "date_modification"])
+
+    return Response(
+        {
+            "detail": f"Phase actuelle mise à jour en « {libelle_phase_projet(phase_code)} ».",
+            "projet": ProjetDetailSerialiseur(projet, context={"request": requete}).data,
+        }
+    )
 
 
 @api_view(["GET"])
@@ -521,3 +572,24 @@ def vue_generer_depuis_modele(requete):
         }, status=201)
     except Exception as exc:
         raise ValidationError({"detail": str(exc)}) from exc
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_statuts_livrables(requete, projet_id):
+    """Lecture et mise à jour des statuts de livrables d'un projet."""
+    from django.shortcuts import get_object_or_404
+    projet = get_object_or_404(Projet, pk=projet_id)
+
+    if requete.method == "GET":
+        statuts = dict(projet.qualification_wizard or {}).get("statuts_livrables", {})
+        return Response(statuts)
+
+    # PATCH : mise à jour partielle
+    qualification = dict(projet.qualification_wizard or {})
+    statuts = dict(qualification.get("statuts_livrables", {}))
+    statuts.update(requete.data)
+    qualification["statuts_livrables"] = statuts
+    projet.qualification_wizard = qualification
+    projet.save(update_fields=["qualification_wizard", "date_modification"])
+    return Response(statuts)

@@ -20,6 +20,8 @@ from .views import (
     vue_missions_livrables,
     vue_modeles_documents,
     vue_generer_depuis_modele,
+    vue_appliquer_phase_suggeree,
+    vue_statuts_livrables,
 )
 
 urlpatterns = [
@@ -37,6 +39,8 @@ urlpatterns = [
     path("<uuid:pk>/", VueDetailProjet.as_view(), name="projets-detail"),
     path("<uuid:projet_id>/qualification-documentaire/", vue_qualification_documentaire_projet, name="projets-qualification-documentaire"),
     path("<uuid:projet_id>/synthese/", vue_synthese_projet, name="projets-synthese"),
+    path("<uuid:projet_id>/phase-suggeree/appliquer/", vue_appliquer_phase_suggeree, name="projets-phase-suggeree-appliquer"),
+    path("<uuid:projet_id>/statuts-livrables/", vue_statuts_livrables, name="projets-statuts-livrables"),
     path("<uuid:projet_id>/lots/", VueLotsProjet.as_view(), name="projets-lots"),
     path("<uuid:projet_id>/intervenants/", VueIntervenantsProjet.as_view(), name="projets-intervenants"),
 ]

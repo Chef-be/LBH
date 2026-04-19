@@ -10,6 +10,8 @@ import { useSessionStore } from "@/crochets/useSession";
 import { ArrowLeft, Euro, FolderOpen, Users, Pencil, Trash2, X, Info, ChevronRight } from "lucide-react";
 import { NavigationProjet } from "@/composants/projets/NavigationProjet";
 import { DashboardProjet } from "@/composants/projets/DashboardProjet";
+import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +32,22 @@ interface Intervenant {
   role_libelle: string;
 }
 
+interface PhaseSuggeree {
+  code: string;
+  libelle: string;
+  raison: string;
+  indices: string[];
+  differe: boolean;
+  avancee_superieure: boolean;
+  phase_actuelle: string;
+  phase_actuelle_libelle: string;
+}
+
+interface SyntheseProjet {
+  total_prix_vente_etudes: number;
+  total_marge_nette_etudes?: number;
+}
+
 interface ProjetDetail {
   id: string;
   reference: string;
@@ -45,6 +63,7 @@ interface ProjetDetail {
   objectif_mission_libelle: string;
   phase_actuelle: string;
   phase_libelle: string;
+  phase_suggeree?: PhaseSuggeree | null;
   organisation_nom: string | null;
   maitre_ouvrage_nom: string | null;
   maitre_oeuvre_nom: string | null;
@@ -87,6 +106,7 @@ interface ProjetDetail {
     sources_methodologiques: string[];
   };
   dossiers_ged: Array<{ code: string; intitule: string; description: string }>;
+  statuts_livrables: Record<string, string>;
   lots: Lot[];
   intervenants: Intervenant[];
   date_creation: string;
@@ -152,33 +172,37 @@ function formaterValeurContexte(valeur: string | string[] | boolean) {
 export function DetailProjet({ id }: { id: string }) {
   const router = useRouter();
   const utilisateur = useSessionStore((etat) => etat.utilisateur);
+  const notifications = useNotifications();
   const estSuperAdmin = Boolean(utilisateur?.est_super_admin);
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
+  const [modaleSuppressionOuverte, setModaleSuppressionOuverte] = useState(false);
   const [erreurSuppression, setErreurSuppression] = useState<string | null>(null);
   const { data: projet, isLoading, isError } = useQuery<ProjetDetail>({
     queryKey: ["projet", id],
     queryFn: () => api.get<ProjetDetail>(`/api/projets/${id}/`),
   });
+  const { data: synthese } = useQuery<SyntheseProjet>({
+    queryKey: ["projet-synthese", id],
+    queryFn: () => api.get<SyntheseProjet>(`/api/projets/${id}/synthese/`),
+    enabled: Boolean(projet),
+  });
 
   const supprimerProjet = async () => {
     if (!projet) return;
-    const confirmation = window.confirm(
-      `Supprimer définitivement le projet ${projet.reference} et tous ses éléments liés ? Cette action est irréversible.`
-    );
-    if (!confirmation) return;
-
     setSuppressionEnCours(true);
     setErreurSuppression(null);
     try {
       await api.supprimer(`/api/projets/${id}/`);
+      notifications.succes(`Projet ${projet.reference} supprimé.`);
       router.push("/projets");
       router.refresh();
     } catch (erreur) {
-      setErreurSuppression(
-        erreur instanceof ErreurApi ? erreur.detail : "Impossible de supprimer le projet."
-      );
+      const message = erreur instanceof ErreurApi ? erreur.detail : "Impossible de supprimer le projet.";
+      setErreurSuppression(message);
+      notifications.erreur(message);
     } finally {
       setSuppressionEnCours(false);
+      setModaleSuppressionOuverte(false);
     }
   };
 
@@ -231,6 +255,23 @@ export function DetailProjet({ id }: { id: string }) {
     ["estimation_par_lot", "estimation_infrastructure"].some((code) => codesMission.has(code));
   const afficherVoirie = natureOuvrage === "infrastructure" || natureOuvrage === "mixte";
   const afficherBatiment = natureOuvrage === "batiment" || natureOuvrage === "mixte" || (!natureOuvrage && (estMaitriseOeuvre || estMaitriseOuvrage));
+  const equipeProjet = projet.intervenants.length > 0
+    ? projet.intervenants
+    : (projet.responsable_nom
+      ? [{
+          id: "responsable-defaut",
+          utilisateur_nom: projet.responsable_nom,
+          role: "responsable",
+          role_libelle: "Responsable",
+        }]
+      : []);
+  const syntheseFinanciere = [
+    { libelle: "Montant estimé HT", valeur: projet.montant_estime },
+    { libelle: "Montant du marché HT", valeur: projet.montant_marche },
+    { libelle: "Études économiques HT", valeur: synthese?.total_prix_vente_etudes ?? null },
+    { libelle: "Marge nette études HT", valeur: synthese?.total_marge_nette_etudes ?? null },
+    { libelle: "Honoraires prévus HT", valeur: projet.honoraires_prevus, accent: true },
+  ];
 
   return (
     <div className="space-y-6">
@@ -265,7 +306,7 @@ export function DetailProjet({ id }: { id: string }) {
           {estSuperAdmin && (
             <button
               type="button"
-              onClick={supprimerProjet}
+              onClick={() => setModaleSuppressionOuverte(true)}
               disabled={suppressionEnCours}
               className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -336,33 +377,31 @@ export function DetailProjet({ id }: { id: string }) {
               <Euro size={16} /> Synthèse financière
             </h2>
             <dl className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <dt style={{ color: "var(--texte-3)" }}>Montant estimé HT</dt>
-                <dd className="font-mono font-medium">{formaterMontant(projet.montant_estime)}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt style={{ color: "var(--texte-3)" }}>Montant du marché HT</dt>
-                <dd className="font-mono font-medium">{formaterMontant(projet.montant_marche)}</dd>
-              </div>
-              <div className="flex justify-between pt-3" style={{ borderTop: "1px solid var(--bordure)" }}>
-                <dt style={{ color: "var(--texte-3)" }}>Honoraires prévus HT</dt>
-                <dd className="font-mono font-medium" style={{ color: "var(--c-base)" }}>
-                  {formaterMontant(projet.honoraires_prevus)}
-                </dd>
-              </div>
+              {syntheseFinanciere.map((ligne) => (
+                <div
+                  key={ligne.libelle}
+                  className={ligne.accent ? "flex justify-between pt-3" : "flex justify-between"}
+                  style={ligne.accent ? { borderTop: "1px solid var(--bordure)" } : undefined}
+                >
+                  <dt style={{ color: "var(--texte-3)" }}>{ligne.libelle}</dt>
+                  <dd className="font-mono font-medium" style={ligne.accent ? { color: "var(--c-base)" } : undefined}>
+                    {formaterMontant(ligne.valeur)}
+                  </dd>
+                </div>
+              ))}
             </dl>
           </div>
 
           {/* Intervenants */}
           <div className="carte">
             <h2 className="mb-4 flex items-center gap-2">
-              <Users size={16} /> Équipe ({projet.intervenants.length})
+              <Users size={16} /> Équipe ({equipeProjet.length})
             </h2>
-            {projet.intervenants.length === 0 ? (
+            {equipeProjet.length === 0 ? (
               <p className="text-sm" style={{ color: "var(--texte-3)" }}>Aucun intervenant affecté.</p>
             ) : (
               <ul className="space-y-2">
-                {projet.intervenants.map((intervenant, idx) => (
+                {equipeProjet.map((intervenant, idx) => (
                   <li key={idx} className="flex items-center justify-between text-sm">
                     <span className="font-medium">{intervenant.utilisateur_nom}</span>
                     <span className="badge-neutre">{intervenant.role_libelle}</span>
@@ -382,6 +421,21 @@ export function DetailProjet({ id }: { id: string }) {
 
       {/* Modal contexte détaillé */}
       <ModalContexte projet={projet} />
+      <ModalConfirmation
+        ouverte={modaleSuppressionOuverte}
+        titre="Supprimer ce projet"
+        message={`Supprimer définitivement le projet ${projet.reference} et tous ses éléments liés ? Cette action est irréversible.`}
+        libelleBoutonConfirmer="Supprimer"
+        libelleBoutonAnnuler="Annuler"
+        variante="danger"
+        chargement={suppressionEnCours}
+        onConfirmer={supprimerProjet}
+        onAnnuler={() => {
+          if (!suppressionEnCours) {
+            setModaleSuppressionOuverte(false);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -472,6 +526,18 @@ function ModalContexte({ projet }: { projet: ProjetDetail }) {
   const c = projet.contexte_projet;
   const pr = projet.processus_recommande;
   const vp = projet.mode_variation_prix;
+  const codesMission = new Set([
+    c?.mission_principale.code,
+    ...(c?.missions_associees ?? []).map((mission) => mission.code),
+    c?.phase_intervention?.code,
+  ].filter(Boolean));
+  const contextePiecesEcrites =
+    projet.objectif_mission === "redaction_dce_cctp" ||
+    projet.objectif_mission === "estimation_moe" ||
+    ["redaction_cctp", "redaction_bpu", "redaction_dpgf", "redaction_ccap", "redaction_rc", "redaction_pieces_marche_infrastructure"].some((code) => codesMission.has(code));
+  const contexteAppelsOffres =
+    ["reponse_ao_entreprise", "prospection_ao", "redaction_dce_cctp"].includes(projet.objectif_mission) ||
+    ["act", "act_infrastructure", "rapport_analyse_offres", "analyse_offres_infrastructure", "reponse_appel_offres"].some((code) => codesMission.has(code));
 
   return (
     <div
@@ -574,6 +640,40 @@ function ModalContexte({ projet }: { projet: ProjetDetail }) {
         {/* Processus recommandé */}
         <section>
           <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Processus recommandé</h3>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Link
+              href={`/projets/${projet.id}/economie/nouvelle`}
+              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
+              style={{ background: "var(--c-base)", color: "#fff" }}
+            >
+              Lancer une étude
+            </Link>
+            <Link
+              href={`/projets/${projet.id}/documents`}
+              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
+              style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
+            >
+              Ajouter un document
+            </Link>
+            {contextePiecesEcrites && (
+              <Link
+                href={`/projets/${projet.id}/pieces-ecrites/nouvelle`}
+                className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
+                style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
+              >
+                Créer une pièce
+              </Link>
+            )}
+            {contexteAppelsOffres && (
+              <Link
+                href={`/projets/${projet.id}/appels-offres/nouveau`}
+                className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
+                style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
+              >
+                Créer un AO
+              </Link>
+            )}
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {pr.methodes_estimation.length > 0 && (
               <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>
