@@ -191,18 +191,21 @@ CELERY_TASK_ROUTES = {
 # ============================================================
 # STOCKAGE OBJET — MinIO (compatible S3)
 # ============================================================
-DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+DEFAULT_FILE_STORAGE = "noyau.stockage.StockageMinioPublic"
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 
 # Django 4.2+ — STORAGES prend la priorité sur DEFAULT_FILE_STORAGE
 STORAGES = {
     "default": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        "BACKEND": "noyau.stockage.StockageMinioPublic",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
+
+# URL publique du proxy MinIO (nginx redirige /minio/ → lbh-minio:9000/)
+MINIO_URL_PUBLIQUE = config("MINIO_URL_PUBLIQUE", default="/minio")
 
 AWS_ACCESS_KEY_ID = config("MINIO_ACCES_CLE", default="")
 AWS_SECRET_ACCESS_KEY = config("MINIO_SECRET_CLE", default="")
