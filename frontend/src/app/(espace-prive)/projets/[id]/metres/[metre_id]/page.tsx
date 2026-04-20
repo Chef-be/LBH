@@ -2123,23 +2123,6 @@ ${lignesLegende.map((z) => `
               </div>
             );
           })}
-          {outil === "calibrer" && (
-            <div className="xl:mt-2 space-y-1.5">
-              <input
-                type="number" step="0.01" min="0.01"
-                className="champ-saisie w-full text-xs py-1 font-mono border-amber-300 focus:ring-amber-400"
-                placeholder="Longueur connue (m)"
-                title="Longueur connue en mètres"
-                value={longueurConnue}
-                onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
-              />
-              <div className="flex gap-1">
-                {[0, 1].map((i) => (
-                  <div key={i} className={`w-2.5 h-2.5 rounded-full border ${calibrationPoints.length > i ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"}`} />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Canvas */}
@@ -2202,6 +2185,32 @@ ${lignesLegende.map((z) => `
 
         {/* Panel zones */}
         <div className="space-y-3">
+          {/* Calibration — affiché quand l'outil "calibrer" est actif */}
+          {outil === "calibrer" && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-800">Calibration de l'échelle</p>
+              <label className="text-xs text-amber-700">
+                Longueur connue (m)
+                <input
+                  type="number" step="0.01" min="0.01"
+                  className="mt-1 champ-saisie w-full font-mono border-amber-300 focus:ring-amber-400"
+                  placeholder="Ex : 5.00"
+                  title="Longueur connue en mètres"
+                  value={longueurConnue}
+                  onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                {[0, 1].map((i) => (
+                  <div key={i} className={`w-2.5 h-2.5 rounded-full border ${calibrationPoints.length > i ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"}`} />
+                ))}
+                <span className="text-xs text-amber-600">
+                  {calibrationPoints.length === 0 ? "Cliquez le 1er point" : calibrationPoints.length === 1 ? "Cliquez le 2e point" : "Calibration appliquée"}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-700">
               Zones ({zones.filter((z) => z.mode === "ajout").length})
