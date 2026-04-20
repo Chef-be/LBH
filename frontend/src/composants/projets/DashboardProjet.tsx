@@ -633,7 +633,7 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
         <section
           className="rounded-2xl border p-5"
           style={{
-            background: "color-mix(in srgb, var(--c-base) 8%, white)",
+            background: "color-mix(in srgb, var(--c-base) 8%, var(--fond-carte))",
             borderColor: "color-mix(in srgb, var(--c-base) 28%, var(--bordure))",
           }}
         >
@@ -659,7 +659,7 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
                       key={indice}
                       className="rounded-full px-2.5 py-1 text-xs"
                       style={{
-                        background: "rgba(255, 255, 255, 0.72)",
+                        background: "var(--fond-entree)",
                         border: "1px solid var(--bordure)",
                         color: "var(--texte-2)",
                       }}

@@ -709,7 +709,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
 // Types canvas
 // ---------------------------------------------------------------------------
 
-type OutilCanvas = "selection" | "surface" | "longueur" | "comptage" | "calibrer" | "soustraction_surface" | "soustraction_longueur";
+type OutilCanvas = "selection" | "surface" | "longueur" | "comptage" | "calibrer" | "soustraction_surface" | "soustraction_longueur" | "regle";
 
 interface PointCanvas { x: number; y: number; }
 
@@ -788,6 +788,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const espacePresse = useRef(false); // Space+drag pour panner sans changer d'outil
   const [mesureEnCours, setMesureEnCours] = useState<string | null>(null); // dimension affichée en bas
   const timerSauvegarde = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Règle de mesure — points temporaires (max 2), réinitialisés à chaque nouvelle mesure
+  const [reglePoints, setReglePoints] = useState<PointCanvas[]>([]);
 
   // Adapte le canvas à la taille du conteneur
   useEffect(() => {
@@ -827,6 +829,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
         }
       }
       // Créer ou mettre à jour les zones ajout (les soustractions sont dans deductions du parent)
+      // Collecter les dbId nouvellement créés pour mettre à jour le state
+      const nouvellesAssociations: Record<string, string> = {}; // zoneId local → dbId BDD
       for (const zone of zonesAEnregistrer.filter((z) => z.mode === "ajout")) {
         const deductionsFilles = zonesAEnregistrer
           .filter((z) => z.mode === "soustraction" && z.parentZoneId === zone.id)
@@ -848,8 +852,14 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           await api.patch(`/api/metres/${metreId}/fonds-plan/${fpId}/zones/${zone.dbId}/`, payload);
         } else {
           const result = await api.post<{ id: string }>(`/api/metres/${metreId}/fonds-plan/${fpId}/zones/`, payload);
-          zone.dbId = result.id; // mutation locale pour éviter re-POST
+          nouvellesAssociations[zone.id] = result.id;
         }
+      }
+      // Persiste les dbId dans le state React pour ne pas recréer lors du prochain cycle
+      if (Object.keys(nouvellesAssociations).length > 0) {
+        setZones((prev) => prev.map((z) =>
+          nouvellesAssociations[z.id] ? { ...z, dbId: nouvellesAssociations[z.id] } : z
+        ));
       }
     } catch {
       setDerniereErreurSauvegarde("Sauvegarde impossible — travail non perdu");
@@ -882,7 +892,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
           appliquerImageSurCanvas(img);
         }
-        // Charger les zones
+        // Charger les zones — utiliser l'échelle réelle du fond de plan (pas 50 hardcodé)
+        const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
         const zonesExistantes = await api.get<Array<{
           id: string; designation: string; type_mesure: string;
           points_px: Array<[number, number]>; deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
@@ -892,8 +903,12 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
         const zonesChargees: ZoneVisualisee[] = [];
         for (const z of zonesExistantes) {
           const type = (z.type_mesure === "surface" || z.type_mesure === "longueur" || z.type_mesure === "comptage") ? z.type_mesure : "surface";
-          const valeurBrute = type === "surface" ? calculerSurface(z.points_px.map(([x,y]) => ({x,y}))) / (50 * 50)
-            : type === "longueur" ? calculerLongueur(z.points_px.map(([x,y]) => ({x,y}))) / 50 : z.points_px.length;
+          const pts = z.points_px.map(([x,y]) => ({x, y}));
+          const valeur = type === "surface"
+            ? calculerSurface(pts) / (echelle * echelle)
+            : type === "longueur"
+              ? calculerLongueur(pts) / echelle
+              : z.points_px.length;
           const zoneAjout: ZoneVisualisee = {
             id: `zone-chargee-${z.id}`,
             dbId: z.id,
@@ -901,19 +916,19 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
             mode: "ajout",
             designation: z.designation,
             unite: z.unite,
-            points: z.points_px.map(([x,y]) => ({x, y})),
-            valeur: valeurBrute,
+            points: pts,
+            valeur,
             couleur: z.couleur,
             deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
           };
           zonesChargees.push(zoneAjout);
-          // Recréer les sous-zones de déduction comme zones locales
+          // Recréer les sous-zones de déduction
           for (let i = 0; i < z.deductions.length; i++) {
             const d = z.deductions[i];
             const ptsDed = d.points_px.map(([x,y]) => ({x,y}));
             const valDed = type === "surface"
-              ? calculerSurface(ptsDed) / (50 * 50)
-              : calculerLongueur(ptsDed) / 50;
+              ? calculerSurface(ptsDed) / (echelle * echelle)
+              : calculerLongueur(ptsDed) / echelle;
             zonesChargees.push({
               id: `ded-chargee-${z.id}-${i}`,
               type: type === "surface" ? "surface" : "longueur",
@@ -1207,8 +1222,62 @@ ${lignesLegende.map((z) => `
       }
     }
 
+    // Règle de mesure — tracé temporaire en vert avec cotation
+    if (outil === "regle" && echellePixelParMetre > 0) {
+      const pointsRegle = mousePos && reglePoints.length === 1
+        ? [...reglePoints, mousePos]
+        : reglePoints;
+      if (pointsRegle.length >= 2) {
+        const [A, B] = pointsRegle;
+        const dx = B.x - A.x;
+        const dy = B.y - A.y;
+        const distPx = Math.sqrt(dx * dx + dy * dy);
+        const distM = distPx / echellePixelParMetre;
+        // Ligne principale
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#16a34a";
+        ctx.lineWidth = 2 / zoom;
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+        // Tirets perpendiculaires aux extrémités
+        const angle = Math.atan2(dy, dx);
+        const perpLen = 8 / zoom;
+        for (const pt of [A, B]) {
+          ctx.beginPath();
+          ctx.moveTo(pt.x + Math.cos(angle + Math.PI / 2) * perpLen, pt.y + Math.sin(angle + Math.PI / 2) * perpLen);
+          ctx.lineTo(pt.x - Math.cos(angle + Math.PI / 2) * perpLen, pt.y - Math.sin(angle + Math.PI / 2) * perpLen);
+          ctx.stroke();
+        }
+        // Étiquette de mesure
+        const mx = (A.x + B.x) / 2;
+        const my = (A.y + B.y) / 2 - 12 / zoom;
+        const labelRegle = `${distM.toFixed(3)} ml`;
+        ctx.font = `bold ${12 / zoom}px system-ui`;
+        ctx.textAlign = "center";
+        const tw = ctx.measureText(labelRegle).width;
+        ctx.fillStyle = "#15803d";
+        ctx.fillRect(mx - tw / 2 - 4 / zoom, my - 13 / zoom, tw + 8 / zoom, 17 / zoom);
+        ctx.fillStyle = "white";
+        ctx.fillText(labelRegle, mx, my);
+      } else if (reglePoints.length === 1 && mousePos) {
+        // Aperçu avant le 2e clic
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = "#16a34a";
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.setLineDash([5 / zoom, 3 / zoom]);
+        ctx.beginPath(); ctx.moveTo(reglePoints[0].x, reglePoints[0].y); ctx.lineTo(mousePos.x, mousePos.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // Point de départ
+      if (reglePoints.length >= 1) {
+        ctx.fillStyle = "#16a34a";
+        ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(reglePoints[0].x, reglePoints[0].y, 4 / zoom, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
     ctx.restore();
-  }, [fondPlan, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints]);
+  }, [fondPlan, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
 
   useEffect(() => { dessiner(); }, [dessiner]);
 
@@ -1313,6 +1382,14 @@ ${lignesLegende.map((z) => `
           return [];
         }
         return next;
+      });
+      return;
+    }
+    if (outil === "regle") {
+      const pt = coordCanvas(e);
+      setReglePoints((prev) => {
+        if (prev.length >= 2) return [pt]; // Nouveau segment : réinitialise
+        return [...prev, pt];
       });
       return;
     }
@@ -1594,6 +1671,7 @@ ${lignesLegende.map((z) => `
 
   const outils = [
     { id: "selection" as OutilCanvas, icone: <MousePointer className="w-4 h-4" />, titre: "Sélection / Déplacement" },
+    { id: "regle" as OutilCanvas, icone: <Ruler className="w-4 h-4 text-green-600" />, titre: "Règle — mesure ponctuelle (non enregistrée)" },
     { id: "surface" as OutilCanvas, icone: <Square className="w-4 h-4" />, titre: "Surface (polygone)" },
     { id: "soustraction_surface" as OutilCanvas, icone: <MinusSquare className="w-4 h-4 text-red-500" />, titre: "Soustraire surface" },
     { id: "longueur" as OutilCanvas, icone: <LineIcon className="w-4 h-4" />, titre: "Longueur (polyligne)" },
@@ -1604,6 +1682,11 @@ ${lignesLegende.map((z) => `
 
   const instructionOutil = {
     selection: "Glisser pour naviguer — Molette pour zoomer",
+    regle: reglePoints.length === 0
+      ? "Clic pour poser le 1er point de mesure"
+      : reglePoints.length === 1
+        ? "Clic pour poser le 2e point — la cote s'affiche en vert"
+        : "Clic pour recommencer une nouvelle mesure",
     surface: "Clic pour poser un point — Clic droit pour fermer le polygone",
     soustraction_surface: "Surface à déduire (rouge) — Clic droit pour fermer",
     longueur: "Clic pour ajouter un segment — Clic droit pour terminer",
@@ -1736,10 +1819,12 @@ ${lignesLegende.map((z) => `
         <div className="flex xl:flex-col gap-2 flex-wrap">
           {outils.map((o) => (
             <button key={o.id} type="button" title={o.titre}
-              onClick={() => { setOutil(o.id); setPointsEnCours([]); }}
+              onClick={() => { setOutil(o.id); setPointsEnCours([]); setReglePoints([]); }}
               className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${
                 outil === o.id
-                  ? (o.id.startsWith("soustraction") ? "border-red-300 bg-red-50 text-red-700" : "border-primaire-300 bg-primaire-50 text-primaire-700")
+                  ? (o.id.startsWith("soustraction") ? "border-red-300 bg-red-50 text-red-700"
+                    : o.id === "regle" ? "border-green-300 bg-green-50 text-green-700"
+                    : "border-primaire-300 bg-primaire-50 text-primaire-700")
                   : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
               }`}
             >
@@ -1785,7 +1870,7 @@ ${lignesLegende.map((z) => `
               cursor: (isDragging.current || isMidDragging.current)
                 ? "grabbing"
                 : outil === "selection" ? "grab"
-                : outil === "calibrer" ? "crosshair"
+                : outil === "regle" ? "cell"
                 : "crosshair",
             }}
           />
