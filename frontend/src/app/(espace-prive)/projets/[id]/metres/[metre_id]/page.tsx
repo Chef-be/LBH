@@ -2087,6 +2087,34 @@ ${lignesLegende.map((z) => `
         )}
       </div>
 
+      {/* Barre de calibration — pleine largeur, visible au-dessus du canvas */}
+      {outil === "calibrer" && (
+        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <ScanLine className="w-4 h-4 text-amber-600 shrink-0" />
+          <span className="text-sm font-semibold text-amber-800 shrink-0">Calibration de l'échelle</span>
+          <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+            <label className="text-xs text-amber-700 shrink-0">Longueur connue :</label>
+            <input
+              type="number" step="0.01" min="0.01"
+              className="champ-saisie flex-1 font-mono border-amber-300 focus:ring-amber-400"
+              placeholder="Ex : 5.00 m"
+              title="Longueur connue en mètres"
+              value={longueurConnue}
+              onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
+            />
+            <span className="text-xs text-amber-700 shrink-0">m</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {[0, 1].map((i) => (
+              <div key={i} className={`w-2.5 h-2.5 rounded-full border ${calibrationPoints.length > i ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"}`} />
+            ))}
+            <span className="text-xs text-amber-600">
+              {calibrationPoints.length === 0 ? "Cliquez le 1er point sur le plan" : calibrationPoints.length === 1 ? "Cliquez le 2e point" : "✓ Calibration appliquée"}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Interface canvas */}
       <div className="grid gap-4 xl:grid-cols-[60px_minmax(0,1fr)_290px]">
         {/* Barre d'outils — avec sous-outils de déduction hiérarchisés */}
@@ -2185,32 +2213,6 @@ ${lignesLegende.map((z) => `
 
         {/* Panel zones */}
         <div className="space-y-3">
-          {/* Calibration — affiché quand l'outil "calibrer" est actif */}
-          {outil === "calibrer" && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-              <p className="text-xs font-semibold text-amber-800">Calibration de l'échelle</p>
-              <label className="text-xs text-amber-700">
-                Longueur connue (m)
-                <input
-                  type="number" step="0.01" min="0.01"
-                  className="mt-1 champ-saisie w-full font-mono border-amber-300 focus:ring-amber-400"
-                  placeholder="Ex : 5.00"
-                  title="Longueur connue en mètres"
-                  value={longueurConnue}
-                  onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
-                />
-              </label>
-              <div className="flex items-center gap-2">
-                {[0, 1].map((i) => (
-                  <div key={i} className={`w-2.5 h-2.5 rounded-full border ${calibrationPoints.length > i ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"}`} />
-                ))}
-                <span className="text-xs text-amber-600">
-                  {calibrationPoints.length === 0 ? "Cliquez le 1er point" : calibrationPoints.length === 1 ? "Cliquez le 2e point" : "Calibration appliquée"}
-                </span>
-              </div>
-            </div>
-          )}
-
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-700">
               Zones ({zones.filter((z) => z.mode === "ajout").length})
