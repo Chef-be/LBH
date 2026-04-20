@@ -789,6 +789,9 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const espacePresse = useRef(false); // Space+drag pour panner sans changer d'outil
   const [mesureEnCours, setMesureEnCours] = useState<string | null>(null); // dimension affichée en bas
   const timerSauvegarde = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Anti-concurrence : empêche deux saves simultanés ; stocke le dernier snapshot en attente
+  const sauvegardeEnCoursRef = useRef(false);
+  const pendingZonesRef = useRef<{ zones: ZoneVisualisee[]; fpId: string } | null>(null);
   // Règle de mesure — points temporaires (max 2), réinitialisés à chaque nouvelle mesure
   const [reglePoints, setReglePoints] = useState<PointCanvas[]>([]);
   // Gestion multipage — tous les fonds de plan disponibles pour ce métré
@@ -822,26 +825,29 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     return () => obs.disconnect();
   }, []);
 
-  // Sauvegarde automatique des zones en BDD (debounced 1.5 s)
+  // Sauvegarde atomique des zones en BDD — une seule instance à la fois
   const sauvegarderZonesBDD = useCallback(async (zonesAEnregistrer: ZoneVisualisee[], fpId: string) => {
     if (!fpId) return;
+    // Si une sauvegarde tourne déjà, stocker le snapshot le plus récent et sortir
+    if (sauvegardeEnCoursRef.current) {
+      pendingZonesRef.current = { zones: zonesAEnregistrer, fpId };
+      return;
+    }
+    sauvegardeEnCoursRef.current = true;
     setSauvegardeEnCours(true);
     setDerniereErreurSauvegarde(null);
     try {
-      // Récupère la liste actuelle en BDD pour détecter les suppressions
       const zonesExistantes = await api.get<Array<{ id: string }>>(`/api/metres/${metreId}/fonds-plan/${fpId}/zones/`);
       const idsExistants = new Set(zonesExistantes.map((z) => z.id));
       const idsLocaux = new Set(zonesAEnregistrer.filter((z) => z.dbId).map((z) => z.dbId!));
-      // Supprimer les zones retirées localement
       for (const id of idsExistants) {
         if (!idsLocaux.has(id)) {
           await api.supprimer(`/api/metres/${metreId}/fonds-plan/${fpId}/zones/${id}/`);
         }
       }
-      // Créer ou mettre à jour les zones ajout (les soustractions sont dans deductions du parent)
-      // Collecter les dbId nouvellement créés pour mettre à jour le state
-      const nouvellesAssociations: Record<string, string> = {}; // zoneId local → dbId BDD
+      const nouvellesAssociations: Record<string, string> = {};
       for (const zone of zonesAEnregistrer.filter((z) => z.mode === "ajout")) {
+        if (zone.points.length === 0) continue; // zone vide, on ignore
         const deductionsFilles = zonesAEnregistrer
           .filter((z) => z.mode === "soustraction" && z.parentZoneId === zone.id)
           .map((d) => ({
@@ -865,7 +871,6 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           nouvellesAssociations[zone.id] = result.id;
         }
       }
-      // Persiste les dbId dans le state React pour ne pas recréer lors du prochain cycle
       if (Object.keys(nouvellesAssociations).length > 0) {
         setZones((prev) => prev.map((z) =>
           nouvellesAssociations[z.id] ? { ...z, dbId: nouvellesAssociations[z.id] } : z
@@ -874,15 +879,28 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     } catch {
       setDerniereErreurSauvegarde("Sauvegarde impossible — travail non perdu");
     } finally {
+      sauvegardeEnCoursRef.current = false;
       setSauvegardeEnCours(false);
+      // S'il y a un snapshot plus récent en attente, le sauvegarder immédiatement
+      if (pendingZonesRef.current) {
+        const pending = pendingZonesRef.current;
+        pendingZonesRef.current = null;
+        void sauvegarderZonesBDD(pending.zones, pending.fpId);
+      }
     }
   }, [metreId]);
 
   const planifierSauvegarde = useCallback((zonesAEnregistrer: ZoneVisualisee[], fpId: string | null) => {
     if (!fpId) return;
     if (timerSauvegarde.current) clearTimeout(timerSauvegarde.current);
+    // Toujours garder le snapshot le plus récent pour le timer
+    pendingZonesRef.current = { zones: zonesAEnregistrer, fpId };
     timerSauvegarde.current = setTimeout(() => {
-      void sauvegarderZonesBDD(zonesAEnregistrer, fpId);
+      if (pendingZonesRef.current) {
+        const pending = pendingZonesRef.current;
+        pendingZonesRef.current = null;
+        void sauvegarderZonesBDD(pending.zones, pending.fpId);
+      }
     }, 1500);
   }, [sauvegarderZonesBDD]);
 
@@ -1342,7 +1360,25 @@ ${lignesLegende.map((z) => `
           const dy = next[1].y - next[0].y;
           const pixels = Math.sqrt(dx * dx + dy * dy);
           const metres = parseFloat(longueurConnue);
-          if (metres > 0 && pixels > 0) setEchellePixelParMetre(pixels / metres);
+          if (metres > 0 && pixels > 0) {
+            const nouvelleEchelle = pixels / metres;
+            setEchellePixelParMetre(nouvelleEchelle);
+            // Persiste l'échelle en base de données
+            if (fondPlanId) {
+              void api.post(`/api/metres/${metreId}/fonds-plan/${fondPlanId}/calibrer/`, {
+                point_a: [next[0].x, next[0].y],
+                point_b: [next[1].x, next[1].y],
+                distance_metres: metres,
+              }).then(() => {
+                // Met à jour l'entrée dans fondsPlans pour que le switch de plan recharge la bonne échelle
+                setFondsPlans((prev) => prev.map((fp) =>
+                  fp.id === fondPlanId ? { ...fp, echelle: nouvelleEchelle } : fp
+                ));
+              }).catch(() => {
+                // Calibration sauvegardée localement uniquement en cas d'erreur réseau
+              });
+            }
+          }
           return [];
         }
         return next;
@@ -1552,6 +1588,9 @@ ${lignesLegende.map((z) => `
   const chargerFondActif = async (fp: {
     id: string; url_fichier?: string; format_fichier?: string; echelle?: number;
   }) => {
+    // Annuler toute sauvegarde en attente pour l'ancien fond de plan
+    if (timerSauvegarde.current) { clearTimeout(timerSauvegarde.current); timerSauvegarde.current = null; }
+    pendingZonesRef.current = null;
     setFondPlanId(fp.id);
     if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
     const url = fp.url_fichier ?? "";
