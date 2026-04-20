@@ -8,7 +8,7 @@ import {
   ArrowLeft, Plus, Pencil, Trash2, CheckCircle,
   AlertCircle, X, Save, ChevronRight, Calculator,
   Ruler, MousePointer, Square, Minus as LineIcon, Hash, ScanLine, Upload, CheckSquare,
-  MinusSquare, FunctionSquare,
+  MinusSquare, FunctionSquare, Layers, ImagePlus,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -784,12 +784,22 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [derniereErreurSauvegarde, setDerniereErreurSauvegarde] = useState<string | null>(null);
   const isDragging = useRef(false);
   const isMidDragging = useRef(false); // pan avec bouton milieu (tous outils)
+  const didDrag = useRef(false);       // distingue clic simple vs glissement (mode règle)
   const lastMouse = useRef<PointCanvas>({ x: 0, y: 0 });
   const espacePresse = useRef(false); // Space+drag pour panner sans changer d'outil
   const [mesureEnCours, setMesureEnCours] = useState<string | null>(null); // dimension affichée en bas
   const timerSauvegarde = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Règle de mesure — points temporaires (max 2), réinitialisés à chaque nouvelle mesure
   const [reglePoints, setReglePoints] = useState<PointCanvas[]>([]);
+  // Gestion multipage — tous les fonds de plan disponibles pour ce métré
+  const [fondsPlans, setFondsPlans] = useState<Array<{
+    id: string; intitule: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+  }>>([]);
+  // Fond de plan secondaire (superposition semi-transparente)
+  const [fondPlanSecondaire, setFondPlanSecondaire] = useState<HTMLImageElement | null>(null);
+  const [fondPlanSecondaireId, setFondPlanSecondaireId] = useState<string | null>(null);
+  const [opaciteSecondaire, setOpaciteSecondaire] = useState(0.4);
+  const [panneauSuppressionFond, setPanneauSuppressionFond] = useState(false);
 
   // Adapte le canvas à la taille du conteneur
   useEffect(() => {
@@ -876,74 +886,17 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     }, 1500);
   }, [sauvegarderZonesBDD]);
 
-  // Chargement des zones existantes depuis le premier fond de plan disponible
+  // Chargement initial — tous les fonds de plan + zones du premier
   useEffect(() => {
     const chargerExistant = async () => {
       try {
-        const fonds = await api.get<Array<{ id: string; url_fichier?: string; format_fichier?: string; echelle?: number }>>(`/api/metres/${metreId}/fonds-plan/`);
+        const fonds = await api.get<Array<{
+          id: string; intitule: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+        }>>(`/api/metres/${metreId}/fonds-plan/`);
         if (!fonds.length) return;
-        const fp = fonds[0];
-        setFondPlanId(fp.id);
-        if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
-        // Charger l'image
-        const url = fp.url_fichier ?? "";
-        if (url) {
-          const estPDF = fp.format_fichier === "pdf";
-          const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
-          appliquerImageSurCanvas(img);
-        }
-        // Charger les zones — utiliser l'échelle réelle du fond de plan (pas 50 hardcodé)
-        const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
-        const zonesExistantes = await api.get<Array<{
-          id: string; designation: string; type_mesure: string;
-          points_px: Array<[number, number]>; deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
-          unite: string; couleur: string; ordre: number;
-        }>>(`/api/metres/${metreId}/fonds-plan/${fp.id}/zones/`);
-        if (!zonesExistantes.length) return;
-        const zonesChargees: ZoneVisualisee[] = [];
-        for (const z of zonesExistantes) {
-          const type = (z.type_mesure === "surface" || z.type_mesure === "longueur" || z.type_mesure === "comptage") ? z.type_mesure : "surface";
-          const pts = z.points_px.map(([x,y]) => ({x, y}));
-          const valeur = type === "surface"
-            ? calculerSurface(pts) / (echelle * echelle)
-            : type === "longueur"
-              ? calculerLongueur(pts) / echelle
-              : z.points_px.length;
-          const zoneAjout: ZoneVisualisee = {
-            id: `zone-chargee-${z.id}`,
-            dbId: z.id,
-            type,
-            mode: "ajout",
-            designation: z.designation,
-            unite: z.unite,
-            points: pts,
-            valeur,
-            couleur: z.couleur,
-            deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
-          };
-          zonesChargees.push(zoneAjout);
-          // Recréer les sous-zones de déduction
-          for (let i = 0; i < z.deductions.length; i++) {
-            const d = z.deductions[i];
-            const ptsDed = d.points_px.map(([x,y]) => ({x,y}));
-            const valDed = type === "surface"
-              ? calculerSurface(ptsDed) / (echelle * echelle)
-              : calculerLongueur(ptsDed) / echelle;
-            zonesChargees.push({
-              id: `ded-chargee-${z.id}-${i}`,
-              type: type === "surface" ? "surface" : "longueur",
-              mode: "soustraction",
-              parentZoneId: `zone-chargee-${z.id}`,
-              designation: d.designation,
-              unite: z.unite,
-              points: ptsDed,
-              valeur: valDed,
-              couleur: COULEUR_SOUSTRACTION,
-              deductions: [],
-            });
-          }
-        }
-        setZones(zonesChargees);
+        setFondsPlans(fonds);
+        // chargerFondActif est défini plus bas dans le composant — accessible via closure
+        await chargerFondActif(fonds[0]);
       } catch {
         // Pas de fond plan existant — cas normal
       }
@@ -1050,6 +1003,12 @@ ${lignesLegende.map((z) => `
     // Fond de plan ou grille
     if (fondPlan) {
       ctx.drawImage(fondPlan, 0, 0);
+      // Superposition semi-transparente du fond secondaire
+      if (fondPlanSecondaire) {
+        ctx.globalAlpha = opaciteSecondaire;
+        ctx.drawImage(fondPlanSecondaire, 0, 0);
+        ctx.globalAlpha = 1;
+      }
     } else {
       ctx.fillStyle = "#f8fafc";
       ctx.fillRect(0, 0, canvas.width / zoom, canvas.height / zoom);
@@ -1277,7 +1236,7 @@ ${lignesLegende.map((z) => `
     }
 
     ctx.restore();
-  }, [fondPlan, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
+  }, [fondPlan, fondPlanSecondaire, opaciteSecondaire, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
 
   useEffect(() => { dessiner(); }, [dessiner]);
 
@@ -1357,6 +1316,11 @@ ${lignesLegende.map((z) => `
 
   const gererClic = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
+    // Si l'utilisateur a glissé pour panner, ignorer ce clic (ne pas ajouter de point)
+    if (didDrag.current) {
+      didDrag.current = false;
+      return;
+    }
     if (outil === "selection") {
       // Sélection d'une zone par clic
       const pt = coordCanvas(e);
@@ -1457,20 +1421,16 @@ ${lignesLegende.map((z) => `
 
   const gererMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     lastMouse.current = { x: e.clientX, y: e.clientY };
-    // Bouton milieu → pan universel
+    // Bouton milieu → pan universel (preventDefault natif via useEffect dédié)
     if (e.button === 1) {
-      e.preventDefault();
       isMidDragging.current = true;
+      didDrag.current = false;
       return;
     }
-    // Bouton gauche + espace pressée → pan universel
-    if (e.button === 0 && espacePresse.current) {
+    // Bouton gauche → pan potentiel dans tous les outils (didDrag discrimine clic vs glissement)
+    if (e.button === 0) {
       isDragging.current = true;
-      return;
-    }
-    // Bouton gauche en mode sélection → pan
-    if (e.button === 0 && outil === "selection") {
-      isDragging.current = true;
+      didDrag.current = false;
     }
   };
 
@@ -1482,11 +1442,11 @@ ${lignesLegende.map((z) => `
     if (isPanning) {
       const dx = e.clientX - lastMouse.current.x;
       const dy = e.clientY - lastMouse.current.y;
-      setOffsetCanvas((prev) => {
-        const nx = prev.x + dx;
-        const ny = prev.y + dy;
-        return clampOffset(nx, ny, zoomRef.current);
-      });
+      // Seuil minimal pour distinguer un clic d'un glissement (5 px)
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) didDrag.current = true;
+      if (didDrag.current) {
+        setOffsetCanvas((prev) => clampOffset(prev.x + dx, prev.y + dy, zoomRef.current));
+      }
       lastMouse.current = { x: e.clientX, y: e.clientY };
       return;
     }
@@ -1496,24 +1456,18 @@ ${lignesLegende.map((z) => `
     if (mousePos && pointsEnCours.length > 0) {
       if (outil === "longueur" || outil === "soustraction_longueur") {
         const longueurPx = calculerLongueur([...pointsEnCours, pt]);
-        const longueurM = longueurPx / echellePixelParMetre;
-        setMesureEnCours(`${longueurM.toFixed(3)} ml`);
+        setMesureEnCours(`${(longueurPx / echellePixelParMetre).toFixed(3)} ml`);
       } else if (outil === "surface" || outil === "soustraction_surface") {
         if (pointsEnCours.length >= 2) {
           const surfacePx = calculerSurface([...pointsEnCours, pt]);
-          const surfaceM2 = surfacePx / (echellePixelParMetre * echellePixelParMetre);
-          setMesureEnCours(`≈ ${surfaceM2.toFixed(3)} m²`);
+          setMesureEnCours(`≈ ${(surfacePx / (echellePixelParMetre * echellePixelParMetre)).toFixed(3)} m²`);
         }
       } else if (outil === "calibrer" && calibrationPoints.length === 1) {
         const dx = pt.x - calibrationPoints[0].x;
         const dy = pt.y - calibrationPoints[0].y;
         const pixels = Math.sqrt(dx * dx + dy * dy);
         const m = parseFloat(longueurConnue);
-        if (m > 0) {
-          setMesureEnCours(`1m = ${(pixels / m).toFixed(1)} px/m`);
-        } else {
-          setMesureEnCours(`${pixels.toFixed(0)} px`);
-        }
+        setMesureEnCours(m > 0 ? `1m = ${(pixels / m).toFixed(1)} px/m` : `${pixels.toFixed(0)} px`);
       } else {
         setMesureEnCours(null);
       }
@@ -1523,8 +1477,11 @@ ${lignesLegende.map((z) => `
   };
 
   const gererMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button === 1) isMidDragging.current = false;
-    else isDragging.current = false;
+    if (e.button === 1) {
+      isMidDragging.current = false;
+    } else {
+      isDragging.current = false;
+    }
   };
 
   // Espace pour activer temporairement le pan
@@ -1534,6 +1491,21 @@ ${lignesLegende.map((z) => `
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, []);
+
+  // Bloque le comportement natif "auto-scroll" du navigateur sur bouton milieu (passive: false requis)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const bloquerScrollMilieu = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
+    canvas.addEventListener("mousedown", bloquerScrollMilieu, { passive: false });
+    canvas.addEventListener("auxclick", bloquerScrollMilieu, { passive: false });
+    return () => {
+      canvas.removeEventListener("mousedown", bloquerScrollMilieu);
+      canvas.removeEventListener("auxclick", bloquerScrollMilieu);
+    };
   }, []);
 
   const chargerImageDepuisUrl = (url: string): Promise<HTMLImageElement> => {
@@ -1576,6 +1548,95 @@ ${lignesLegende.map((z) => `
     setTimeout(() => setProgressionFond(null), 600);
   };
 
+  // Chargement complet d'un fond de plan (image + zones) — appelé au changement de plan actif
+  const chargerFondActif = async (fp: {
+    id: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+  }) => {
+    setFondPlanId(fp.id);
+    if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
+    const url = fp.url_fichier ?? "";
+    if (url) {
+      const estPDF = fp.format_fichier === "pdf";
+      const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
+      appliquerImageSurCanvas(img);
+    }
+    // Charger les zones pour ce fond de plan
+    const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
+    try {
+      const zonesExistantes = await api.get<Array<{
+        id: string; designation: string; type_mesure: string;
+        points_px: Array<[number, number]>; deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
+        unite: string; couleur: string; ordre: number;
+      }>>(`/api/metres/${metreId}/fonds-plan/${fp.id}/zones/`);
+      if (!zonesExistantes.length) { setZones([]); return; }
+      const zonesChargees: ZoneVisualisee[] = [];
+      for (const z of zonesExistantes) {
+        const type = (z.type_mesure === "surface" || z.type_mesure === "longueur" || z.type_mesure === "comptage") ? z.type_mesure : "surface";
+        const pts = z.points_px.map(([x, y]) => ({ x, y }));
+        const valeur = type === "surface"
+          ? calculerSurface(pts) / (echelle * echelle)
+          : type === "longueur" ? calculerLongueur(pts) / echelle : z.points_px.length;
+        zonesChargees.push({
+          id: `zone-chargee-${z.id}`, dbId: z.id, type, mode: "ajout",
+          designation: z.designation, unite: z.unite, points: pts, valeur,
+          couleur: z.couleur, deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
+        });
+        for (let i = 0; i < z.deductions.length; i++) {
+          const d = z.deductions[i];
+          const ptsDed = d.points_px.map(([x, y]) => ({ x, y }));
+          const valDed = type === "surface"
+            ? calculerSurface(ptsDed) / (echelle * echelle)
+            : calculerLongueur(ptsDed) / echelle;
+          zonesChargees.push({
+            id: `ded-chargee-${z.id}-${i}`, type: type === "surface" ? "surface" : "longueur",
+            mode: "soustraction", parentZoneId: `zone-chargee-${z.id}`,
+            designation: d.designation, unite: z.unite, points: ptsDed, valeur: valDed,
+            couleur: COULEUR_SOUSTRACTION, deductions: [],
+          });
+        }
+      }
+      setZones(zonesChargees);
+    } catch { setZones([]); }
+  };
+
+  // Chargement d'un fond secondaire (image uniquement, pas de zones)
+  const chargerFondSecondaire = async (fp: {
+    id: string; url_fichier?: string; format_fichier?: string;
+  }) => {
+    const url = fp.url_fichier ?? "";
+    if (!url) return;
+    try {
+      const estPDF = fp.format_fichier === "pdf";
+      const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
+      setFondPlanSecondaire(img);
+      setFondPlanSecondaireId(fp.id);
+    } catch { /* ignore */ }
+  };
+
+  // Suppression du fond de plan actif avec toutes ses zones
+  const supprimerFondPlanActif = async () => {
+    if (!fondPlanId) return;
+    setPanneauSuppressionFond(false);
+    try {
+      await api.supprimer(`/api/metres/${metreId}/fonds-plan/${fondPlanId}/`);
+      const restants = fondsPlans.filter((fp) => fp.id !== fondPlanId);
+      setFondsPlans(restants);
+      setZones([]);
+      setFondPlan(null);
+      if (fondPlanSecondaireId === fondPlanId) {
+        setFondPlanSecondaire(null);
+        setFondPlanSecondaireId(null);
+      }
+      if (restants.length > 0) {
+        await chargerFondActif(restants[0]);
+      } else {
+        setFondPlanId(null);
+      }
+    } catch {
+      setErreurFond("Impossible de supprimer le fond de plan.");
+    }
+  };
+
   const uploaderFond = async (fichier: File) => {
     setChargementFond(true);
     setErreurFond(null);
@@ -1593,12 +1654,20 @@ ${lignesLegende.map((z) => `
       // url_fichier = URL relative /minio/... (sans build_absolute_uri)
       const url = reponse.url_fichier ?? reponse.fichier ?? reponse.url ?? "";
       if (!url) { setErreurFond("Aucune URL retournée par le serveur."); return; }
-      if (reponse.id) setFondPlanId(reponse.id);
+      const fpId = reponse.id ?? null;
+      if (fpId) {
+        setFondPlanId(fpId);
+        // Ajouter à la liste des fonds de plan
+        const nouveauFp = {
+          id: fpId, intitule: fichier.name,
+          url_fichier: url, format_fichier: reponse.format_fichier, echelle: undefined,
+        };
+        setFondsPlans((prev) => prev.some((f) => f.id === fpId) ? prev : [...prev, nouveauFp]);
+        setZones([]); // Nouveau fond → pas encore de zones
+      }
 
       const estPDF = reponse.format_fichier === "pdf" || fichier.name.toLowerCase().endsWith(".pdf");
-
       if (estPDF) {
-        // Rendu de la 1re page PDF via PDF.js → converti en image
         const img = await chargerPremierePage(url);
         appliquerImageSurCanvas(img);
       } else {
@@ -1669,15 +1738,23 @@ ${lignesLegende.map((z) => `
     } finally { setEnregistrement(false); }
   };
 
-  const outils = [
-    { id: "selection" as OutilCanvas, icone: <MousePointer className="w-4 h-4" />, titre: "Sélection / Déplacement" },
-    { id: "regle" as OutilCanvas, icone: <Ruler className="w-4 h-4 text-green-600" />, titre: "Règle — mesure ponctuelle (non enregistrée)" },
-    { id: "surface" as OutilCanvas, icone: <Square className="w-4 h-4" />, titre: "Surface (polygone)" },
-    { id: "soustraction_surface" as OutilCanvas, icone: <MinusSquare className="w-4 h-4 text-red-500" />, titre: "Soustraire surface" },
-    { id: "longueur" as OutilCanvas, icone: <LineIcon className="w-4 h-4" />, titre: "Longueur (polyligne)" },
-    { id: "soustraction_longueur" as OutilCanvas, icone: <LineIcon className="w-4 h-4 text-red-500" />, titre: "Soustraire longueur" },
-    { id: "comptage" as OutilCanvas, icone: <Hash className="w-4 h-4" />, titre: "Comptage" },
-    { id: "calibrer" as OutilCanvas, icone: <ScanLine className="w-4 h-4" />, titre: "Calibrer l'échelle" },
+  // Outils principaux — les sous-outils de déduction sont hiérarchisés sous leur parent
+  const outils: Array<{
+    id: OutilCanvas; icone: React.ReactNode; titre: string;
+    sous?: Array<{ id: OutilCanvas; icone: React.ReactNode; titre: string }>;
+  }> = [
+    { id: "selection", icone: <MousePointer className="w-4 h-4" />, titre: "Sélection / Déplacement" },
+    { id: "regle", icone: <Ruler className="w-4 h-4 text-green-600" />, titre: "Règle — mesure ponctuelle (non enregistrée)" },
+    {
+      id: "surface", icone: <Square className="w-4 h-4" />, titre: "Surface (polygone)",
+      sous: [{ id: "soustraction_surface", icone: <MinusSquare className="w-3.5 h-3.5" />, titre: "Soustraire une surface" }],
+    },
+    {
+      id: "longueur", icone: <LineIcon className="w-4 h-4" />, titre: "Longueur (polyligne)",
+      sous: [{ id: "soustraction_longueur", icone: <LineIcon className="w-3.5 h-3.5" />, titre: "Soustraire une longueur" }],
+    },
+    { id: "comptage", icone: <Hash className="w-4 h-4" />, titre: "Comptage" },
+    { id: "calibrer", icone: <ScanLine className="w-4 h-4" />, titre: "Calibrer l'échelle" },
   ];
 
   const instructionOutil = {
@@ -1796,41 +1873,153 @@ ${lignesLegende.map((z) => `
         </div>
       )}
 
-      {/* Upload fond de plan */}
-      {!fondPlan && (
-        <div className="carte p-6 space-y-3">
-          <p className="font-semibold text-slate-700">Importer un fond de plan</p>
-          <p className="text-sm text-slate-400">Formats acceptés : image (PNG, JPEG, TIFF) ou PDF.</p>
-          <label className="flex cursor-pointer items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-10 hover:border-primaire-300 hover:bg-primaire-50 transition">
+      {/* Gestionnaire de fonds de plan — toujours visible */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Liste des fonds de plan disponibles */}
+          {fondsPlans.map((fp) => (
+            <div key={fp.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                title={`Activer : ${fp.intitule}`}
+                onClick={() => { void chargerFondActif(fp); }}
+                className={`max-w-[140px] truncate rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+                  fp.id === fondPlanId
+                    ? "border-primaire-300 bg-primaire-50 text-primaire-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300"
+                }`}
+              >
+                {fp.id === fondPlanId && <span className="inline-block w-1.5 h-1.5 rounded-full bg-primaire-500 mr-1 mb-0.5" />}
+                {fp.intitule || `Plan ${fondsPlans.indexOf(fp) + 1}`}
+              </button>
+              {/* Bouton superposition secondaire */}
+              {fp.id !== fondPlanId && fondPlan && (
+                <button
+                  type="button"
+                  title={fondPlanSecondaireId === fp.id ? "Retirer la superposition" : "Superposer ce plan (semi-transparent)"}
+                  onClick={() => {
+                    if (fondPlanSecondaireId === fp.id) {
+                      setFondPlanSecondaire(null);
+                      setFondPlanSecondaireId(null);
+                    } else {
+                      void chargerFondSecondaire(fp);
+                    }
+                  }}
+                  className={`p-1 rounded-lg border transition ${
+                    fondPlanSecondaireId === fp.id
+                      ? "border-purple-300 bg-purple-50 text-purple-600"
+                      : "border-slate-200 bg-white text-slate-400 hover:text-purple-500"
+                  }`}
+                >
+                  <Layers className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          ))}
+
+          {/* Upload d'un nouveau fond de plan */}
+          <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1.5 text-xs transition ${
+            chargementFond ? "border-slate-200 text-slate-400" : "border-slate-300 text-slate-500 hover:border-primaire-400 hover:text-primaire-600"
+          }`}>
             {chargementFond
-              ? <><Calculator className="w-6 h-6 animate-spin text-slate-400" /><span className="text-sm text-slate-500">Téléversement…</span></>
-              : <><Upload className="w-6 h-6 text-slate-400" /><span className="text-sm text-slate-500">Cliquez pour importer le fond de plan</span></>
+              ? <><Calculator className="w-3 h-3 animate-spin" />Chargement…</>
+              : <><ImagePlus className="w-3 h-3" />Ajouter un plan</>
             }
+            <input type="file" accept="image/*,.pdf" className="hidden"
+              disabled={chargementFond}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploaderFond(f); e.currentTarget.value = ""; }}
+            />
+          </label>
+
+          {/* Opacité de la superposition */}
+          {fondPlanSecondaire && (
+            <div className="flex items-center gap-2 ml-auto">
+              <Layers className="w-3 h-3 text-purple-500 shrink-0" />
+              <input
+                type="range" min={0} max={1} step={0.05}
+                value={opaciteSecondaire}
+                onChange={(e) => setOpaciteSecondaire(parseFloat(e.target.value))}
+                className="w-20 accent-purple-500"
+                title={`Opacité superposition : ${Math.round(opaciteSecondaire * 100)}%`}
+              />
+              <span className="text-xs text-purple-600 font-mono w-8 text-right">{Math.round(opaciteSecondaire * 100)}%</span>
+            </div>
+          )}
+
+          {/* Suppression du fond de plan actif */}
+          {fondPlanId && (
+            <div className="ml-auto flex items-center gap-2">
+              {panneauSuppressionFond ? (
+                <>
+                  <span className="text-xs text-red-600">Supprimer ce plan et ses métrés ?</span>
+                  <button type="button" onClick={() => void supprimerFondPlanActif()}
+                    className="rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-600 hover:bg-red-100">
+                    Confirmer
+                  </button>
+                  <button type="button" onClick={() => setPanneauSuppressionFond(false)}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 hover:bg-slate-50">
+                    Annuler
+                  </button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setPanneauSuppressionFond(true)}
+                  title="Supprimer ce fond de plan et toutes ses zones"
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-400 hover:border-red-200 hover:text-red-500 transition">
+                  <Trash2 className="w-3 h-3" />Supprimer le plan
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Zone d'upload initiale (aucun fond de plan) */}
+        {fondsPlans.length === 0 && !chargementFond && (
+          <label className="mt-3 flex cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-8 hover:border-primaire-300 hover:bg-primaire-50 transition">
+            <Upload className="w-5 h-5 text-slate-400" />
+            <span className="text-sm text-slate-500">Cliquez pour importer votre premier fond de plan (image ou PDF)</span>
             <input type="file" accept="image/*,.pdf" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploaderFond(f); e.currentTarget.value = ""; }}
             />
           </label>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Interface canvas */}
       <div className="grid gap-4 xl:grid-cols-[60px_minmax(0,1fr)_290px]">
-        {/* Barre d'outils */}
-        <div className="flex xl:flex-col gap-2 flex-wrap">
-          {outils.map((o) => (
-            <button key={o.id} type="button" title={o.titre}
-              onClick={() => { setOutil(o.id); setPointsEnCours([]); setReglePoints([]); }}
-              className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${
-                outil === o.id
-                  ? (o.id.startsWith("soustraction") ? "border-red-300 bg-red-50 text-red-700"
-                    : o.id === "regle" ? "border-green-300 bg-green-50 text-green-700"
-                    : "border-primaire-300 bg-primaire-50 text-primaire-700")
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              {o.icone}
-            </button>
-          ))}
+        {/* Barre d'outils — avec sous-outils de déduction hiérarchisés */}
+        <div className="flex xl:flex-col gap-1 flex-wrap">
+          {outils.map((o) => {
+            const sousActif = o.sous?.some((s) => s.id === outil) ?? false;
+            const parentActif = outil === o.id || sousActif;
+            return (
+              <div key={o.id} className="flex xl:flex-col gap-1">
+                <button type="button" title={o.titre}
+                  onClick={() => { setOutil(o.id); setPointsEnCours([]); setReglePoints([]); }}
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${
+                    parentActif
+                      ? o.id === "regle" ? "border-green-300 bg-green-50 text-green-700"
+                        : "border-primaire-300 bg-primaire-50 text-primaire-700"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {o.icone}
+                </button>
+                {/* Sous-outils de déduction — affichés uniquement quand l'outil parent est actif */}
+                {parentActif && o.sous?.map((so) => (
+                  <button key={so.id} type="button" title={so.titre}
+                    onClick={() => { setOutil(so.id); setPointsEnCours([]); }}
+                    className={`flex h-8 w-8 items-center justify-center rounded-lg border transition xl:ml-1 ${
+                      outil === so.id
+                        ? "border-red-300 bg-red-50 text-red-600"
+                        : "border-red-200 bg-white text-red-400 hover:bg-red-50"
+                    }`}
+                  >
+                    {so.icone}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
           {outil === "calibrer" && (
             <div className="xl:mt-2 space-y-1.5">
               <input
