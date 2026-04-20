@@ -2127,8 +2127,8 @@ ${lignesLegende.map((z) => `
             <div className="xl:mt-2 space-y-1.5">
               <input
                 type="number" step="0.01" min="0.01"
-                className="champ-saisie w-14 text-xs py-1 text-center font-mono border-amber-300 focus:ring-amber-400"
-                placeholder="m"
+                className="champ-saisie w-full text-xs py-1 font-mono border-amber-300 focus:ring-amber-400"
+                placeholder="Longueur connue (m)"
                 title="Longueur connue en mètres"
                 value={longueurConnue}
                 onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
