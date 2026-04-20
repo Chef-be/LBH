@@ -1255,6 +1255,64 @@ ${lignesLegende.map((z) => `
       }
     }
 
+    // Réticule de précision — remplace le curseur OS pour tous les outils de tracé
+    const outilsTracé: OutilCanvas[] = ["regle", "surface", "longueur", "soustraction_surface", "soustraction_longueur", "comptage", "calibrer"];
+    if (mousePos && outilsTracé.includes(outil) && !isDragging.current && !isMidDragging.current) {
+      const cx = mousePos.x;
+      const cy = mousePos.y;
+      const bras = 14 / zoom;
+      const gap = 4 / zoom;
+      const couleurReticule = outil === "regle" || outil === "calibrer" ? "#16a34a"
+        : (outil === "soustraction_surface" || outil === "soustraction_longueur") ? "#ef4444"
+        : "#0ea5e9";
+
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+
+      // Ombre portée pour contraste sur fonds clairs et sombres
+      const dessinerBras = (couleur: string, lw: number) => {
+        ctx.strokeStyle = couleur;
+        ctx.lineWidth = lw / zoom;
+        ctx.beginPath();
+        ctx.moveTo(cx - bras, cy); ctx.lineTo(cx - gap, cy);
+        ctx.moveTo(cx + gap, cy); ctx.lineTo(cx + bras, cy);
+        ctx.moveTo(cx, cy - bras); ctx.lineTo(cx, cy - gap);
+        ctx.moveTo(cx, cy + gap); ctx.lineTo(cx, cy + bras);
+        ctx.stroke();
+      };
+
+      dessinerBras("rgba(0,0,0,0.5)", 3);   // ombre
+      dessinerBras(couleurReticule, 1.5);    // réticule coloré
+
+      // Petit point central
+      ctx.fillStyle = couleurReticule;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 1.5 / zoom, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Coordonnées en temps réel (distance depuis dernier point posé)
+      if (echellePixelParMetre > 0 && (outil === "regle" ? reglePoints.length === 1 : pointsEnCours.length > 0)) {
+        const ptRef = outil === "regle" ? reglePoints[reglePoints.length - 1] : pointsEnCours[pointsEnCours.length - 1];
+        if (ptRef) {
+          const dxPx = cx - ptRef.x;
+          const dyPx = cy - ptRef.y;
+          const distPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+          const dist = outil === "surface" || outil === "soustraction_surface"
+            ? `≈ ${(distPx / echellePixelParMetre).toFixed(2)} m`
+            : `${(distPx / echellePixelParMetre).toFixed(3)} m`;
+          ctx.font = `${10 / zoom}px system-ui`;
+          ctx.textAlign = "left";
+          const tw = ctx.measureText(dist).width;
+          const lx = cx + bras + 4 / zoom;
+          const ly = cy - 4 / zoom;
+          ctx.fillStyle = "rgba(15,23,42,0.75)";
+          ctx.fillRect(lx - 2 / zoom, ly - 10 / zoom, tw + 6 / zoom, 13 / zoom);
+          ctx.fillStyle = "#f8fafc";
+          ctx.fillText(dist, lx + 1 / zoom, ly);
+        }
+      }
+    }
+
     ctx.restore();
   }, [fondPlan, fondPlanSecondaire, opaciteSecondaire, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
 
@@ -2104,8 +2162,7 @@ ${lignesLegende.map((z) => `
               cursor: (isDragging.current || isMidDragging.current)
                 ? "grabbing"
                 : outil === "selection" ? "grab"
-                : outil === "regle" ? "cell"
-                : "crosshair",
+                : "none", // réticule dessiné directement sur le canvas pour tous les outils de tracé
             }}
           />
           <div className="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-500">
