@@ -69,11 +69,9 @@ export function FormulaireNouveauMetre({ projetId }: { projetId: string }) {
         <div>
           <label className="libelle-champ" htmlFor="type_metre">Type de métré *</label>
           <select id="type_metre" name="type_metre" className="champ-saisie" required defaultValue="avant_metre">
-            <option value="avant_metre">Avant-métré (estimatif)</option>
-            <option value="metre_definitif">Métré définitif (descriptif)</option>
+            <option value="avant_metre">Avant-métré</option>
+            <option value="metre_definitif">Métré définitif</option>
             <option value="metre_contradictoire">Métré contradictoire</option>
-            <option value="metre_travaux_en_cours">Situation de travaux</option>
-            <option value="metre_decompte">Décompte général définitif</option>
           </select>
           {erreurs.type_metre && <p className="text-xs text-red-500 mt-1">{erreurs.type_metre}</p>}
         </div>

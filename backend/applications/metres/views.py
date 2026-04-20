@@ -149,6 +149,7 @@ class VueListeFondsPlans(generics.ListCreateAPIView):
     """Liste et téléversement des fonds de plan d'un métré."""
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = FondPlanSerialiseur
+    pagination_class = None  # Retourner toujours la liste complète (jamais paginée)
 
     def get_queryset(self):
         return FondPlan.objects.filter(
@@ -229,6 +230,7 @@ class VueListeZonesMesure(generics.ListCreateAPIView):
     """CRUD des zones de mesure sur un fond de plan."""
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ZoneMesureSerialiseur
+    pagination_class = None  # Retourner toujours la liste complète
 
     def get_queryset(self):
         return ZoneMesure.objects.filter(

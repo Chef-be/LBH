@@ -1105,17 +1105,15 @@ ${lignesLegende.map((z) => `
         ctx.font = `bold ${13 / zoom}px system-ui`;
         ctx.textAlign = "center";
 
+        // zone.valeur est déjà en unités réelles (m², ml, u) — ne pas diviser à nouveau par l'échelle
         let valAff = "";
         if (zone.type === "comptage") {
           valAff = `${zone.points.length} u`;
         } else if (zone.type === "longueur" && zone.hauteur) {
-          const surf = zone.valeur * zone.hauteur / (echellePixelParMetre * echellePixelParMetre);
+          const surf = zone.valeur * zone.hauteur; // ml × m → m²
           valAff = `${surf.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} m²`;
         } else {
-          const val = zone.type === "surface"
-            ? zone.valeur / (echellePixelParMetre * echellePixelParMetre)
-            : zone.valeur / echellePixelParMetre;
-          valAff = `${val.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${zone.unite}`;
+          valAff = `${zone.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${zone.unite}`;
         }
 
         if (zone.mode === "soustraction") {
@@ -1605,7 +1603,7 @@ ${lignesLegende.map((z) => `
   ];
 
   const instructionOutil = {
-    selection: "Glisser pour naviguer — Molette pour zoomer — Espace+Glisser ou Molette clic depuis n'importe quel outil",
+    selection: "Glisser pour naviguer — Molette pour zoomer",
     surface: "Clic pour poser un point — Clic droit pour fermer le polygone",
     soustraction_surface: "Surface à déduire (rouge) — Clic droit pour fermer",
     longueur: "Clic pour ajouter un segment — Clic droit pour terminer",

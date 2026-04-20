@@ -14,11 +14,9 @@ class Metre(models.Model):
     """
 
     TYPES = [
-        ("avant_metre", "Avant-métré (estimatif)"),
-        ("metre_definitif", "Métré définitif (descriptif)"),
+        ("avant_metre", "Avant-métré"),
+        ("metre_definitif", "Métré définitif"),
         ("metre_contradictoire", "Métré contradictoire"),
-        ("metre_travaux_en_cours", "Situation de travaux"),
-        ("metre_decompte", "Décompte général définitif"),
     ]
 
     STATUTS = [
