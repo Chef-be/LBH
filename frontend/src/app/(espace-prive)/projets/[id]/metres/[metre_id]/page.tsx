@@ -2260,8 +2260,8 @@ ${lignesLegende.map((z) => `
             <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
               {zones.filter((z) => z.mode === "ajout").map((zone) => {
                 const soustractions = zones.filter((d) => d.mode === "soustraction" && d.parentZoneId === zone.id);
-                const totalDeductions = soustractions.reduce((s, d) => s + d.valeur, 0);
-                const valeurNette = zone.valeur - totalDeductions;
+                const totalDeductions = soustractions.reduce((s, d) => s + (d.type === "longueur" && d.hauteur ? d.valeur * d.hauteur : d.valeur), 0);
+                const valeurNette = (zone.type === "longueur" && zone.hauteur ? zone.valeur * zone.hauteur : zone.valeur) - totalDeductions;
                 return (
                   <div key={zone.id} className="space-y-1">
                     {/* Zone principale */}
@@ -2326,13 +2326,25 @@ ${lignesLegende.map((z) => `
                             onClick={(e) => e.stopPropagation()}
                           />
                           <span className="font-mono text-xs text-red-600 shrink-0">
-                            {ded.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} {ded.unite}
+                            {ded.type === "longueur" && ded.hauteur
+                              ? `${(ded.valeur * ded.hauteur).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} m²`
+                              : `${ded.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${ded.unite}`
+                            }
                           </span>
                           <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(ded.id); }}
                             className="p-0.5 text-red-200 hover:text-red-500 shrink-0">
                             <X className="w-3 h-3" />
                           </button>
                         </div>
+                        {ded.type === "longueur" && (
+                          <button
+                            type="button"
+                            className="mt-1 ml-4 text-[10px] text-red-500 hover:underline"
+                            onClick={(e) => { e.stopPropagation(); setModalHauteur({ zoneId: ded.id, hauteurActuelle: ded.hauteur ? String(ded.hauteur) : "" }); }}
+                          >
+                            {ded.hauteur ? `× h = ${ded.hauteur} m → surface déduite` : "Ajouter une hauteur → surface déduite"}
+                          </button>
+                        )}
                       </div>
                     ))}
 
@@ -2341,7 +2353,7 @@ ${lignesLegende.map((z) => `
                       <div className="ml-5 rounded-lg bg-green-50 border border-green-200 px-3 py-1.5 flex items-center justify-between">
                         <span className="text-xs text-green-700 font-medium">Valeur nette</span>
                         <span className="font-mono text-xs font-bold text-green-800">
-                          {valeurNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} {zone.unite}
+                          {valeurNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} {zone.type === "longueur" && zone.hauteur ? "m²" : zone.unite}
                         </span>
                       </div>
                     )}
