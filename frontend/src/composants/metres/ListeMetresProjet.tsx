@@ -15,7 +15,6 @@ interface Metre {
   type_libelle: string;
   statut: string;
   statut_libelle: string;
-  montant_total_ht: number;
   date_modification: string;
 }
 
@@ -28,11 +27,6 @@ const STYLES_STATUT: Record<string, string> = {
   valide: "badge-succes",
   archive: "badge-neutre",
 };
-
-function formaterMontant(val: number) {
-  if (val == null) return "—";
-  return `${Number(val).toLocaleString("fr-FR", { minimumFractionDigits: 0 })} €`;
-}
 
 export function ListeMetresProjet({ projetId }: { projetId: string }) {
   const queryClient = useQueryClient();
@@ -94,7 +88,6 @@ export function ListeMetresProjet({ projetId }: { projetId: string }) {
             <th className="text-left py-2 pr-4 font-medium">Intitulé</th>
             <th className="text-left py-2 pr-4 font-medium">Type</th>
             <th className="text-left py-2 pr-4 font-medium">Statut</th>
-            <th className="text-right py-2 pr-4 font-medium">Montant HT</th>
             <th className="text-right py-2 pr-4 font-medium">Modifié</th>
             <th className="text-right py-2 font-medium">Actions</th>
           </tr>
@@ -112,9 +105,6 @@ export function ListeMetresProjet({ projetId }: { projetId: string }) {
                 <span className={clsx(STYLES_STATUT[m.statut] || "badge-neutre")}>
                   {m.statut_libelle}
                 </span>
-              </td>
-              <td className="py-3 pr-4 text-right font-mono text-xs font-medium text-primaire-700">
-                {formaterMontant(m.montant_total_ht)}
               </td>
               <td className="py-3 pr-4 text-right text-xs text-slate-400">
                 {new Date(m.date_modification).toLocaleDateString("fr-FR")}

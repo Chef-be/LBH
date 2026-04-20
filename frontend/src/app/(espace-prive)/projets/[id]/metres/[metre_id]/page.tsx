@@ -909,12 +909,14 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     const chargerExistant = async () => {
       try {
         const fonds = await api.get<Array<{
-          id: string; intitule: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+          id: string; intitule: string; url_fichier?: string; format_fichier?: string; echelle?: unknown;
         }>>(`/api/metres/${metreId}/fonds-plan/`);
         if (!fonds.length) return;
-        setFondsPlans(fonds);
+        // Normaliser echelle en number (DRF retourne les DecimalField en string)
+        const fondsNorm = fonds.map((f) => ({ ...f, echelle: f.echelle != null ? Number(f.echelle) : undefined }));
+        setFondsPlans(fondsNorm);
         // chargerFondActif est défini plus bas dans le composant — accessible via closure
-        await chargerFondActif(fonds[0]);
+        await chargerFondActif(fondsNorm[0]);
       } catch {
         // Pas de fond plan existant — cas normal
       }
@@ -1595,9 +1597,13 @@ ${lignesLegende.map((z) => `
     if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
     const url = fp.url_fichier ?? "";
     if (url) {
-      const estPDF = fp.format_fichier === "pdf";
-      const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
-      appliquerImageSurCanvas(img);
+      try {
+        const estPDF = fp.format_fichier === "pdf";
+        const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
+        appliquerImageSurCanvas(img);
+      } catch {
+        setErreurFond("Impossible de charger l'image du fond de plan.");
+      }
     }
     // Charger les zones pour ce fond de plan
     const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
@@ -1640,7 +1646,7 @@ ${lignesLegende.map((z) => `
 
   // Chargement d'un fond secondaire (image uniquement, pas de zones)
   const chargerFondSecondaire = async (fp: {
-    id: string; url_fichier?: string; format_fichier?: string;
+    id: string; url_fichier?: string; format_fichier?: string; echelle?: number;
   }) => {
     const url = fp.url_fichier ?? "";
     if (!url) return;

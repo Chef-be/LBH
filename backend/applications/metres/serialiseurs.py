@@ -178,7 +178,7 @@ class ZoneMesureSerialiseur(serializers.ModelSerializer):
             "couleur", "ordre", "date_modification",
         ]
         read_only_fields = [
-            "id", "ligne_metre", "valeur_brute", "valeur_deduction", "valeur_nette",
+            "id", "fond_plan", "ligne_metre", "valeur_brute", "valeur_deduction", "valeur_nette",
             "date_modification", "type_libelle",
         ]
 
