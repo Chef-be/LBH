@@ -524,7 +524,10 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
 
   const { data: missionsDonnees = [] } = useQuery<MissionProjet[]>({
     queryKey: ["missions-livrables", familleClient],
-    queryFn: () => api.get<MissionProjet[]>(`/api/projets/missions-livrables/?famille_client=${familleClient}`),
+    queryFn: async () => {
+      const r = await api.get<{ missions?: MissionProjet[] } | MissionProjet[]>(`/api/projets/missions-livrables/?famille_client=${familleClient}`);
+      return Array.isArray(r) ? r : (r.missions ?? []);
+    },
     enabled: !!familleClient && missionsCodes.size > 0,
     staleTime: 300_000,
   });
