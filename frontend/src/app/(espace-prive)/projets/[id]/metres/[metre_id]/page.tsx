@@ -781,7 +781,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [enregistrement, setEnregistrement] = useState(false);
   const [succes, setSucces] = useState<string | null>(null);
   const [modalHauteur, setModalHauteur] = useState<{ zoneId: string; hauteurActuelle: string } | null>(null);
-  const [modalParentSoustraction, setModalParentSoustraction] = useState<ZoneVisualisee | null>(null); // zone soustraction en attente de parent
+  const [modalParentSoustraction, setModalParentSoustraction] = useState<ZoneVisualisee | null>(null);
+  const [pendingParentId, setPendingParentId] = useState<string | null>(null); // sous-zone en attente : prochaine forme → sous-zone de ce parent
   const [sauvegardeEnCours, setSauvegardeEnCours] = useState(false);
   const [derniereErreurSauvegarde, setDerniereErreurSauvegarde] = useState<string | null>(null);
   const isDragging = useRef(false);
@@ -1359,11 +1360,34 @@ ${lignesLegende.map((z) => `
       ? COULEUR_SOUSTRACTION
       : COULEURS_AJOUT[(zones.filter((z) => z.mode === "ajout").length) % COULEURS_AJOUT.length];
 
+    const zonesAjout = zones.filter((z) => z.mode === "ajout");
+
+    // Calcul du numéro et du parent pour la sous-zone
+    let sousZoneDeId: string | undefined;
+    let numeroZone: string | undefined;
+    let designation: string;
+
+    if (!estSoustraction && pendingParentId) {
+      // Mode sous-zone : tag la zone avec le parent
+      const parent = zones.find((z) => z.id === pendingParentId);
+      sousZoneDeId = pendingParentId;
+      const existingChildren = zones.filter((z) => z.sousZoneDeId === pendingParentId);
+      const parentNum = parent?.numeroZone || String(zonesAjout.filter((z) => !z.sousZoneDeId).indexOf(parent!) + 1);
+      numeroZone = `${parentNum}.${existingChildren.length + 1}`;
+      designation = parent?.designation ?? `Sous-zone ${numeroZone}`;
+    } else {
+      designation = estSoustraction
+        ? `Déduction ${zones.filter((z) => z.mode === "soustraction").length + 1}`
+        : `Zone ${zonesAjout.filter((z) => !z.sousZoneDeId).length + 1}`;
+    }
+
     const nouvelleZone: ZoneVisualisee = {
       id: `zone-${Date.now()}`,
       type: typeZone,
       mode: estSoustraction ? "soustraction" : "ajout",
-      designation: estSoustraction ? `Déduction ${zones.filter((z) => z.mode === "soustraction").length + 1}` : `Zone ${zones.filter((z) => z.mode === "ajout").length + 1}`,
+      designation,
+      sousZoneDeId,
+      numeroZone,
       unite: typeZone === "surface" ? "m²" : typeZone === "longueur" ? "ml" : "u",
       points: [...pointsEnCours],
       valeur: valeurReelle,
@@ -1372,17 +1396,14 @@ ${lignesLegende.map((z) => `
     };
 
     if (estSoustraction) {
-      // Vérifier qu'une zone parent (ajout) est sélectionnée
-      const zonesAjout = zones.filter((z) => z.mode === "ajout");
-      const parentSelectionne = zonesAjout.find((z) => z.id === zoneSelectionnee);
       if (zonesAjout.length === 0) {
-        // Aucune zone de base → impossible d'ajouter une déduction
         setErreurFond("Créez d'abord une zone de base (surface ou longueur) avant d'ajouter une déduction.");
         setPointsEnCours([]);
         return;
       }
+      // Cherche la zone sélectionnée parmi les zones ajout (y compris sous-zones)
+      const parentSelectionne = zonesAjout.find((z) => z.id === zoneSelectionnee);
       if (parentSelectionne) {
-        // Parent explicitement sélectionné → liaison directe
         nouvelleZone.parentZoneId = parentSelectionne.id;
         setZones((prev) => {
           const nouvelles = [...prev, nouvelleZone];
@@ -1392,21 +1413,31 @@ ${lignesLegende.map((z) => `
         setPointsEnCours([]);
         setZoneSelectionnee(nouvelleZone.id);
       } else {
-        // Demander à l'utilisateur de choisir le parent via modale
         setModalParentSoustraction(nouvelleZone);
         setPointsEnCours([]);
       }
       return;
     }
 
+    // Zone d'ajout (principale ou sous-zone)
+    setPendingParentId(null); // réinitialiser le mode sous-zone après création
     setZones((prev) => {
+      // Insérer la sous-zone après les sous-zones existantes du même parent, ou à la fin
+      if (sousZoneDeId) {
+        const lastChildIdx = prev.reduce((acc, z, i) => z.sousZoneDeId === sousZoneDeId ? i : acc, -1);
+        const insertAt = lastChildIdx >= 0 ? lastChildIdx + 1 : prev.length;
+        const res = [...prev];
+        res.splice(insertAt, 0, nouvelleZone);
+        planifierSauvegarde(res, fondPlanId);
+        return res;
+      }
       const nouvelles = [...prev, nouvelleZone];
       planifierSauvegarde(nouvelles, fondPlanId);
       return nouvelles;
     });
     setPointsEnCours([]);
     setZoneSelectionnee(nouvelleZone.id);
-  }, [outil, pointsEnCours, echellePixelParMetre, zones, zoneSelectionnee, fondPlanId, planifierSauvegarde]);
+  }, [outil, pointsEnCours, echellePixelParMetre, zones, zoneSelectionnee, fondPlanId, planifierSauvegarde, pendingParentId]);
 
   const gererClic = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
@@ -1670,7 +1701,8 @@ ${lignesLegende.map((z) => `
     setFondPlanId(fp.id);
     if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
     const url = fp.url_fichier ?? "";
-    if (url) {
+    const estVectoriel = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(url);
+    if (url && !estVectoriel) {
       try {
         const estPDF = fp.format_fichier === "pdf";
         const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
@@ -1678,6 +1710,9 @@ ${lignesLegende.map((z) => `
       } catch {
         setErreurFond("Impossible de charger l'image du fond de plan.");
       }
+    } else if (estVectoriel) {
+      setSucces("Fond de plan CAO (DXF/DWG) — dessinez les zones directement sur la grille.");
+      setTimeout(() => setSucces(null), 5000);
     }
     // Charger les zones pour ce fond de plan
     const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
@@ -1979,8 +2014,12 @@ ${lignesLegende.map((z) => `
                   }}
                   className="w-full flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-left text-sm hover:border-primaire-300 hover:bg-primaire-50 transition"
                 >
+                  {z.sousZoneDeId && <span className="text-slate-300">└</span>}
                   <span className="w-3 h-3 rounded-full shrink-0" style={{ background: z.couleur }} />
-                  <span className="font-medium">{z.designation}</span>
+                  <span className="font-medium">
+                    {z.numeroZone ? <span className="text-slate-400 text-xs font-mono mr-1">{z.numeroZone}</span> : null}
+                    {z.designation}
+                  </span>
                   <span className="ml-auto font-mono text-xs text-slate-400">
                     {z.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} {z.unite}
                   </span>
@@ -2190,6 +2229,20 @@ ${lignesLegende.map((z) => `
 
         {/* Canvas */}
         <div ref={conteneurRef} className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+          {/* Bandeau mode sous-zone */}
+          {pendingParentId && (() => {
+            const parent = zones.find((z) => z.id === pendingParentId);
+            return parent ? (
+              <div className="flex items-center gap-2 bg-primaire-600 px-3 py-1.5 text-xs text-white font-medium">
+                <span className="shrink-0">Sous-zone de :</span>
+                <span className="font-bold truncate">{parent.numeroZone ? `${parent.numeroZone} — ` : ""}{parent.designation}</span>
+                <span className="mx-1 opacity-50">·</span>
+                <span className="opacity-75">Sélectionnez un outil et dessinez</span>
+                <button type="button" className="ml-auto shrink-0 opacity-75 hover:opacity-100"
+                  onClick={() => setPendingParentId(null)}>Annuler ×</button>
+              </div>
+            ) : null;
+          })()}
           <canvas
             ref={canvasRef}
             className="block w-full"
@@ -2300,32 +2353,14 @@ ${lignesLegende.map((z) => `
                 const valeurBrute = zone.type === "longueur" && zone.hauteur ? zone.valeur * zone.hauteur : zone.type === "comptage" ? zone.points.length : zone.valeur;
                 const valeurNette = valeurBrute - totalDeductions;
 
-                const ajouterSousZone = (e: React.MouseEvent) => {
+                const activerModeSousZone = (e: React.MouseEvent) => {
                   e.stopPropagation();
-                  // Compter les sous-zones existantes pour auto-numéroter
-                  const parentNum = zone.numeroZone || String(zones.filter((z2) => z2.mode === "ajout" && !z2.sousZoneDeId).indexOf(zone) + 1);
-                  const nbSousZones = sousZones.length;
-                  const numero = `${parentNum}.${nbSousZones + 1}`;
-                  const nouvelleSousZone: ZoneVisualisee = {
-                    id: `sous-zone-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                    type: zone.type, mode: "ajout",
-                    sousZoneDeId: zone.id,
-                    numeroZone: numero,
-                    designation: zone.designation,
-                    unite: zone.unite, points: [], valeur: 0,
-                    couleur: zone.couleur, deductions: [],
-                  };
-                  setZones((prev) => {
-                    // Insérer après la dernière sous-zone existante ou après la zone
-                    const idx = prev.findLastIndex((z2) => z2.sousZoneDeId === zone.id);
-                    const insertAfter = idx >= 0 ? idx : prev.indexOf(zone);
-                    const res = [...prev];
-                    res.splice(insertAfter + 1, 0, nouvelleSousZone);
-                    planifierSauvegarde(res, fondPlanId);
-                    return res;
-                  });
-                  setOutil(zone.type);
-                  setZoneSelectionnee(nouvelleSousZone.id);
+                  setPendingParentId(zone.id);
+                  // Passer en outil surface par défaut si on est en sélection
+                  if (outil === "selection" || outil === "calibrer" || outil === "regle") {
+                    setOutil("surface");
+                  }
+                  setPointsEnCours([]);
                 };
 
                 return (
@@ -2374,10 +2409,14 @@ ${lignesLegende.map((z) => `
                           )}
                           <button
                             type="button"
-                            className="mt-1 text-[10px] text-primaire-500 hover:text-primaire-700 hover:underline"
-                            onClick={ajouterSousZone}
+                            className={`mt-1 text-[10px] hover:underline font-medium transition ${
+                              pendingParentId === zone.id
+                                ? "text-primaire-700 underline"
+                                : "text-primaire-500 hover:text-primaire-700"
+                            }`}
+                            onClick={activerModeSousZone}
                           >
-                            + Sous-zone
+                            {pendingParentId === zone.id ? "▶ Dessinez la sous-zone…" : "+ Sous-zone"}
                           </button>
                         </div>
                         <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(zone.id); }}
@@ -2392,38 +2431,86 @@ ${lignesLegende.map((z) => `
                       const szSoustractions = zones.filter((d) => d.mode === "soustraction" && d.parentZoneId === sz.id);
                       const szDeductions = szSoustractions.reduce((s, d) => s + (d.type === "longueur" && d.hauteur ? d.valeur * d.hauteur : d.valeur), 0);
                       const szBrute = sz.type === "longueur" && sz.hauteur ? sz.valeur * sz.hauteur : sz.type === "comptage" ? sz.points.length : sz.valeur;
+                      const szNette = Math.max(0, szBrute - szDeductions);
                       return (
-                        <div key={sz.id}
-                          className={`ml-4 rounded-xl border p-2.5 cursor-pointer transition ${
-                            sz.id === zoneSelectionnee ? "border-primaire-200 bg-primaire-50" : "border-slate-200 bg-slate-50/60 hover:border-slate-300"
-                          }`}
-                          onClick={() => setZoneSelectionnee(sz.id === zoneSelectionnee ? null : sz.id)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-slate-400 font-mono shrink-0">{sz.numeroZone}</span>
-                            <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: sz.couleur }} />
-                            <input
-                              type="text" className="flex-1 min-w-0 text-xs border-none bg-transparent p-0 focus:ring-0 text-slate-700"
-                              value={sz.designation}
-                              onChange={(e) => modifierZone(sz.id, { designation: e.target.value })}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <span className="font-mono text-xs text-slate-500 shrink-0">
-                              {sz.type === "comptage" ? `${sz.points.length} u`
-                                : sz.type === "longueur" && sz.hauteur
-                                  ? `${(szBrute - szDeductions).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} m²`
-                                  : `${(szBrute - szDeductions).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${sz.unite}`}
-                            </span>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(sz.id); }}
-                              className="p-0.5 text-slate-200 hover:text-red-400 shrink-0">
-                              <X className="w-3 h-3" />
-                            </button>
+                        <div key={sz.id} className="ml-4 space-y-1">
+                          <div
+                            className={`rounded-xl border p-2.5 cursor-pointer transition ${
+                              sz.id === zoneSelectionnee ? "border-primaire-200 bg-primaire-50" : "border-slate-200 bg-slate-50/60 hover:border-slate-300"
+                            }`}
+                            onClick={() => setZoneSelectionnee(sz.id === zoneSelectionnee ? null : sz.id)}
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="mt-0.5 flex items-center gap-1 shrink-0">
+                                {sz.numeroZone && <span className="text-[10px] font-bold text-slate-400 font-mono">{sz.numeroZone}</span>}
+                                <div className="h-2.5 w-2.5 rounded-full" style={{ background: sz.couleur }} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <input
+                                  type="text" className="w-full text-xs border-none bg-transparent p-0 focus:ring-0 text-slate-700"
+                                  value={sz.designation}
+                                  onChange={(e) => modifierZone(sz.id, { designation: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <div className="mt-0.5 font-mono text-xs text-slate-500">
+                                  {sz.type === "comptage" ? `${sz.points.length} u`
+                                    : sz.type === "longueur" && sz.hauteur
+                                      ? `${szNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} m²`
+                                      : `${szNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${sz.unite}`}
+                                </div>
+                                {sz.type === "longueur" && (
+                                  <button type="button" className="mt-0.5 text-[10px] text-primaire-600 hover:underline"
+                                    onClick={(e) => { e.stopPropagation(); setModalHauteur({ zoneId: sz.id, hauteurActuelle: sz.hauteur ? String(sz.hauteur) : "" }); }}>
+                                    {sz.hauteur ? `× h = ${sz.hauteur} m → surface` : "Ajouter une hauteur → surface"}
+                                  </button>
+                                )}
+                              </div>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(sz.id); }}
+                                className="p-0.5 text-slate-200 hover:text-red-400 shrink-0 mt-0.5">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
-                          {sz.type === "longueur" && (
-                            <button type="button" className="mt-1 ml-7 text-[10px] text-primaire-600 hover:underline"
-                              onClick={(e) => { e.stopPropagation(); setModalHauteur({ zoneId: sz.id, hauteurActuelle: sz.hauteur ? String(sz.hauteur) : "" }); }}>
-                              {sz.hauteur ? `× h = ${sz.hauteur} m` : "Ajouter hauteur"}
-                            </button>
+                          {/* Déductions de cette sous-zone */}
+                          {szSoustractions.map((ded) => (
+                            <div key={ded.id}
+                              className={`ml-4 rounded-lg border p-2 cursor-pointer transition ${
+                                ded.id === zoneSelectionnee ? "border-red-200 bg-red-50" : "border-red-100 bg-red-50/40 hover:border-red-200"
+                              }`}
+                              onClick={() => setZoneSelectionnee(ded.id === zoneSelectionnee ? null : ded.id)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-red-400 text-xs font-bold shrink-0">−</span>
+                                <input type="text" className="flex-1 min-w-0 text-xs border-none bg-transparent p-0 focus:ring-0 text-red-700 font-medium"
+                                  value={ded.designation}
+                                  onChange={(e) => modifierZone(ded.id, { designation: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <span className="font-mono text-xs text-red-600 shrink-0">
+                                  {ded.type === "longueur" && ded.hauteur
+                                    ? `${(ded.valeur * ded.hauteur).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} m²`
+                                    : `${ded.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${ded.unite}`}
+                                </span>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(ded.id); }}
+                                  className="p-0.5 text-red-200 hover:text-red-500 shrink-0">
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                              {ded.type === "longueur" && (
+                                <button type="button" className="mt-0.5 ml-4 text-[10px] text-red-500 hover:underline"
+                                  onClick={(e) => { e.stopPropagation(); setModalHauteur({ zoneId: ded.id, hauteurActuelle: ded.hauteur ? String(ded.hauteur) : "" }); }}>
+                                  {ded.hauteur ? `× h = ${ded.hauteur} m → surface déduite` : "Ajouter une hauteur → surface déduite"}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          {szSoustractions.length > 0 && (
+                            <div className="ml-4 rounded-lg bg-green-50 border border-green-200 px-2.5 py-1 flex items-center justify-between">
+                              <span className="text-xs text-green-700 font-medium">Net sous-zone</span>
+                              <span className="font-mono text-xs font-bold text-green-800">
+                                {szNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} {sz.type === "longueur" && sz.hauteur ? "m²" : sz.unite}
+                              </span>
+                            </div>
                           )}
                         </div>
                       );
