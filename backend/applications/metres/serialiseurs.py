@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from .models import Metre, LigneMetre, FondPlan, ZoneMesure, ExtractionCAO
-from .services import analyser_detail_calcul
+from .services import analyser_detail_calcul, generer_miniature_fond_plan
 
 
 class LigneMetre_Serialiseur(serializers.ModelSerializer):
@@ -114,25 +114,31 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
     nb_zones = serializers.SerializerMethodField()
     intitule = serializers.CharField(required=False, default="", allow_blank=True)
     format_fichier = serializers.CharField(required=False, default="image")
-    # URL relative (/minio/...) — évite que DRF construise une URL absolue http://
-    # via request.build_absolute_uri() qui ignorait le proxy SSL/www.
     url_fichier = serializers.SerializerMethodField()
+    url_miniature = serializers.SerializerMethodField()
 
     class Meta:
         model = FondPlan
         fields = [
             "id", "metre", "intitule", "format_fichier", "format_libelle",
             "fichier", "url_fichier", "echelle", "reference_calibration",
-            "numero_page", "largeur_px", "hauteur_px", "miniature",
+            "numero_page", "largeur_px", "hauteur_px", "miniature", "url_miniature",
             "nb_zones", "date_creation",
         ]
-        read_only_fields = ["id", "date_creation", "nb_zones", "format_libelle", "url_fichier"]
+        read_only_fields = ["id", "date_creation", "nb_zones", "format_libelle", "url_fichier", "url_miniature"]
 
     def get_url_fichier(self, obj):
-        """Retourne l'URL relative MinIO sans passer par build_absolute_uri."""
         if obj.fichier:
             try:
                 return obj.fichier.url
+            except Exception:
+                return None
+        return None
+
+    def get_url_miniature(self, obj):
+        if obj.miniature:
+            try:
+                return obj.miniature.url
             except Exception:
                 return None
         return None
@@ -153,15 +159,20 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
     def create(self, validated_data):
         import os
         fichier = validated_data.get("fichier")
-        # Auto-détection du format depuis l'extension du fichier
         if fichier:
             validated_data["format_fichier"] = self._detecter_format(fichier.name)
-        # Génère l'intitulé depuis le nom du fichier si non fourni
         if not validated_data.get("intitule") and fichier:
             validated_data["intitule"] = os.path.splitext(fichier.name)[0][:200]
         if not validated_data.get("intitule"):
             validated_data["intitule"] = "Plan sans titre"
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+        # Générer automatiquement la miniature pour les fichiers CAO
+        if instance.format_fichier == "dxf":
+            try:
+                generer_miniature_fond_plan(instance)
+            except Exception:
+                pass
+        return instance
 
 
 class ZoneMesureSerialiseur(serializers.ModelSerializer):

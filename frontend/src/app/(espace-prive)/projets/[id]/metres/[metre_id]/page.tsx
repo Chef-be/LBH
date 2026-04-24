@@ -799,7 +799,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [reglePoints, setReglePoints] = useState<PointCanvas[]>([]);
   // Gestion multipage — tous les fonds de plan disponibles pour ce métré
   const [fondsPlans, setFondsPlans] = useState<Array<{
-    id: string; intitule: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+    id: string; intitule: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
   }>>([]);
   // Fond de plan secondaire (superposition semi-transparente)
   const [fondPlanSecondaire, setFondPlanSecondaire] = useState<HTMLImageElement | null>(null);
@@ -918,11 +918,11 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     const chargerExistant = async () => {
       try {
         const fonds = await api.get<Array<{
-          id: string; intitule: string; url_fichier?: string; format_fichier?: string; echelle?: unknown;
+          id: string; intitule: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: unknown;
         }>>(`/api/metres/${metreId}/fonds-plan/`);
         if (!fonds.length) return;
         // Normaliser echelle en number (DRF retourne les DecimalField en string)
-        const fondsNorm = fonds.map((f) => ({ ...f, echelle: f.echelle != null ? Number(f.echelle) : undefined }));
+        const fondsNorm = fonds.map((f) => ({ ...f, echelle: f.echelle != null ? Number(f.echelle) : undefined, url_miniature: f.url_miniature }));
         setFondsPlans(fondsNorm);
         // chargerFondActif est défini plus bas dans le composant — accessible via closure
         await chargerFondActif(fondsNorm[0]);
@@ -1693,16 +1693,30 @@ ${lignesLegende.map((z) => `
 
   // Chargement complet d'un fond de plan (image + zones) — appelé au changement de plan actif
   const chargerFondActif = async (fp: {
-    id: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+    id: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
   }) => {
-    // Annuler toute sauvegarde en attente pour l'ancien fond de plan
     if (timerSauvegarde.current) { clearTimeout(timerSauvegarde.current); timerSauvegarde.current = null; }
     pendingZonesRef.current = null;
     setFondPlanId(fp.id);
     if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
     const url = fp.url_fichier ?? "";
     const estVectoriel = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(url);
-    if (url && !estVectoriel) {
+    if (estVectoriel) {
+      // Afficher la miniature pré-rendue si disponible, sinon grille vide
+      const urlMiniature = fp.url_miniature ?? "";
+      if (urlMiniature) {
+        try {
+          const img = await chargerImageDepuisUrl(urlMiniature);
+          appliquerImageSurCanvas(img);
+        } catch {
+          setSucces("Fond de plan CAO — aperçu non disponible, dessinez les zones sur la grille.");
+          setTimeout(() => setSucces(null), 5000);
+        }
+      } else {
+        setSucces("Fond de plan CAO (DXF/DWG) — dessinez les zones directement sur la grille.");
+        setTimeout(() => setSucces(null), 5000);
+      }
+    } else if (url) {
       try {
         const estPDF = fp.format_fichier === "pdf";
         const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
@@ -1710,9 +1724,6 @@ ${lignesLegende.map((z) => `
       } catch {
         setErreurFond("Impossible de charger l'image du fond de plan.");
       }
-    } else if (estVectoriel) {
-      setSucces("Fond de plan CAO (DXF/DWG) — dessinez les zones directement sur la grille.");
-      setTimeout(() => setSucces(null), 5000);
     }
     // Charger les zones pour ce fond de plan
     const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
@@ -1771,9 +1782,10 @@ ${lignesLegende.map((z) => `
 
   // Chargement d'un fond secondaire (image uniquement, pas de zones)
   const chargerFondSecondaire = async (fp: {
-    id: string; url_fichier?: string; format_fichier?: string; echelle?: number;
+    id: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
   }) => {
-    const url = fp.url_fichier ?? "";
+    const estVectoriel = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(fp.url_fichier ?? "");
+    const url = estVectoriel ? (fp.url_miniature ?? fp.url_fichier ?? "") : (fp.url_fichier ?? "");
     if (!url) return;
     try {
       const estPDF = fp.format_fichier === "pdf";
@@ -1816,32 +1828,42 @@ ${lignesLegende.map((z) => `
       formData.append("fichier", fichier);
       formData.append("metre", metreId);
       const reponse = await requeteApiAvecProgression<{
-        id?: string; fichier?: string; url?: string; url_fichier?: string; format_fichier?: string;
+        id?: string; fichier?: string; url?: string; url_fichier?: string; url_miniature?: string; format_fichier?: string;
       }>(
         `/api/metres/${metreId}/fonds-plan/`,
         { method: "POST", corps: formData, onProgression: setProgressionFond }
       );
-      // url_fichier = URL relative /minio/... (sans build_absolute_uri)
       const url = reponse.url_fichier ?? reponse.fichier ?? reponse.url ?? "";
       if (!url) { setErreurFond("Aucune URL retournée par le serveur."); return; }
       const fpId = reponse.id ?? null;
       if (fpId) {
         setFondPlanId(fpId);
-        // Ajouter à la liste des fonds de plan
         const nouveauFp = {
           id: fpId, intitule: fichier.name,
-          url_fichier: url, format_fichier: reponse.format_fichier, echelle: undefined,
+          url_fichier: url, url_miniature: reponse.url_miniature, format_fichier: reponse.format_fichier, echelle: undefined,
         };
         setFondsPlans((prev) => prev.some((f) => f.id === fpId) ? prev : [...prev, nouveauFp]);
-        setZones([]); // Nouveau fond → pas encore de zones
+        setZones([]);
       }
 
       const estPDF = reponse.format_fichier === "pdf" || fichier.name.toLowerCase().endsWith(".pdf");
       const estVectoriel = reponse.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(fichier.name);
       if (estVectoriel) {
-        // DXF/DWG : pas de prévisualisation canvas côté client — les zones restent actives
-        setSucces("Fichier CAO importé. La quantification se fera via les zones de mesure dessinées.");
-        setTimeout(() => setSucces(null), 5000);
+        const urlMiniature = reponse.url_miniature ?? "";
+        if (urlMiniature) {
+          try {
+            const img = await chargerImageDepuisUrl(urlMiniature);
+            appliquerImageSurCanvas(img);
+            setSucces("Fichier CAO importé — aperçu affiché. Tracez vos zones de mesure par-dessus.");
+            setTimeout(() => setSucces(null), 6000);
+          } catch {
+            setSucces("Fichier CAO importé. Dessinez vos zones de mesure sur la grille.");
+            setTimeout(() => setSucces(null), 5000);
+          }
+        } else {
+          setSucces("Fichier CAO importé. La quantification se fera via les zones de mesure dessinées.");
+          setTimeout(() => setSucces(null), 5000);
+        }
       } else if (estPDF) {
         const img = await chargerPremierePage(url);
         appliquerImageSurCanvas(img);
