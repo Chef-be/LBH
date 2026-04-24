@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from .models import Metre, LigneMetre, FondPlan, ZoneMesure, ExtractionCAO
-from .services import analyser_detail_calcul, generer_miniature_fond_plan
+from .services import analyser_detail_calcul
 
 
 class LigneMetre_Serialiseur(serializers.ModelSerializer):
@@ -166,12 +166,10 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
         if not validated_data.get("intitule"):
             validated_data["intitule"] = "Plan sans titre"
         instance = super().create(validated_data)
-        # Générer automatiquement la miniature pour les fichiers CAO
+        # Lancer la génération de miniature en tâche asynchrone (évite le timeout)
         if instance.format_fichier == "dxf":
-            try:
-                generer_miniature_fond_plan(instance)
-            except Exception:
-                pass
+            from .taches import tache_generer_miniature_fond_plan
+            tache_generer_miniature_fond_plan.delay(str(instance.id))
         return instance
 
 

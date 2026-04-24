@@ -210,65 +210,49 @@ def calculer_zone_mesure(zone) -> dict:
     }
 
 
-def _est_dxf_texte(chemin: str) -> bool:
-    """Vérifie si le fichier est un DXF textuel (vs DWG binaire)."""
+def _est_dwg_binaire(chemin: str) -> bool:
+    """Retourne True si le fichier est un DWG binaire AutoCAD (magic bytes AC + version)."""
     try:
         with open(chemin, "rb") as f:
             entete = f.read(8)
-        # DWG binaire : commence par AC + code version (ex: AC1027)
-        if entete[:2] == b"AC" and entete[2:6].isdigit():
-            return False
-        # DXF textuel : commence généralement par "  0" (groupe code)
-        return True
+        return entete[:2] == b"AC" and entete[2:6].isdigit()
     except OSError:
         return False
 
 
-def _generer_placeholder_dwg_png(largeur_px: int = 2480, hauteur_px: int = 1754) -> bytes:
-    """Génère une image PNG informative pour les fichiers DWG binaires."""
-    import io
-    from PIL import Image, ImageDraw, ImageFont
-
-    img = Image.new("RGB", (largeur_px, hauteur_px), color=(248, 249, 250))
-    dessin = ImageDraw.Draw(img)
-
-    # Grille de fond
-    for x in range(0, largeur_px, 80):
-        dessin.line([(x, 0), (x, hauteur_px)], fill=(220, 225, 230), width=1)
-    for y in range(0, hauteur_px, 80):
-        dessin.line([(0, y), (largeur_px, y)], fill=(220, 225, 230), width=1)
-
-    # Message central
-    cx, cy = largeur_px // 2, hauteur_px // 2
-    try:
-        police = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
-        police_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
-    except OSError:
-        police = police_sm = ImageFont.load_default()
-
-    texte_titre = "Fichier DWG"
-    texte_info = "Format binaire AutoCAD - Aperçu non disponible"
-    texte_aide = "Utilisez l'outil de tracé pour mesurer sur ce fond de plan"
-
-    dessin.text((cx, cy - 60), texte_titre, fill=(59, 130, 246), font=police, anchor="mm")
-    dessin.text((cx, cy + 10), texte_info, fill=(100, 116, 139), font=police_sm, anchor="mm")
-    dessin.text((cx, cy + 60), texte_aide, fill=(148, 163, 184), font=police_sm, anchor="mm")
-
-    tampon = io.BytesIO()
-    img.save(tampon, format="PNG", optimize=True)
-    tampon.seek(0)
-    return tampon.read()
-
-
-def convertir_dxf_en_png(source, largeur_px: int = 2480, hauteur_px: int = 1754) -> bytes:
+def _convertir_dwg_en_dxf(chemin_dwg: str) -> str:
     """
-    Convertit un fichier DXF en image PNG via ezdxf + matplotlib.
-    Pour les DWG binaires, génère un placeholder informatif.
-    `source` peut être un chemin str ou un FieldFile Django (MinIO).
+    Convertit un fichier DWG binaire en DXF via dwg2dxf (LibreDWG).
+    Retourne le chemin du fichier DXF temporaire généré.
+    Lève ValueError si dwg2dxf est absent ou si la conversion échoue.
     """
-    import io
     import os
+    import shutil
+    import subprocess
     import tempfile
+
+    dwg2dxf = shutil.which("dwg2dxf")
+    if not dwg2dxf:
+        raise ValueError("dwg2dxf introuvable. LibreDWG n'est pas installé.")
+
+    tmpdir = tempfile.mkdtemp()
+    nom_base = os.path.splitext(os.path.basename(chemin_dwg))[0]
+    chemin_dxf = os.path.join(tmpdir, f"{nom_base}.dxf")
+
+    resultat = subprocess.run(
+        [dwg2dxf, "--as", "r2000", chemin_dwg, "-o", chemin_dxf],
+        capture_output=True, timeout=120,
+    )
+    stderr_txt = resultat.stderr.decode("utf-8", errors="replace") if resultat.stderr else ""
+    if resultat.returncode != 0 or not os.path.exists(chemin_dxf):
+        raise ValueError(f"Échec dwg2dxf (code {resultat.returncode}) : {stderr_txt[:400]}")
+
+    return chemin_dxf
+
+
+def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> bytes:
+    """Rend un fichier DXF en PNG via ezdxf + matplotlib."""
+    import io
     import ezdxf
     import ezdxf.recover
     from ezdxf.addons.drawing import RenderContext, Frontend
@@ -277,7 +261,41 @@ def convertir_dxf_en_png(source, largeur_px: int = 2480, hauteur_px: int = 1754)
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # Télécharger le fichier depuis le stockage si nécessaire
+    try:
+        doc = ezdxf.readfile(chemin_dxf)
+    except Exception:
+        doc, _ = ezdxf.recover.readfile(chemin_dxf)
+
+    msp = doc.modelspace()
+    fig = plt.figure(figsize=(largeur_px / 100, hauteur_px / 100), dpi=100)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_aspect("equal")
+    ax.axis("off")
+    fig.patch.set_facecolor("white")
+
+    ctx = RenderContext(doc)
+    out = MatplotlibBackend(ax)
+    Frontend(ctx, out).draw_layout(msp, finalize=True)
+
+    tampon = io.BytesIO()
+    fig.savefig(tampon, format="png", dpi=100, bbox_inches="tight",
+                facecolor="white", pad_inches=0.05)
+    plt.close(fig)
+    tampon.seek(0)
+    return tampon.read()
+
+
+def convertir_dxf_en_png(source, largeur_px: int = 2480, hauteur_px: int = 1754) -> bytes:
+    """
+    Convertit un fichier DXF ou DWG en image PNG.
+    - DXF texte : rendu direct via ezdxf + matplotlib.
+    - DWG binaire : conversion DWG→DXF via dwg2dxf (LibreDWG) puis rendu.
+    `source` peut être un chemin str ou un FieldFile Django (MinIO).
+    """
+    import os
+    import tempfile
+
+    # Télécharger depuis le stockage MinIO si nécessaire
     if isinstance(source, str):
         chemin = source
         supprimer_temp = False
@@ -290,47 +308,66 @@ def convertir_dxf_en_png(source, largeur_px: int = 2480, hauteur_px: int = 1754)
             chemin = tmp.name
         supprimer_temp = True
 
+    chemin_dxf_temp = None
     try:
-        # Les DWG binaires ne sont pas lisibles par ezdxf
-        if not _est_dxf_texte(chemin):
-            return _generer_placeholder_dwg_png(largeur_px, hauteur_px)
-
-        try:
-            doc = ezdxf.readfile(chemin)
-        except Exception:
-            doc, _ = ezdxf.recover.readfile(chemin)
-
-        msp = doc.modelspace()
-        fig = plt.figure(figsize=(largeur_px / 100, hauteur_px / 100), dpi=100)
-        ax = fig.add_axes([0, 0, 1, 1])
-        ax.set_aspect("equal")
-        ax.axis("off")
-        fig.patch.set_facecolor("white")
-
-        ctx = RenderContext(doc)
-        out = MatplotlibBackend(ax)
-        Frontend(ctx, out).draw_layout(msp, finalize=True)
-
-        tampon = io.BytesIO()
-        fig.savefig(tampon, format="png", dpi=100, bbox_inches="tight",
-                    facecolor="white", pad_inches=0.05)
-        plt.close(fig)
-        tampon.seek(0)
-        return tampon.read()
+        if _est_dwg_binaire(chemin):
+            # DWG binaire → conversion LibreDWG → DXF → PNG
+            chemin_dxf_temp = _convertir_dwg_en_dxf(chemin)
+            return _rendre_dxf_en_png(chemin_dxf_temp, largeur_px, hauteur_px)
+        else:
+            # DXF texte → rendu direct
+            return _rendre_dxf_en_png(chemin, largeur_px, hauteur_px)
     finally:
         if supprimer_temp:
             try:
                 os.unlink(chemin)
             except OSError:
                 pass
+        if chemin_dxf_temp:
+            import shutil
+            try:
+                shutil.rmtree(os.path.dirname(chemin_dxf_temp), ignore_errors=True)
+            except OSError:
+                pass
+
+
+def _generer_placeholder_dwg_png(largeur_px: int = 2480, hauteur_px: int = 1754) -> bytes:
+    """Génère une image PNG informative pour les DWG non lisibles."""
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (largeur_px, hauteur_px), color=(248, 249, 250))
+    dessin = ImageDraw.Draw(img)
+    for x in range(0, largeur_px, 80):
+        dessin.line([(x, 0), (x, hauteur_px)], fill=(220, 225, 230), width=1)
+    for y in range(0, hauteur_px, 80):
+        dessin.line([(0, y), (largeur_px, y)], fill=(220, 225, 230), width=1)
+    cx, cy = largeur_px // 2, hauteur_px // 2
+    try:
+        police = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+        police_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
+    except OSError:
+        police = police_sm = ImageFont.load_default()
+    dessin.text((cx, cy - 60), "Fichier DWG", fill=(59, 130, 246), font=police, anchor="mm")
+    dessin.text((cx, cy + 10), "Format non lisible — aperçu indisponible", fill=(100, 116, 139), font=police_sm, anchor="mm")
+    dessin.text((cx, cy + 60), "Convertissez en DXF pour obtenir un rendu", fill=(148, 163, 184), font=police_sm, anchor="mm")
+    tampon = io.BytesIO()
+    img.save(tampon, format="PNG", optimize=True)
+    tampon.seek(0)
+    return tampon.read()
 
 
 def generer_miniature_fond_plan(fond_plan) -> bool:
     """
     Génère et enregistre la miniature PNG d'un FondPlan DXF/DWG.
-    Retourne True si la miniature a été générée.
+    En cas d'échec de conversion, enregistre un placeholder informatif.
+    Retourne True si une miniature a été générée (rendu ou placeholder).
     """
+    import logging
+    import os
     from django.core.files.base import ContentFile
+
+    logger = logging.getLogger(__name__)
 
     if not (fond_plan.fichier and fond_plan.fichier.name):
         return False
@@ -341,9 +378,9 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     try:
         png_bytes = convertir_dxf_en_png(fond_plan.fichier)
     except Exception as exc:
-        raise ValueError(f"Impossible de convertir le fichier CAO en image : {exc}") from exc
+        logger.warning("Conversion CAO échouée pour %s : %s — génération placeholder.", fond_plan.fichier.name, exc)
+        png_bytes = _generer_placeholder_dwg_png()
 
-    import os
     nom_base = os.path.splitext(os.path.basename(fond_plan.fichier.name))[0]
     nom_miniature = f"{nom_base}_miniature.png"
     fond_plan.miniature.save(nom_miniature, ContentFile(png_bytes), save=True)

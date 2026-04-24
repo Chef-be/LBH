@@ -21,8 +21,10 @@ WORKDIR /app
 
 # Installation des dépendances système
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Compilation Python
+    # Compilation Python et C
     build-essential \
+    autoconf automake libtool gperf \
+    wget \
     # PostgreSQL
     libpq-dev \
     # Traitement de fichiers
@@ -42,9 +44,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libproj-dev \
     # Outils réseau
     curl \
-    # Nettoyage
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Compilation LibreDWG — conversion DWG binaire → DXF (outil dwg2dxf)
+# libredwg n'est pas dans Debian bookworm ; on compile depuis les sources GNU
+RUN wget -q https://ftp.gnu.org/gnu/libredwg/libredwg-0.12.5.tar.gz \
+    && tar -xf libredwg-0.12.5.tar.gz \
+    && cd libredwg-0.12.5 \
+    && ./configure --disable-bindings --disable-python \
+    && make -j"$(nproc)" \
+    && make install \
+    && ldconfig \
+    && cd .. \
+    && rm -rf libredwg-0.12.5 libredwg-0.12.5.tar.gz
 
 # Installation des dépendances Python
 COPY requirements.txt .

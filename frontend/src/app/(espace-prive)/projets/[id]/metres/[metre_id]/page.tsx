@@ -792,6 +792,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const espacePresse = useRef(false); // Space+drag pour panner sans changer d'outil
   const [mesureEnCours, setMesureEnCours] = useState<string | null>(null); // dimension affichée en bas
   const timerSauvegarde = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerPollMiniature = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [miniatureEnCours, setMiniatureEnCours] = useState(false);
   // Anti-concurrence : empêche deux saves simultanés ; stocke le dernier snapshot en attente
   const sauvegardeEnCoursRef = useRef(false);
   const pendingZonesRef = useRef<{ zones: ZoneVisualisee[]; fpId: string } | null>(null);
@@ -825,7 +827,10 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     ajusterTaille();
     const obs = new ResizeObserver(ajusterTaille);
     obs.observe(conteneur);
-    return () => obs.disconnect();
+    return () => {
+      obs.disconnect();
+      if (timerPollMiniature.current) clearTimeout(timerPollMiniature.current);
+    };
   }, []);
 
   // Sauvegarde atomique des zones en BDD — une seule instance à la fois
@@ -1819,6 +1824,38 @@ ${lignesLegende.map((z) => `
     }
   };
 
+  const demarrerPollMiniature = (fpId: string, tentative = 0) => {
+    const MAX_TENTATIVES = 30; // 30 × 4s = 2 minutes max
+    if (tentative >= MAX_TENTATIVES) {
+      setMiniatureEnCours(false);
+      setSucces("Le rendu du plan CAO est disponible — rechargez si nécessaire.");
+      setTimeout(() => setSucces(null), 5000);
+      return;
+    }
+    timerPollMiniature.current = setTimeout(async () => {
+      try {
+        const fp = await api.get<{ id: string; url_miniature?: string; format_fichier?: string }>(`/api/metres/${metreId}/fonds-plan/${fpId}/`);
+        if (fp.url_miniature) {
+          setMiniatureEnCours(false);
+          // Mettre à jour la liste des fonds de plan avec l'URL miniature
+          setFondsPlans((prev) => prev.map((f) => f.id === fpId ? { ...f, url_miniature: fp.url_miniature } : f));
+          try {
+            const img = await chargerImageDepuisUrl(fp.url_miniature);
+            appliquerImageSurCanvas(img);
+            setSucces("Rendu du plan CAO disponible — tracez vos zones de mesure par-dessus.");
+            setTimeout(() => setSucces(null), 6000);
+          } catch {
+            // miniature non chargeable, pas grave
+          }
+        } else {
+          demarrerPollMiniature(fpId, tentative + 1);
+        }
+      } catch {
+        demarrerPollMiniature(fpId, tentative + 1);
+      }
+    }, 4000);
+  };
+
   const uploaderFond = async (fichier: File) => {
     setChargementFond(true);
     setErreurFond(null);
@@ -1851,6 +1888,7 @@ ${lignesLegende.map((z) => `
       if (estVectoriel) {
         const urlMiniature = reponse.url_miniature ?? "";
         if (urlMiniature) {
+          // Miniature déjà disponible (cas rare si très rapide)
           try {
             const img = await chargerImageDepuisUrl(urlMiniature);
             appliquerImageSurCanvas(img);
@@ -1860,9 +1898,11 @@ ${lignesLegende.map((z) => `
             setSucces("Fichier CAO importé. Dessinez vos zones de mesure sur la grille.");
             setTimeout(() => setSucces(null), 5000);
           }
-        } else {
-          setSucces("Fichier CAO importé. La quantification se fera via les zones de mesure dessinées.");
-          setTimeout(() => setSucces(null), 5000);
+        } else if (fpId) {
+          // La miniature est générée en arrière-plan — polling
+          setMiniatureEnCours(true);
+          setSucces("Fichier CAO importé — rendu en cours de génération…");
+          demarrerPollMiniature(fpId);
         }
       } else if (estPDF) {
         const img = await chargerPremierePage(url);
@@ -2250,7 +2290,17 @@ ${lignesLegende.map((z) => `
         </div>
 
         {/* Canvas */}
-        <div ref={conteneurRef} className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+        <div ref={conteneurRef} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+          {/* Bandeau génération miniature CAO */}
+          {miniatureEnCours && (
+            <div className="absolute inset-x-0 top-0 z-20 flex items-center gap-2 bg-amber-50 px-4 py-2 text-sm text-amber-800 border-b border-amber-200">
+              <svg className="h-4 w-4 animate-spin text-amber-500" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+              <span>Génération du rendu du plan CAO en cours — l&apos;aperçu s&apos;affichera automatiquement…</span>
+            </div>
+          )}
           {/* Bandeau mode sous-zone */}
           {pendingParentId && (() => {
             const parent = zones.find((z) => z.id === pendingParentId);
