@@ -250,6 +250,23 @@ def _convertir_dwg_en_dxf(chemin_dwg: str) -> str:
     return chemin_dxf
 
 
+def _extents_valides(doc) -> tuple | None:
+    """Retourne (xmin, ymin, xmax, ymax) depuis $EXTMIN/$EXTMAX si valides, sinon None."""
+    import math
+    try:
+        extmin = doc.header.get("$EXTMIN")
+        extmax = doc.header.get("$EXTMAX")
+        if not (extmin and extmax):
+            return None
+        xmin, ymin = float(extmin[0]), float(extmin[1])
+        xmax, ymax = float(extmax[0]), float(extmax[1])
+        if all(math.isfinite(v) for v in (xmin, ymin, xmax, ymax)) and xmax > xmin and ymax > ymin:
+            return xmin, ymin, xmax, ymax
+    except Exception:
+        pass
+    return None
+
+
 def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> bytes:
     """Rend un fichier DXF en PNG via ezdxf + matplotlib."""
     import io
@@ -267,19 +284,48 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         doc, _ = ezdxf.recover.readfile(chemin_dxf)
 
     msp = doc.modelspace()
-    fig = plt.figure(figsize=(largeur_px / 100, hauteur_px / 100), dpi=100)
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.set_aspect("equal")
+
+    # Fond sombre : convention AutoCAD — color 7 (BLANC) visible sur fond noir
+    BG = "#1a1a1a"
+
+    # Extents 2D valides du document
+    ext = _extents_valides(doc)
+
+    # Dimensionner la figure selon le ratio réel du dessin
+    if ext:
+        xmin, ymin, xmax, ymax = ext
+        marge = max(xmax - xmin, ymax - ymin) * 0.03
+        ratio = (xmax - xmin) / (ymax - ymin)
+        if ratio >= 1:
+            w = largeur_px / 100
+            h = max(w / ratio, 2)
+        else:
+            h = hauteur_px / 100
+            w = max(h * ratio, 2)
+    else:
+        w, h = largeur_px / 100, hauteur_px / 100
+        marge = None
+
+    fig, ax = plt.subplots(figsize=(w, h), dpi=100)
+    ax.set_facecolor(BG)
+    fig.patch.set_facecolor(BG)
     ax.axis("off")
-    fig.patch.set_facecolor("white")
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
     ctx = RenderContext(doc)
+    ctx.current_layout_properties.set_colors(BG)
     out = MatplotlibBackend(ax)
-    Frontend(ctx, out).draw_layout(msp, finalize=True)
+    # finalize=False : évite que ezdxf appelle set_aspect('equal') + autoscale
+    # qui redimensionnent la figure et rendent le contenu invisible
+    Frontend(ctx, out).draw_layout(msp, finalize=False)
+
+    # Zoomer sur les extents du document (les limites auto d'ezdxf sont trop larges)
+    if ext:
+        ax.set_xlim(xmin - marge, xmax + marge)
+        ax.set_ylim(ymin - marge, ymax + marge)
 
     tampon = io.BytesIO()
-    fig.savefig(tampon, format="png", dpi=100, bbox_inches="tight",
-                facecolor="white", pad_inches=0.05)
+    fig.savefig(tampon, format="png", dpi=100, facecolor=BG, bbox_inches=None)
     plt.close(fig)
     tampon.seek(0)
     return tampon.read()
