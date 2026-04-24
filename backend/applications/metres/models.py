@@ -183,10 +183,15 @@ class FondPlan(models.Model):
     largeur_px = models.PositiveIntegerField(null=True, blank=True)
     hauteur_px = models.PositiveIntegerField(null=True, blank=True)
 
-    # Image pré-rendue (pour affichage rapide dans le canvas)
+    # Aperçu basse résolution (~800px) — chargé en premier pour affichage immédiat
+    apercu = models.FileField(
+        upload_to="metres/apercus/%Y/%m/",
+        null=True, blank=True, verbose_name="Aperçu rapide (PNG 800px)",
+    )
+    # Image haute résolution (~4960px) — chargée en arrière-plan pour le zoom
     miniature = models.FileField(
         upload_to="metres/miniatures/%Y/%m/",
-        null=True, blank=True, verbose_name="Miniature (PNG)",
+        null=True, blank=True, verbose_name="Miniature HD (PNG)",
     )
 
     date_creation = models.DateTimeField(auto_now_add=True)

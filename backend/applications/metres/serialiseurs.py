@@ -115,6 +115,7 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
     intitule = serializers.CharField(required=False, default="", allow_blank=True)
     format_fichier = serializers.CharField(required=False, default="image")
     url_fichier = serializers.SerializerMethodField()
+    url_apercu = serializers.SerializerMethodField()
     url_miniature = serializers.SerializerMethodField()
 
     class Meta:
@@ -122,15 +123,27 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
         fields = [
             "id", "metre", "intitule", "format_fichier", "format_libelle",
             "fichier", "url_fichier", "echelle", "reference_calibration",
-            "numero_page", "largeur_px", "hauteur_px", "miniature", "url_miniature",
+            "numero_page", "largeur_px", "hauteur_px",
+            "apercu", "url_apercu", "miniature", "url_miniature",
             "nb_zones", "date_creation",
         ]
-        read_only_fields = ["id", "date_creation", "nb_zones", "format_libelle", "url_fichier", "url_miniature"]
+        read_only_fields = [
+            "id", "date_creation", "nb_zones", "format_libelle",
+            "url_fichier", "url_apercu", "url_miniature",
+        ]
 
     def get_url_fichier(self, obj):
         if obj.fichier:
             try:
                 return obj.fichier.url
+            except Exception:
+                return None
+        return None
+
+    def get_url_apercu(self, obj):
+        if obj.apercu:
+            try:
+                return obj.apercu.url
             except Exception:
                 return None
         return None

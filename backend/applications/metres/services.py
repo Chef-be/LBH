@@ -284,15 +284,9 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         doc, _ = ezdxf.recover.readfile(chemin_dxf)
 
     msp = doc.modelspace()
-
-    # Fond sombre : convention AutoCAD — color 7 (BLANC) visible sur fond noir
     BG = "#1a1a1a"
-
-    # Extents 2D valides du document
     ext = _extents_valides(doc)
 
-    # Dimensionner la figure selon le ratio exact de la zone affichée (marges incluses)
-    # afin que l'échelle X/Y soit identique sans appeler set_aspect (qui écrase nos limites)
     if ext:
         xmin, ymin, xmax, ymax = ext
         dx = xmax - xmin
@@ -315,21 +309,19 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     ax.axis("off")
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-    ctx = RenderContext(doc)
-    ctx.current_layout_properties.set_colors(BG)
-    out = MatplotlibBackend(ax)
-    # finalize=False : évite que ezdxf appelle set_aspect + autoscale
-    # qui élargissent la vue aux blocs en position (0,0) et rendent le plan invisible
-    Frontend(ctx, out).draw_layout(msp, finalize=False)
-
-    # Échelle X/Y identique : indispensable pour le rendu correct des hachures
-    # adjustable='datalim' élargit légèrement les limites sans réduire la zone visible
-    ax.set_aspect("equal", adjustable="datalim")
-
-    # Zoomer sur les extents du document après avoir imposé l'aspect égal
+    # Fixer limites et aspect AVANT le rendu : les clip paths des hachures
+    # sont établis dans le système de coordonnées final, évitant tout débordement
+    ax.set_aspect("equal", adjustable="box")
     if ext:
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)
+
+    ctx = RenderContext(doc)
+    ctx.current_layout_properties.set_colors(BG)
+    out = MatplotlibBackend(ax)
+    # finalize=False : évite que ezdxf rappelle set_aspect + autoscale
+    # qui élargissent la vue aux blocs en (0,0) et rendent le plan invisible
+    Frontend(ctx, out).draw_layout(msp, finalize=False)
 
     tampon = io.BytesIO()
     fig.savefig(tampon, format="png", dpi=100, facecolor=BG, bbox_inches=None)
@@ -412,9 +404,9 @@ def _generer_placeholder_dwg_png(largeur_px: int = 2480, hauteur_px: int = 1754)
 
 def generer_miniature_fond_plan(fond_plan) -> bool:
     """
-    Génère et enregistre la miniature PNG d'un FondPlan DXF/DWG.
-    En cas d'échec de conversion, enregistre un placeholder informatif.
-    Retourne True si une miniature a été générée (rendu ou placeholder).
+    Génère et enregistre l'aperçu (800px) et la miniature HD (4960px) d'un FondPlan DXF/DWG.
+    L'aperçu est produit en premier pour un affichage immédiat dans le canvas.
+    Retourne True si au moins un rendu a été produit.
     """
     import logging
     import os
@@ -428,15 +420,27 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     if not (nom.endswith(".dxf") or nom.endswith(".dwg")):
         return False
 
-    try:
-        png_bytes = convertir_dxf_en_png(fond_plan.fichier)
-    except Exception as exc:
-        logger.warning("Conversion CAO échouée pour %s : %s — génération placeholder.", fond_plan.fichier.name, exc)
-        png_bytes = _generer_placeholder_dwg_png()
-
     nom_base = os.path.splitext(os.path.basename(fond_plan.fichier.name))[0]
-    nom_miniature = f"{nom_base}_miniature.png"
-    fond_plan.miniature.save(nom_miniature, ContentFile(png_bytes), save=True)
+
+    # 1. Aperçu rapide basse résolution — disponible rapidement pour le canvas
+    try:
+        apercu_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=800, hauteur_px=566)
+    except Exception as exc:
+        logger.warning("Aperçu CAO échoué pour %s : %s", fond_plan.fichier.name, exc)
+        apercu_bytes = _generer_placeholder_dwg_png()
+
+    fond_plan.apercu.save(f"{nom_base}_apercu.png", ContentFile(apercu_bytes), save=True)
+    logger.info("Aperçu CAO généré pour %s", fond_plan.fichier.name)
+
+    # 2. Miniature haute résolution — chargée en arrière-plan pour le zoom
+    try:
+        hd_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=4960, hauteur_px=3508)
+    except Exception as exc:
+        logger.warning("Miniature HD CAO échouée pour %s : %s — copie de l'aperçu.", fond_plan.fichier.name, exc)
+        hd_bytes = apercu_bytes
+
+    fond_plan.miniature.save(f"{nom_base}_miniature.png", ContentFile(hd_bytes), save=True)
+    logger.info("Miniature HD CAO générée pour %s", fond_plan.fichier.name)
     return True
 
 

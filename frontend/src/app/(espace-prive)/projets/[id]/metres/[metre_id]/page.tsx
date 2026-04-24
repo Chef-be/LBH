@@ -802,8 +802,10 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [reglePoints, setReglePoints] = useState<PointCanvas[]>([]);
   // Gestion multipage — tous les fonds de plan disponibles pour ce métré
   const [fondsPlans, setFondsPlans] = useState<Array<{
-    id: string; intitule: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
+    id: string; intitule: string; url_fichier?: string; url_apercu?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
   }>>([]);
+  // true tant que la miniature HD n'est pas encore chargée (aperçu affiché en attendant)
+  const [fondPlanEstApercu, setFondPlanEstApercu] = useState(false);
   // Fond de plan secondaire (superposition semi-transparente)
   const [fondPlanSecondaire, setFondPlanSecondaire] = useState<HTMLImageElement | null>(null);
   const [fondPlanSecondaireId, setFondPlanSecondaireId] = useState<string | null>(null);
@@ -924,11 +926,13 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
     const chargerExistant = async () => {
       try {
         const fonds = await api.get<Array<{
-          id: string; intitule: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: unknown;
+          id: string; intitule: string; url_fichier?: string; url_apercu?: string; url_miniature?: string; format_fichier?: string; echelle?: unknown;
         }>>(`/api/metres/${metreId}/fonds-plan/`);
         if (!fonds.length) return;
-        // Normaliser echelle en number (DRF retourne les DecimalField en string)
-        const fondsNorm = fonds.map((f) => ({ ...f, echelle: f.echelle != null ? Number(f.echelle) : undefined, url_miniature: f.url_miniature }));
+        const fondsNorm = fonds.map((f) => ({
+          ...f,
+          echelle: f.echelle != null ? Number(f.echelle) : undefined,
+        }));
         setFondsPlans(fondsNorm);
         // chargerFondActif est défini plus bas dans le composant — accessible via closure
         await chargerFondActif(fondsNorm[0]);
@@ -1699,7 +1703,7 @@ ${lignesLegende.map((z) => `
 
   // Chargement complet d'un fond de plan (image + zones) — appelé au changement de plan actif
   const chargerFondActif = async (fp: {
-    id: string; url_fichier?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
+    id: string; url_fichier?: string; url_apercu?: string; url_miniature?: string; format_fichier?: string; echelle?: number;
   }) => {
     if (timerSauvegarde.current) { clearTimeout(timerSauvegarde.current); timerSauvegarde.current = null; }
     pendingZonesRef.current = null;
@@ -1708,12 +1712,22 @@ ${lignesLegende.map((z) => `
     const url = fp.url_fichier ?? "";
     const estVectoriel = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(url);
     if (estVectoriel) {
-      const urlMiniature = fp.url_miniature ?? "";
-      if (urlMiniature) {
+      const urlApercu = fp.url_apercu ?? "";
+      const urlHD = fp.url_miniature ?? "";
+      const urlPremier = urlApercu || urlHD;
+      if (urlPremier) {
         try {
           setChargementImage(true);
-          const img = await chargerImageDepuisUrl(urlMiniature);
+          const img = await chargerImageDepuisUrl(urlPremier);
           appliquerImageSurCanvas(img);
+          setFondPlanEstApercu(!!urlApercu && !!urlHD && urlApercu !== urlHD);
+          // Charger la HD en arrière-plan si l'aperçu était affiché
+          if (urlApercu && urlHD && urlApercu !== urlHD) {
+            chargerImageDepuisUrl(urlHD).then((imgHD) => {
+              setFondPlan(imgHD);
+              setFondPlanEstApercu(false);
+            }).catch(() => { setFondPlanEstApercu(false); });
+          }
         } catch {
           setSucces("Fond de plan CAO — aperçu non disponible, dessinez les zones sur la grille.");
           setTimeout(() => setSucces(null), 5000);
@@ -1840,19 +1854,31 @@ ${lignesLegende.map((z) => `
     }
     timerPollMiniature.current = setTimeout(async () => {
       try {
-        const fp = await api.get<{ id: string; url_miniature?: string; format_fichier?: string }>(`/api/metres/${metreId}/fonds-plan/${fpId}/`);
+        const fp = await api.get<{
+          id: string; url_apercu?: string; url_miniature?: string; format_fichier?: string;
+        }>(`/api/metres/${metreId}/fonds-plan/${fpId}/`);
+
+        // Phase 1 : aperçu disponible → afficher immédiatement, continuer le poll pour la HD
+        if (fp.url_apercu && !fondPlan) {
+          setFondsPlans((prev) => prev.map((f) => f.id === fpId ? { ...f, url_apercu: fp.url_apercu } : f));
+          try {
+            const img = await chargerImageDepuisUrl(fp.url_apercu);
+            appliquerImageSurCanvas(img);
+            setFondPlanEstApercu(true);
+          } catch { /* silencieux */ }
+        }
+
+        // Phase 2 : HD disponible → swap et arrêt du poll
         if (fp.url_miniature) {
           setMiniatureEnCours(false);
-          // Mettre à jour la liste des fonds de plan avec l'URL miniature
           setFondsPlans((prev) => prev.map((f) => f.id === fpId ? { ...f, url_miniature: fp.url_miniature } : f));
           try {
-            const img = await chargerImageDepuisUrl(fp.url_miniature);
-            appliquerImageSurCanvas(img);
+            const imgHD = await chargerImageDepuisUrl(fp.url_miniature);
+            setFondPlan(imgHD);
+            setFondPlanEstApercu(false);
             setSucces("Rendu du plan CAO disponible — tracez vos zones de mesure par-dessus.");
             setTimeout(() => setSucces(null), 6000);
-          } catch {
-            // miniature non chargeable, pas grave
-          }
+          } catch { /* silencieux */ }
         } else {
           demarrerPollMiniature(fpId, tentative + 1);
         }
@@ -1871,7 +1897,7 @@ ${lignesLegende.map((z) => `
       formData.append("fichier", fichier);
       formData.append("metre", metreId);
       const reponse = await requeteApiAvecProgression<{
-        id?: string; fichier?: string; url?: string; url_fichier?: string; url_miniature?: string; format_fichier?: string;
+        id?: string; fichier?: string; url?: string; url_fichier?: string; url_apercu?: string; url_miniature?: string; format_fichier?: string;
       }>(
         `/api/metres/${metreId}/fonds-plan/`,
         { method: "POST", corps: formData, onProgression: setProgressionFond }
@@ -1883,7 +1909,8 @@ ${lignesLegende.map((z) => `
         setFondPlanId(fpId);
         const nouveauFp = {
           id: fpId, intitule: fichier.name,
-          url_fichier: url, url_miniature: reponse.url_miniature, format_fichier: reponse.format_fichier, echelle: undefined,
+          url_fichier: url, url_apercu: reponse.url_apercu, url_miniature: reponse.url_miniature,
+          format_fichier: reponse.format_fichier, echelle: undefined,
         };
         setFondsPlans((prev) => prev.some((f) => f.id === fpId) ? prev : [...prev, nouveauFp]);
         setZones([]);
@@ -1892,20 +1919,30 @@ ${lignesLegende.map((z) => `
       const estPDF = reponse.format_fichier === "pdf" || fichier.name.toLowerCase().endsWith(".pdf");
       const estVectoriel = reponse.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(fichier.name);
       if (estVectoriel) {
-        const urlMiniature = reponse.url_miniature ?? "";
-        if (urlMiniature) {
-          // Miniature déjà disponible (cas rare si très rapide)
+        const urlApercu = reponse.url_apercu ?? "";
+        const urlHD = reponse.url_miniature ?? "";
+        const urlPremier = urlApercu || urlHD;
+        if (urlPremier) {
+          // Aperçu ou HD déjà disponible → afficher immédiatement
           try {
-            const img = await chargerImageDepuisUrl(urlMiniature);
+            const img = await chargerImageDepuisUrl(urlPremier);
             appliquerImageSurCanvas(img);
+            setFondPlanEstApercu(!!urlApercu && !!urlHD && urlApercu !== urlHD);
             setSucces("Fichier CAO importé — aperçu affiché. Tracez vos zones de mesure par-dessus.");
             setTimeout(() => setSucces(null), 6000);
+            // Charger la HD en arrière-plan si on a que l'aperçu
+            if (urlApercu && urlHD && urlApercu !== urlHD) {
+              chargerImageDepuisUrl(urlHD).then((imgHD) => {
+                setFondPlan(imgHD);
+                setFondPlanEstApercu(false);
+              }).catch(() => { setFondPlanEstApercu(false); });
+            }
           } catch {
             setSucces("Fichier CAO importé. Dessinez vos zones de mesure sur la grille.");
             setTimeout(() => setSucces(null), 5000);
           }
         } else if (fpId) {
-          // La miniature est générée en arrière-plan — polling
+          // Rien de disponible encore — polling
           setMiniatureEnCours(true);
           setSucces("Fichier CAO importé — rendu en cours de génération…");
           demarrerPollMiniature(fpId);
@@ -2315,6 +2352,16 @@ ${lignesLegende.map((z) => `
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
               </svg>
               <span className="text-sm font-medium text-white">Chargement du fond de plan…</span>
+            </div>
+          )}
+          {/* Badge discret HD en cours de chargement */}
+          {fondPlanEstApercu && !chargementImage && (
+            <div className="absolute bottom-10 right-3 z-10 flex items-center gap-1.5 rounded-full bg-slate-800/70 px-2.5 py-1 text-xs text-slate-300">
+              <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+              HD en cours…
             </div>
           )}
           {/* Bandeau mode sous-zone */}
