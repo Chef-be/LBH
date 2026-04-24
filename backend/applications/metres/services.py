@@ -322,7 +322,11 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     # qui élargissent la vue aux blocs en position (0,0) et rendent le plan invisible
     Frontend(ctx, out).draw_layout(msp, finalize=False)
 
-    # Zoomer sur les extents du document (marges incluses dans le ratio figure → échelles égales)
+    # Échelle X/Y identique : indispensable pour le rendu correct des hachures
+    # adjustable='datalim' élargit légèrement les limites sans réduire la zone visible
+    ax.set_aspect("equal", adjustable="datalim")
+
+    # Zoomer sur les extents du document après avoir imposé l'aspect égal
     if ext:
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)

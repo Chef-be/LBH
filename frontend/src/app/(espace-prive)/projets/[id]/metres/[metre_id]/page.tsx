@@ -794,6 +794,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const timerSauvegarde = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerPollMiniature = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [miniatureEnCours, setMiniatureEnCours] = useState(false);
+  const [chargementImage, setChargementImage] = useState(false);
   // Anti-concurrence : empêche deux saves simultanés ; stocke le dernier snapshot en attente
   const sauvegardeEnCoursRef = useRef(false);
   const pendingZonesRef = useRef<{ zones: ZoneVisualisee[]; fpId: string } | null>(null);
@@ -1707,15 +1708,17 @@ ${lignesLegende.map((z) => `
     const url = fp.url_fichier ?? "";
     const estVectoriel = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(url);
     if (estVectoriel) {
-      // Afficher la miniature pré-rendue si disponible, sinon grille vide
       const urlMiniature = fp.url_miniature ?? "";
       if (urlMiniature) {
         try {
+          setChargementImage(true);
           const img = await chargerImageDepuisUrl(urlMiniature);
           appliquerImageSurCanvas(img);
         } catch {
           setSucces("Fond de plan CAO — aperçu non disponible, dessinez les zones sur la grille.");
           setTimeout(() => setSucces(null), 5000);
+        } finally {
+          setChargementImage(false);
         }
       } else {
         setSucces("Fond de plan CAO (DXF/DWG) — dessinez les zones directement sur la grille.");
@@ -1723,11 +1726,14 @@ ${lignesLegende.map((z) => `
       }
     } else if (url) {
       try {
+        setChargementImage(true);
         const estPDF = fp.format_fichier === "pdf";
         const img = estPDF ? await chargerPremierePage(url) : await chargerImageDepuisUrl(url);
         appliquerImageSurCanvas(img);
       } catch {
         setErreurFond("Impossible de charger l'image du fond de plan.");
+      } finally {
+        setChargementImage(false);
       }
     }
     // Charger les zones pour ce fond de plan
@@ -2299,6 +2305,16 @@ ${lignesLegende.map((z) => `
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
               </svg>
               <span>Génération du rendu du plan CAO en cours — l&apos;aperçu s&apos;affichera automatiquement…</span>
+            </div>
+          )}
+          {/* Overlay chargement image fond de plan */}
+          {chargementImage && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-900/60 rounded-2xl">
+              <svg className="h-10 w-10 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+              <span className="text-sm font-medium text-white">Chargement du fond de plan…</span>
             </div>
           )}
           {/* Bandeau mode sous-zone */}
