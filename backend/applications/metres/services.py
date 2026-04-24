@@ -291,12 +291,15 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     # Extents 2D valides du document
     ext = _extents_valides(doc)
 
-    # Dimensionner la figure selon le ratio réel du dessin
+    # Dimensionner la figure selon le ratio exact de la zone affichée (marges incluses)
+    # afin que l'échelle X/Y soit identique sans appeler set_aspect (qui écrase nos limites)
     if ext:
         xmin, ymin, xmax, ymax = ext
-        marge = max(xmax - xmin, ymax - ymin) * 0.03
-        ratio = (xmax - xmin) / (ymax - ymin)
-        if ratio >= 1:
+        dx = xmax - xmin
+        dy = ymax - ymin
+        marge = max(dx, dy) * 0.03
+        ratio = (dx + 2 * marge) / (dy + 2 * marge)
+        if ratio >= largeur_px / hauteur_px:
             w = largeur_px / 100
             h = max(w / ratio, 2)
         else:
@@ -315,11 +318,11 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     ctx = RenderContext(doc)
     ctx.current_layout_properties.set_colors(BG)
     out = MatplotlibBackend(ax)
-    # finalize=False : évite que ezdxf appelle set_aspect('equal') + autoscale
-    # qui redimensionnent la figure et rendent le contenu invisible
+    # finalize=False : évite que ezdxf appelle set_aspect + autoscale
+    # qui élargissent la vue aux blocs en position (0,0) et rendent le plan invisible
     Frontend(ctx, out).draw_layout(msp, finalize=False)
 
-    # Zoomer sur les extents du document (les limites auto d'ezdxf sont trop larges)
+    # Zoomer sur les extents du document (marges incluses dans le ratio figure → échelles égales)
     if ext:
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)
