@@ -718,7 +718,9 @@ interface ZoneVisualisee {
   dbId?: string;          // ID en base (ZoneMesure.id)
   type: "surface" | "longueur" | "comptage";
   mode: "ajout" | "soustraction";
-  parentZoneId?: string;  // Pour les soustractions : ID de la zone parent (obligatoire)
+  parentZoneId?: string;  // Pour les soustractions : ID de la zone parent
+  sousZoneDeId?: string;  // Pour la hiérarchie : ID de la zone parente (zone 1.1 sous zone 1)
+  numeroZone?: string;    // Numéro d'affichage (ex: "1", "1.1", "1.2")
   designation: string;
   unite: string;
   points: PointCanvas[];
@@ -855,6 +857,10 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
             points_px: d.points.map((p) => [p.x, p.y]),
             surface_m2: d.valeur,
           }));
+        // Résoudre le dbId de la zone parente (hiérarchie)
+        const parentDbId = zone.sousZoneDeId
+          ? (zonesAEnregistrer.find((z) => z.id === zone.sousZoneDeId)?.dbId ?? null)
+          : null;
         const payload = {
           designation: zone.designation,
           type_mesure: zone.type,
@@ -863,6 +869,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           unite: zone.unite,
           couleur: zone.couleur,
           ordre: zonesAEnregistrer.filter((z) => z.mode === "ajout").indexOf(zone),
+          zone_parente: parentDbId,
+          numero: zone.numeroZone ?? "",
         };
         if (zone.dbId) {
           await api.patch(`/api/metres/${metreId}/fonds-plan/${fpId}/zones/${zone.dbId}/`, payload);
@@ -1290,8 +1298,16 @@ ${lignesLegende.map((z) => `
       ctx.arc(cx, cy, 1.5 / zoom, 0, Math.PI * 2);
       ctx.fill();
 
+      const etiquetteTemporaireDejaDessinee =
+        pointsEnCours.length > 0 && (
+          outil === "longueur"
+          || outil === "soustraction_longueur"
+          || outil === "surface"
+          || outil === "soustraction_surface"
+        );
+
       // Coordonnées en temps réel (distance depuis dernier point posé)
-      if (echellePixelParMetre > 0 && (outil === "regle" ? reglePoints.length === 1 : pointsEnCours.length > 0)) {
+      if (!etiquetteTemporaireDejaDessinee && echellePixelParMetre > 0 && (outil === "regle" ? reglePoints.length === 1 : pointsEnCours.length > 0)) {
         const ptRef = outil === "regle" ? reglePoints[reglePoints.length - 1] : pointsEnCours[pointsEnCours.length - 1];
         if (ptRef) {
           const dxPx = cx - ptRef.x;
@@ -1668,21 +1684,29 @@ ${lignesLegende.map((z) => `
     try {
       const zonesExistantes = await api.get<Array<{
         id: string; designation: string; type_mesure: string;
-        points_px: Array<[number, number]>; deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
+        points_px: Array<[number, number]>;
+        deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
         unite: string; couleur: string; ordre: number;
+        zone_parente?: string | null;
+        numero?: string;
       }>>(`/api/metres/${metreId}/fonds-plan/${fp.id}/zones/`);
       if (!zonesExistantes.length) { setZones([]); return; }
       const zonesChargees: ZoneVisualisee[] = [];
+      // Map dbId -> localId pour résoudre les relations parente
+      const dbIdToLocalId: Record<string, string> = {};
       for (const z of zonesExistantes) {
         const type = (z.type_mesure === "surface" || z.type_mesure === "longueur" || z.type_mesure === "comptage") ? z.type_mesure : "surface";
         const pts = z.points_px.map(([x, y]) => ({ x, y }));
         const valeur = type === "surface"
           ? calculerSurface(pts) / (echelle * echelle)
           : type === "longueur" ? calculerLongueur(pts) / echelle : z.points_px.length;
+        const localId = `zone-chargee-${z.id}`;
+        dbIdToLocalId[z.id] = localId;
         zonesChargees.push({
-          id: `zone-chargee-${z.id}`, dbId: z.id, type, mode: "ajout",
+          id: localId, dbId: z.id, type, mode: "ajout",
           designation: z.designation, unite: z.unite, points: pts, valeur,
           couleur: z.couleur, deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
+          numeroZone: z.numero || undefined,
         });
         for (let i = 0; i < z.deductions.length; i++) {
           const d = z.deductions[i];
@@ -1692,10 +1716,18 @@ ${lignesLegende.map((z) => `
             : calculerLongueur(ptsDed) / echelle;
           zonesChargees.push({
             id: `ded-chargee-${z.id}-${i}`, type: type === "surface" ? "surface" : "longueur",
-            mode: "soustraction", parentZoneId: `zone-chargee-${z.id}`,
+            mode: "soustraction", parentZoneId: localId,
             designation: d.designation, unite: z.unite, points: ptsDed, valeur: valDed,
             couleur: COULEUR_SOUSTRACTION, deductions: [],
           });
+        }
+      }
+      // Résoudre les relations zone_parente (hiérarchie)
+      for (const z of zonesExistantes) {
+        if (z.zone_parente && dbIdToLocalId[z.zone_parente]) {
+          const localId = dbIdToLocalId[z.id];
+          const idx = zonesChargees.findIndex((zc) => zc.id === localId);
+          if (idx >= 0) zonesChargees[idx] = { ...zonesChargees[idx], sousZoneDeId: dbIdToLocalId[z.zone_parente] };
         }
       }
       setZones(zonesChargees);
@@ -1770,7 +1802,12 @@ ${lignesLegende.map((z) => `
       }
 
       const estPDF = reponse.format_fichier === "pdf" || fichier.name.toLowerCase().endsWith(".pdf");
-      if (estPDF) {
+      const estVectoriel = reponse.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(fichier.name);
+      if (estVectoriel) {
+        // DXF/DWG : pas de prévisualisation canvas côté client — les zones restent actives
+        setSucces("Fichier CAO importé. La quantification se fera via les zones de mesure dessinées.");
+        setTimeout(() => setSucces(null), 5000);
+      } else if (estPDF) {
         const img = await chargerPremierePage(url);
         appliquerImageSurCanvas(img);
       } else {
@@ -1802,43 +1839,69 @@ ${lignesLegende.map((z) => `
   };
 
   const validerEtCreerLignes = async () => {
-    if (zones.length === 0) return;
+    const zonesAjout = zones.filter((z) => z.mode === "ajout");
+    if (zonesAjout.length === 0) return;
     setEnregistrement(true);
+    setErreurFond(null);
     try {
-      // Calcule valeur nette par zone (soustraction = valeur négative)
-      const lignesPayload = zones.map((zone) => {
-        let valeurNette: number;
-        if (zone.type === "comptage") {
-          valeurNette = zone.mode === "soustraction" ? -zone.points.length : zone.points.length;
-        } else if (zone.type === "longueur" && zone.hauteur) {
-          const surf = zone.valeur * zone.hauteur;
-          valeurNette = zone.mode === "soustraction" ? -surf : surf;
-        } else {
-          valeurNette = zone.mode === "soustraction" ? -zone.valeur : zone.valeur;
+      if (fondPlanId) {
+        // Flush les sauvegardes en attente avant de créer les lignes
+        if (timerSauvegarde.current) {
+          clearTimeout(timerSauvegarde.current);
+          timerSauvegarde.current = null;
         }
-        const unite = (zone.type === "longueur" && zone.hauteur) ? "m²" : zone.unite;
-        const detail = zone.mode === "soustraction"
-          ? `Déduction — ${zone.type}${zone.hauteur ? ` × h=${zone.hauteur}m` : ""}`
-          : `Métré visuel — ${zone.type}${zone.hauteur ? ` × h=${zone.hauteur}m` : ""}`;
-        return {
-          metre: metreId,
-          designation: zone.designation,
-          nature: "travaux",
-          quantite: Math.round(valeurNette * 1000) / 1000,
-          unite,
-          detail_calcul: detail,
-          numero_ordre: 0,
-        };
-      });
-      for (const ligne of lignesPayload) {
-        await api.post(`/api/metres/${metreId}/lignes/`, ligne);
+        if (pendingZonesRef.current) {
+          const pending = pendingZonesRef.current;
+          pendingZonesRef.current = null;
+          await sauvegarderZonesBDD(pending.zones, pending.fpId);
+        }
+        const resultat = await api.post<{ nb_lignes: number; detail?: string }>(
+          `/api/metres/${metreId}/valider-zones/`,
+          { fond_plan_id: fondPlanId }
+        );
+        if (resultat.nb_lignes === 0) {
+          setErreurFond("Aucune ligne créée. Calibrez d'abord le plan (outil Règle) pour que les mesures soient précises.");
+        } else {
+          setSucces(`${resultat.nb_lignes} ligne(s) créée(s) depuis le métré visuel.`);
+          setTimeout(() => setSucces(null), 4000);
+          onLignesCreees();
+        }
+      } else {
+        // Fallback sans fond de plan sauvegardé
+        for (const zone of zonesAjout) {
+          const soustractions = zones.filter((z) => z.mode === "soustraction" && z.parentZoneId === zone.id);
+          const totalDeductions = soustractions.reduce(
+            (s, d) => s + (d.type === "longueur" && d.hauteur ? d.valeur * d.hauteur : d.valeur), 0
+          );
+          let valeurBrute: number;
+          if (zone.type === "comptage") {
+            valeurBrute = zone.points.length;
+          } else if (zone.type === "longueur" && zone.hauteur) {
+            valeurBrute = zone.valeur * zone.hauteur;
+          } else {
+            valeurBrute = zone.valeur;
+          }
+          const valeurNette = Math.max(0, valeurBrute - totalDeductions);
+          const unite = zone.type === "longueur" && zone.hauteur ? "m2" : zone.unite;
+          await api.post(`/api/metres/${metreId}/lignes/`, {
+            metre: metreId,
+            designation: zone.designation,
+            nature: "travaux",
+            quantite: Math.round(valeurNette * 1000) / 1000,
+            unite,
+            detail_calcul: "",
+            numero_ordre: 0,
+          });
+        }
+        setSucces(`${zonesAjout.length} ligne(s) créée(s) depuis le métré visuel.`);
+        setTimeout(() => setSucces(null), 4000);
+        onLignesCreees();
       }
-      setSucces(`${zones.length} ligne(s) créée(s) depuis le métré visuel.`);
-      setTimeout(() => setSucces(null), 4000);
-      onLignesCreees();
     } catch (e) {
       setErreurFond(e instanceof ErreurApi ? e.detail : "Erreur lors de la création des lignes.");
-    } finally { setEnregistrement(false); }
+    } finally {
+      setEnregistrement(false);
+    }
   };
 
   // Outils principaux — les sous-outils de déduction sont hiérarchisés sous leur parent
@@ -2028,7 +2091,7 @@ ${lignesLegende.map((z) => `
               ? <><Calculator className="w-3 h-3 animate-spin" />Chargement…</>
               : <><ImagePlus className="w-3 h-3" />Ajouter un plan</>
             }
-            <input type="file" accept="image/*,.pdf" className="hidden"
+            <input type="file" accept="image/*,.pdf,.dxf,.dwg" className="hidden"
               disabled={chargementFond}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploaderFond(f); e.currentTarget.value = ""; }}
             />
@@ -2079,44 +2142,16 @@ ${lignesLegende.map((z) => `
         {fondsPlans.length === 0 && !chargementFond && (
           <label className="mt-3 flex cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-8 hover:border-primaire-300 hover:bg-primaire-50 transition">
             <Upload className="w-5 h-5 text-slate-400" />
-            <span className="text-sm text-slate-500">Cliquez pour importer votre premier fond de plan (image ou PDF)</span>
-            <input type="file" accept="image/*,.pdf" className="hidden"
+            <span className="text-sm text-slate-500">Cliquez pour importer votre premier fond de plan (image, PDF, DXF ou DWG)</span>
+            <input type="file" accept="image/*,.pdf,.dxf,.dwg" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploaderFond(f); e.currentTarget.value = ""; }}
             />
           </label>
         )}
       </div>
 
-      {/* Barre de calibration — pleine largeur, visible au-dessus du canvas */}
-      {outil === "calibrer" && (
-        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <ScanLine className="w-4 h-4 text-amber-600 shrink-0" />
-          <span className="text-sm font-semibold text-amber-800 shrink-0">Calibration de l'échelle</span>
-          <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-            <label className="text-xs text-amber-700 shrink-0">Longueur connue :</label>
-            <input
-              type="number" step="0.01" min="0.01"
-              className="champ-saisie flex-1 font-mono border-amber-300 focus:ring-amber-400"
-              placeholder="Ex : 5.00 m"
-              title="Longueur connue en mètres"
-              value={longueurConnue}
-              onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
-            />
-            <span className="text-xs text-amber-700 shrink-0">m</span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {[0, 1].map((i) => (
-              <div key={i} className={`w-2.5 h-2.5 rounded-full border ${calibrationPoints.length > i ? "bg-amber-400 border-amber-500" : "bg-slate-200 border-slate-300"}`} />
-            ))}
-            <span className="text-xs text-amber-600">
-              {calibrationPoints.length === 0 ? "Cliquez le 1er point sur le plan" : calibrationPoints.length === 1 ? "Cliquez le 2e point" : "✓ Calibration appliquée"}
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Interface canvas */}
-      <div className="grid gap-4 xl:grid-cols-[60px_minmax(0,1fr)_290px]">
+      <div className="grid gap-4 xl:grid-cols-[60px_minmax(0,1fr)_340px]">
         {/* Barre d'outils — avec sous-outils de déduction hiérarchisés */}
         <div className="flex xl:flex-col gap-1 flex-wrap">
           {outils.map((o) => {
@@ -2258,10 +2293,41 @@ ${lignesLegende.map((z) => `
             </div>
           ) : (
             <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-              {zones.filter((z) => z.mode === "ajout").map((zone) => {
+              {zones.filter((z) => z.mode === "ajout" && !z.sousZoneDeId).map((zone) => {
+                const sousZones = zones.filter((z2) => z2.mode === "ajout" && z2.sousZoneDeId === zone.id);
                 const soustractions = zones.filter((d) => d.mode === "soustraction" && d.parentZoneId === zone.id);
                 const totalDeductions = soustractions.reduce((s, d) => s + (d.type === "longueur" && d.hauteur ? d.valeur * d.hauteur : d.valeur), 0);
-                const valeurNette = (zone.type === "longueur" && zone.hauteur ? zone.valeur * zone.hauteur : zone.valeur) - totalDeductions;
+                const valeurBrute = zone.type === "longueur" && zone.hauteur ? zone.valeur * zone.hauteur : zone.type === "comptage" ? zone.points.length : zone.valeur;
+                const valeurNette = valeurBrute - totalDeductions;
+
+                const ajouterSousZone = (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  // Compter les sous-zones existantes pour auto-numéroter
+                  const parentNum = zone.numeroZone || String(zones.filter((z2) => z2.mode === "ajout" && !z2.sousZoneDeId).indexOf(zone) + 1);
+                  const nbSousZones = sousZones.length;
+                  const numero = `${parentNum}.${nbSousZones + 1}`;
+                  const nouvelleSousZone: ZoneVisualisee = {
+                    id: `sous-zone-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                    type: zone.type, mode: "ajout",
+                    sousZoneDeId: zone.id,
+                    numeroZone: numero,
+                    designation: zone.designation,
+                    unite: zone.unite, points: [], valeur: 0,
+                    couleur: zone.couleur, deductions: [],
+                  };
+                  setZones((prev) => {
+                    // Insérer après la dernière sous-zone existante ou après la zone
+                    const idx = prev.findLastIndex((z2) => z2.sousZoneDeId === zone.id);
+                    const insertAfter = idx >= 0 ? idx : prev.indexOf(zone);
+                    const res = [...prev];
+                    res.splice(insertAfter + 1, 0, nouvelleSousZone);
+                    planifierSauvegarde(res, fondPlanId);
+                    return res;
+                  });
+                  setOutil(zone.type);
+                  setZoneSelectionnee(nouvelleSousZone.id);
+                };
+
                 return (
                   <div key={zone.id} className="space-y-1">
                     {/* Zone principale */}
@@ -2276,6 +2342,11 @@ ${lignesLegende.map((z) => `
                       <div className="flex items-start gap-2">
                         <div className="mt-1 h-3 w-3 rounded-full shrink-0" style={{ background: zone.couleur }} />
                         <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1 mb-0.5">
+                            {zone.numeroZone && (
+                              <span className="text-[10px] font-bold text-slate-400 font-mono">{zone.numeroZone}</span>
+                            )}
+                          </div>
                           <input
                             type="text" className="champ-saisie w-full text-xs py-1"
                             value={zone.designation}
@@ -2301,6 +2372,13 @@ ${lignesLegende.map((z) => `
                               {zone.hauteur ? `× h = ${zone.hauteur} m → surface` : "Ajouter une hauteur →surface"}
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="mt-1 text-[10px] text-primaire-500 hover:text-primaire-700 hover:underline"
+                            onClick={ajouterSousZone}
+                          >
+                            + Sous-zone
+                          </button>
                         </div>
                         <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(zone.id); }}
                           className="p-1 text-slate-300 hover:text-red-500">
@@ -2308,6 +2386,48 @@ ${lignesLegende.map((z) => `
                         </button>
                       </div>
                     </div>
+
+                    {/* Sous-zones (hiérarchie) */}
+                    {sousZones.map((sz) => {
+                      const szSoustractions = zones.filter((d) => d.mode === "soustraction" && d.parentZoneId === sz.id);
+                      const szDeductions = szSoustractions.reduce((s, d) => s + (d.type === "longueur" && d.hauteur ? d.valeur * d.hauteur : d.valeur), 0);
+                      const szBrute = sz.type === "longueur" && sz.hauteur ? sz.valeur * sz.hauteur : sz.type === "comptage" ? sz.points.length : sz.valeur;
+                      return (
+                        <div key={sz.id}
+                          className={`ml-4 rounded-xl border p-2.5 cursor-pointer transition ${
+                            sz.id === zoneSelectionnee ? "border-primaire-200 bg-primaire-50" : "border-slate-200 bg-slate-50/60 hover:border-slate-300"
+                          }`}
+                          onClick={() => setZoneSelectionnee(sz.id === zoneSelectionnee ? null : sz.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 font-mono shrink-0">{sz.numeroZone}</span>
+                            <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: sz.couleur }} />
+                            <input
+                              type="text" className="flex-1 min-w-0 text-xs border-none bg-transparent p-0 focus:ring-0 text-slate-700"
+                              value={sz.designation}
+                              onChange={(e) => modifierZone(sz.id, { designation: e.target.value })}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <span className="font-mono text-xs text-slate-500 shrink-0">
+                              {sz.type === "comptage" ? `${sz.points.length} u`
+                                : sz.type === "longueur" && sz.hauteur
+                                  ? `${(szBrute - szDeductions).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} m²`
+                                  : `${(szBrute - szDeductions).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${sz.unite}`}
+                            </span>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); supprimerZone(sz.id); }}
+                              className="p-0.5 text-slate-200 hover:text-red-400 shrink-0">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                          {sz.type === "longueur" && (
+                            <button type="button" className="mt-1 ml-7 text-[10px] text-primaire-600 hover:underline"
+                              onClick={(e) => { e.stopPropagation(); setModalHauteur({ zoneId: sz.id, hauteurActuelle: sz.hauteur ? String(sz.hauteur) : "" }); }}>
+                              {sz.hauteur ? `× h = ${sz.hauteur} m` : "Ajouter hauteur"}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
 
                     {/* Soustractions liées */}
                     {soustractions.map((ded) => (
@@ -2364,17 +2484,122 @@ ${lignesLegende.map((z) => `
           )}
 
           {/* Calibration */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center gap-2">
-              <Ruler className="w-3 h-3 text-slate-400" />
-              <p className="text-xs font-medium text-slate-600">Calibration</p>
+          <div
+            className="rounded-xl border p-4 transition-colors"
+            style={{
+              borderColor: outil === "calibrer"
+                ? "color-mix(in srgb, var(--bordure) 62%, var(--c-base) 38%)"
+                : "var(--bordure)",
+              background: outil === "calibrer"
+                ? "color-mix(in srgb, var(--fond-carte) 84%, var(--c-base) 16%)"
+                : "color-mix(in srgb, var(--fond-carte) 74%, var(--fond-app))",
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  {outil === "calibrer"
+                    ? <ScanLine className="w-4 h-4 shrink-0" style={{ color: "var(--c-base)" }} />
+                    : <Ruler className="w-4 h-4 shrink-0" style={{ color: "var(--texte-3)" }} />
+                  }
+                  <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>
+                    Calibration de l&apos;échelle
+                  </p>
+                </div>
+                <p className="mt-1 text-xs" style={{ color: "var(--texte-2)" }}>
+                  {outil === "calibrer"
+                    ? "Renseignez une distance réelle, puis cliquez deux points sur le plan actif."
+                    : `Échelle active : 1 m = ${echellePixelParMetre.toFixed(1)} px`
+                  }
+                </p>
+              </div>
+              {outil === "calibrer" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOutil("selection");
+                    setCalibrationPoints([]);
+                    setMesureEnCours(null);
+                  }}
+                  className="btn-secondaire px-2.5 py-1 text-xs"
+                >
+                  Fermer
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOutil("calibrer");
+                    setCalibrationPoints([]);
+                  }}
+                  className="btn-secondaire px-2.5 py-1 text-xs"
+                  style={{ color: "var(--c-base)", borderColor: "color-mix(in srgb, var(--bordure) 70%, var(--c-base) 30%)" }}
+                >
+                  Recalibrer
+                </button>
+              )}
             </div>
-            <p className="mt-1 text-xs text-slate-500">1 m = {echellePixelParMetre.toFixed(1)} px</p>
-            {outil !== "calibrer" && (
-              <button type="button" onClick={() => setOutil("calibrer")}
-                className="mt-2 text-xs text-primaire-600 hover:underline">
-                Modifier l&apos;échelle
-              </button>
+
+            {outil === "calibrer" && (
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium" style={{ color: "var(--texte)" }}>
+                    Longueur connue sur le plan
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      className="champ-saisie w-full font-mono text-sm"
+                      placeholder="Ex. 5,00"
+                      title="Longueur connue en mètres"
+                      value={longueurConnue}
+                      onChange={(e) => { setLongueurConnue(e.target.value); setCalibrationPoints([]); }}
+                    />
+                    <span
+                      className="rounded-lg border px-3 py-2 text-sm font-medium"
+                      style={{
+                        borderColor: "var(--bordure)",
+                        background: "var(--fond-entree)",
+                        color: "var(--texte-2)",
+                      }}
+                    >
+                      m
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  className="rounded-lg border px-3 py-2"
+                  style={{
+                    borderColor: "var(--bordure)",
+                    background: "color-mix(in srgb, var(--fond-carte) 78%, var(--fond-app))",
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    {[0, 1].map((i) => (
+                      <div
+                        key={i}
+                        className="h-2.5 w-2.5 rounded-full border"
+                        style={{
+                          borderColor: calibrationPoints.length > i ? "var(--c-base)" : "var(--bordure-fm)",
+                          background: calibrationPoints.length > i ? "var(--c-base)" : "color-mix(in srgb, var(--fond-app) 82%, var(--fond-carte))",
+                        }}
+                      />
+                    ))}
+                    <span className="text-xs font-medium" style={{ color: "var(--texte)" }}>
+                      {calibrationPoints.length === 0
+                        ? "Étape 1 : cliquez le premier point de référence"
+                        : "Étape 2 : cliquez le second point de référence"
+                      }
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs" style={{ color: "var(--texte-2)" }}>
+                    La nouvelle échelle est enregistrée automatiquement dès le second clic.
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         </div>

@@ -224,6 +224,14 @@ class ZoneMesure(models.Model):
         FondPlan, on_delete=models.CASCADE,
         related_name="zones", verbose_name="Fond de plan",
     )
+    zone_parente = models.ForeignKey(
+        "self", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="sous_zones",
+        verbose_name="Zone parente (hiérarchie)",
+    )
+    numero = models.CharField(
+        max_length=20, blank=True, default="", verbose_name="Numéro de zone (ex: 1, 1.1, 1.2)",
+    )
     ligne_metre = models.OneToOneField(
         LigneMetre, on_delete=models.SET_NULL,
         null=True, blank=True, related_name="zone_mesure",

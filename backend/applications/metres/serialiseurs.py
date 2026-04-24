@@ -34,14 +34,12 @@ class LigneMetre_Serialiseur(serializers.ModelSerializer):
         detail_calcul = attrs.get("detail_calcul")
         quantite = attrs.get("quantite")
 
-        if detail_calcul:
+        if detail_calcul and quantite is None:
             try:
                 analyse = analyser_detail_calcul(detail_calcul)
-            except ValueError as exc:
-                raise serializers.ValidationError({"detail_calcul": str(exc)}) from exc
-
-            if quantite is None:
                 attrs["quantite"] = Decimal(str(analyse["quantite_calculee"]))
+            except Exception:
+                pass
         return attrs
 
     def get_montant_ht(self, obj):
@@ -53,7 +51,7 @@ class LigneMetre_Serialiseur(serializers.ModelSerializer):
             return None
         try:
             return analyser_detail_calcul(obj.detail_calcul)["quantite_calculee"]
-        except ValueError:
+        except Exception:
             return None
 
     def get_apercu_calcul(self, obj):
@@ -61,7 +59,7 @@ class LigneMetre_Serialiseur(serializers.ModelSerializer):
             return None
         try:
             return analyser_detail_calcul(obj.detail_calcul)
-        except ValueError:
+        except Exception:
             return None
 
 
@@ -172,7 +170,8 @@ class ZoneMesureSerialiseur(serializers.ModelSerializer):
     class Meta:
         model = ZoneMesure
         fields = [
-            "id", "fond_plan", "ligne_metre", "designation", "type_mesure", "type_libelle",
+            "id", "fond_plan", "zone_parente", "numero", "ligne_metre",
+            "designation", "type_mesure", "type_libelle",
             "points_px", "deductions",
             "valeur_brute", "valeur_deduction", "valeur_nette", "unite",
             "couleur", "ordre", "date_modification",

@@ -70,7 +70,10 @@ def evaluer_expression_quantitative(expression: str, variables: dict[str, Decima
     expression = expression.strip()
     if not expression:
         raise ValueError("L'expression est vide.")
-    arbre = ast.parse(expression, mode="eval")
+    try:
+        arbre = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"Expression de calcul invalide : {exc}") from exc
     return _evaluer_ast(arbre, variables)
 
 
@@ -212,15 +215,15 @@ def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
     from .models import LigneMetre
 
     resultats = calculer_zone_mesure(zone)
-    detail = f"[Mesure visuelle — {zone.type_mesure}]"
+    detail = f"Mesure visuelle {zone.type_mesure}"
     if zone.type_mesure == "surface":
         detail = (
-            f"Surface brute : {resultats['valeur_brute']:.3f} m² — "
-            f"Déductions : {resultats['valeur_deduction']:.3f} m² → "
-            f"Nette : {resultats['valeur_nette']:.3f} m²"
+            f"Brut {resultats['valeur_brute']:.3f} m2"
+            f" - Deductions {resultats['valeur_deduction']:.3f} m2"
+            f" = Net {resultats['valeur_nette']:.3f} m2"
         )
     elif zone.type_mesure in ("longueur", "perimetre"):
-        detail = f"Longueur mesurée : {resultats['valeur_nette']:.3f} ml"
+        detail = f"Longueur {resultats['valeur_nette']:.3f} ml"
 
     ligne = LigneMetre.objects.create(
         metre=metre,

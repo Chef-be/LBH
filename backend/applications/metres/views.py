@@ -69,8 +69,13 @@ class VueListeLignesMetres(generics.ListCreateAPIView):
         ).select_related("ligne_bibliotheque")
 
     def perform_create(self, serializer):
+        from django.db.models import Max
         metre = generics.get_object_or_404(Metre, pk=self.kwargs["metre_id"])
-        serializer.save(metre=metre)
+        numero_ordre = serializer.validated_data.get("numero_ordre") or 0
+        if numero_ordre == 0:
+            agg = metre.lignes.aggregate(max_ordre=Max("numero_ordre"))
+            numero_ordre = (agg["max_ordre"] or 0) + 1
+        serializer.save(metre=metre, numero_ordre=numero_ordre)
 
 
 class VueDetailLigneMetre(generics.RetrieveUpdateDestroyAPIView):
@@ -291,7 +296,7 @@ def vue_valider_zones_en_lignes(request, metre_id):
     if fond_plan_id:
         zones_qs = zones_qs.filter(fond_plan_id=fond_plan_id)
 
-    zones = list(zones_qs.order_by("fond_plan", "ordre"))
+    zones = list(zones_qs.order_by("fond_plan", "zone_parente__ordre", "ordre"))
     if not zones:
         return Response({"detail": "Aucune zone non encore convertie.", "nb_lignes": 0})
 
