@@ -24,7 +24,6 @@ function pct(val: string | number): string {
 
 const LIBELLE_TYPE: Record<string, string> = {
   be: "Bureau d'études",
-  chantier: "Chantier",
   autre: "Autre",
 };
 
@@ -54,6 +53,8 @@ const FORM_VIDE: FormProfil = {
   heures_productives_an: "1600",
   taux_marge_vente: "0.15",
 };
+
+// type_profil ne peut être que "be" ou "autre" — pas de notion chantier pour ce cabinet
 
 function profilVersForm(p: ProfilHoraire): FormProfil {
   return {
@@ -201,7 +202,7 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
           </p>
         </div>
         <div>
-          <p className="text-xs mb-1" style={{ color: "var(--texte-3)" }}>Heures productives/an</p>
+          <p className="text-xs mb-1" style={{ color: "var(--texte-3)" }}>Heures productives / an</p>
           <p className="text-sm font-semibold font-mono" style={{ color: "var(--texte)" }}>
             {fmt(profil.heures_productives_an, 0)} h
           </p>
@@ -537,14 +538,11 @@ function FormulaireProfil({
         </div>
         <div>
           <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Type de profil</label>
-          <select value={form.type_profil} onChange={(e) => {
-            const hp = e.target.value === "chantier" ? "1490" : "1600";
-            setForm({ ...form, type_profil: e.target.value, heures_productives_an: hp });
-          }}
+          <select value={form.type_profil}
+            onChange={(e) => setForm({ ...form, type_profil: e.target.value })}
             className="w-full rounded-lg px-3 py-2 text-sm"
             style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>
             <option value="be">Bureau d&apos;études</option>
-            <option value="chantier">Chantier</option>
             <option value="autre">Autre</option>
           </select>
         </div>

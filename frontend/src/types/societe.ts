@@ -124,7 +124,7 @@ export interface ProfilHoraire {
   couleur: string;
   actif: boolean;
   ordre: number;
-  type_profil: "be" | "chantier" | "autre";
+  type_profil: "be" | "autre";
   taux_charges_salariales: string;
   taux_charges_patronales: string;
   heures_productives_an: string;

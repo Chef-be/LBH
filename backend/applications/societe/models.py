@@ -21,7 +21,6 @@ class ProfilHoraire(models.Model):
     """
     TYPE_PROFIL_CHOICES = [
         ("be", "Bureau d'études"),
-        ("chantier", "Chantier"),
         ("autre", "Autre"),
     ]
 
@@ -54,7 +53,7 @@ class ProfilHoraire(models.Model):
     heures_productives_an = models.DecimalField(
         max_digits=7, decimal_places=2, default=Decimal("1600.00"),
         verbose_name="Heures productives / an",
-        help_text="BE : 1 600 h ; chantier : 1 490 h.",
+        help_text="Heures vendables après congés, administratif et formation. Défaut 1 600 h/an.",
     )
     taux_marge_vente = models.DecimalField(
         max_digits=6, decimal_places=4, default=Decimal("0.1500"),
