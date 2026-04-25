@@ -8,8 +8,22 @@ import { api } from "@/crochets/useApi";
 import type { ChargeFixeStructure, ParametreSociete, ProfilHoraire } from "@/types/societe";
 
 type Onglet = "charges" | "salaires";
+type DecompositionHeuresProductives = {
+  heures_theoriques_annuelles: number;
+  conges_payes: number;
+  jours_feries_et_absences: number;
+  administratif_interne: number;
+  formation_veille: number;
+  commercial_non_facturable: number;
+};
+type FormParametreSociete = Omit<
+  ParametreSociete,
+  "id" | "date_creation" | "date_modification" | "decomposition_heures_productives"
+> & {
+  decomposition_heures_productives: DecompositionHeuresProductives;
+};
 
-const PARAM_VIDE = {
+const PARAM_VIDE: FormParametreSociete = {
   annee: 2026,
   zone_smic: "Mayotte",
   smic_horaire_brut: "9.33",
@@ -18,9 +32,24 @@ const PARAM_VIDE = {
   taux_charges_salariales: "0.2200",
   taux_charges_patronales: "0.4200",
   heures_productives_be: "1600.00",
+  decomposition_heures_productives: {
+    heures_theoriques_annuelles: 1820,
+    conges_payes: 175,
+    jours_feries_et_absences: 35,
+    administratif_interne: 10,
+    formation_veille: 0,
+    commercial_non_facturable: 0,
+  },
   objectif_marge_nette: "0.1500",
   taux_tva_defaut: "0.200",
 };
+
+function normaliserDecomposition(source?: Record<string, number>): DecompositionHeuresProductives {
+  return {
+    ...PARAM_VIDE.decomposition_heures_productives,
+    ...(source ?? {}),
+  };
+}
 
 function euros(valeur: number | string | null | undefined) {
   const n = Number(valeur ?? 0);
@@ -31,10 +60,19 @@ function pct(valeur: string | number) {
   return (Number(valeur) * 100).toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " %";
 }
 
+function valeurPourcentage(valeur: string | number) {
+  return String(Number(valeur || 0) * 100);
+}
+
+function tauxDepuisPourcentage(valeur: string) {
+  return String((Number(valeur || 0) / 100).toFixed(4));
+}
+
 export default function PageChargesSociete() {
   const qc = useQueryClient();
   const [onglet, setOnglet] = useState<Onglet>("charges");
   const [nouvelleCharge, setNouvelleCharge] = useState({ libelle: "", montant_mensuel: "0" });
+  const [sourceSmic, setSourceSmic] = useState<string | null>(null);
 
   const { data: parametres = [] } = useQuery<ParametreSociete[]>({
     queryKey: ["societe-parametres"],
@@ -44,7 +82,7 @@ export default function PageChargesSociete() {
     },
   });
   const parametre = parametres[0];
-  const [formParam, setFormParam] = useState(PARAM_VIDE);
+  const [formParam, setFormParam] = useState<FormParametreSociete>(PARAM_VIDE);
 
   const { data: charges = [] } = useQuery<ChargeFixeStructure[]>({
     queryKey: ["societe-charges-fixes"],
@@ -75,6 +113,7 @@ export default function PageChargesSociete() {
         heures_productives_be: parametre.heures_productives_be,
         objectif_marge_nette: parametre.objectif_marge_nette,
         taux_tva_defaut: parametre.taux_tva_defaut,
+        decomposition_heures_productives: normaliserDecomposition(parametre.decomposition_heures_productives),
       });
     }
   }, [parametre]);
@@ -85,13 +124,32 @@ export default function PageChargesSociete() {
   ), 0);
   const coutComplet = totalFraisFixes + coutSalaires;
   const caCible = coutComplet / Math.max(0.01, 1 - Number(formParam.objectif_marge_nette));
+  const decomposition = formParam.decomposition_heures_productives;
+  const heuresProductives = Math.max(
+    0,
+    Number(decomposition.heures_theoriques_annuelles || 0)
+      - Number(decomposition.conges_payes || 0)
+      - Number(decomposition.jours_feries_et_absences || 0)
+      - Number(decomposition.administratif_interne || 0)
+      - Number(decomposition.formation_veille || 0)
+      - Number(decomposition.commercial_non_facturable || 0)
+  );
 
   const sauverParametre = useMutation({
-    mutationFn: () => parametre
-      ? api.put(`/api/societe/parametres-societe/${parametre.id}/`, formParam)
-      : api.post("/api/societe/parametres-societe/", formParam),
+    mutationFn: () => {
+      const corps = { ...formParam, heures_productives_be: heuresProductives.toFixed(2) };
+      return parametre
+        ? api.put(`/api/societe/parametres-societe/${parametre.id}/`, corps)
+        : api.post("/api/societe/parametres-societe/", corps);
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["societe-parametres"] }),
   });
+
+  const suggererSmic = async (zone: string) => {
+    const r = await api.get<{ smic_horaire_brut: string; source: string }>(`/api/societe/references/smic/?zone=${encodeURIComponent(zone)}`);
+    setSourceSmic(r.source);
+    setFormParam((p) => ({ ...p, smic_horaire_brut: r.smic_horaire_brut }));
+  };
 
   const creerCharge = useMutation({
     mutationFn: () => api.post("/api/societe/charges-fixes/", {
@@ -171,25 +229,79 @@ export default function PageChargesSociete() {
         <section className="rounded-xl p-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
           <div className="grid gap-4 md:grid-cols-3">
             {[
-              ["Taux charges salariales", "taux_charges_salariales"],
-              ["Taux charges patronales", "taux_charges_patronales"],
-              ["Heures productives BE/an", "heures_productives_be"],
-              ["Objectif marge nette", "objectif_marge_nette"],
-              ["SMIC horaire brut", "smic_horaire_brut"],
-              ["PMSS", "pmss"],
-              ["PASS", "pass_annuel"],
-              ["TVA par défaut", "taux_tva_defaut"],
-              ["Zone SMIC", "zone_smic"],
-            ].map(([label, key]) => (
+              { label: "Taux charges salariales", key: "taux_charges_salariales", pct: true },
+              { label: "Taux charges patronales", key: "taux_charges_patronales", pct: true },
+              { label: "Objectif marge nette", key: "objectif_marge_nette", pct: true },
+              { label: "TVA par défaut", key: "taux_tva_defaut", pct: true },
+              { label: "SMIC horaire brut", key: "smic_horaire_brut" },
+              { label: "PMSS", key: "pmss", aide: "Plafond mensuel de la sécurité sociale : base de calcul de certaines cotisations sociales." },
+              { label: "PASS", key: "pass_annuel", aide: "Plafond annuel de la sécurité sociale : référence annuelle issue du PMSS." },
+              { label: "Zone SMIC", key: "zone_smic" },
+            ].map(({ label, key, pct: estPct, aide }) => (
               <label key={key} className="space-y-1">
-                <span className="text-xs font-medium" style={{ color: "var(--texte-3)" }}>{label}</span>
-                <input value={String(formParam[key as keyof typeof formParam])} onChange={(e) => setFormParam((p) => ({ ...p, [key]: e.target.value }))} className="w-full rounded-lg px-3 py-2 text-sm" style={champ} />
+                <span className="text-xs font-medium" style={{ color: "var(--texte-3)" }} title={aide}>{label}</span>
+                <input
+                  value={estPct
+                    ? valeurPourcentage(String(formParam[key as keyof typeof formParam]))
+                    : String(formParam[key as keyof typeof formParam])}
+                  onChange={(e) => setFormParam((p) => ({
+                    ...p,
+                    [key]: estPct
+                      ? tauxDepuisPourcentage(e.target.value)
+                      : e.target.value,
+                  }))}
+                  className="w-full rounded-lg px-3 py-2 text-sm"
+                  style={champ}
+                />
               </label>
             ))}
           </div>
-          <button onClick={() => sauverParametre.mutate()} className="mt-5 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: "var(--c-base)" }}>
-            <Save size={14} /> Enregistrer
-          </button>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button onClick={() => suggererSmic(formParam.zone_smic)} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>
+              Suggérer le SMIC
+            </button>
+            <button onClick={() => sauverParametre.mutate()} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: "var(--c-base)" }}>
+              <Save size={14} /> Enregistrer
+            </button>
+          </div>
+          {sourceSmic ? <p className="mt-2 text-xs" style={{ color: "var(--texte-3)" }}>Source SMIC : {sourceSmic}</p> : null}
+
+          <div className="mt-6 rounded-xl p-4" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Décomposition des heures productives BE/an</p>
+                <p className="text-xs" style={{ color: "var(--texte-3)" }}>Le total calculé alimente automatiquement les profils horaires.</p>
+              </div>
+              <p className="text-2xl font-bold font-mono" style={{ color: "var(--c-base)" }}>{heuresProductives.toLocaleString("fr-FR")} h</p>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {([
+                ["Heures théoriques annuelles", "heures_theoriques_annuelles"],
+                ["Congés payés", "conges_payes"],
+                ["Jours fériés / absences", "jours_feries_et_absences"],
+                ["Administratif interne", "administratif_interne"],
+                ["Formation / veille", "formation_veille"],
+                ["Commercial non facturable", "commercial_non_facturable"],
+              ] as Array<[string, keyof DecompositionHeuresProductives]>).map(([label, key]) => (
+                <label key={key} className="space-y-1">
+                  <span className="text-xs" style={{ color: "var(--texte-3)" }}>{label}</span>
+                  <input
+                    type="number"
+                    value={decomposition[key] ?? 0}
+                    onChange={(e) => setFormParam((p) => ({
+                      ...p,
+                      decomposition_heures_productives: {
+                        ...p.decomposition_heures_productives,
+                        [key]: Number(e.target.value || 0),
+                      },
+                    }))}
+                    className="w-full rounded-lg px-3 py-2 text-sm font-mono"
+                    style={champ}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
 
           <div className="mt-6 overflow-x-auto rounded-xl" style={{ border: "1px solid var(--bordure)" }}>
             <table className="w-full text-sm">

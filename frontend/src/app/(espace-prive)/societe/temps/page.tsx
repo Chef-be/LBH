@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { api, ErreurApi } from "@/crochets/useApi";
+import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
 import { useNotifications } from "@/contextes/FournisseurNotifications";
 import { TempsPasse, ProfilHoraire } from "@/types/societe";
 
@@ -90,11 +90,11 @@ export default function PageTempsSociete() {
 
   const { data: temps = [] } = useQuery<TempsPasse[]>({
     queryKey: ["societe-temps-passes"],
-    queryFn: () => api.get<TempsPasse[]>("/api/societe/temps-passes/"),
+    queryFn: async () => extraireListeResultats(await api.get<{ results?: TempsPasse[] } | TempsPasse[]>("/api/societe/temps-passes/")),
   });
   const { data: profils = [] } = useQuery<ProfilHoraire[]>({
     queryKey: ["societe-profils-horaires"],
-    queryFn: () => api.get<ProfilHoraire[]>("/api/societe/profils-horaires/?actif=true"),
+    queryFn: async () => extraireListeResultats(await api.get<{ results?: ProfilHoraire[] } | ProfilHoraire[]>("/api/societe/profils-horaires/?actif=true")),
   });
   const { data: projets = [] } = useQuery<ProjetOption[]>({
     queryKey: ["societe-projets-options"],

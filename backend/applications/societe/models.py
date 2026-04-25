@@ -207,6 +207,11 @@ class ParametreSociete(models.Model):
     taux_charges_salariales = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.2200"))
     taux_charges_patronales = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.4200"))
     heures_productives_be = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("1600.00"))
+    decomposition_heures_productives = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Décomposition heures productives BE",
+    )
     objectif_marge_nette = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.1500"))
     taux_tva_defaut = models.DecimalField(max_digits=5, decimal_places=3, default=Decimal("0.200"))
     date_creation = models.DateTimeField(auto_now_add=True)

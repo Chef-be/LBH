@@ -90,7 +90,8 @@ class ParametreSocieteSerializer(serializers.ModelSerializer):
         fields = [
             "id", "annee", "zone_smic", "smic_horaire_brut", "pmss", "pass_annuel",
             "taux_charges_salariales", "taux_charges_patronales",
-            "heures_productives_be", "objectif_marge_nette", "taux_tva_defaut",
+            "heures_productives_be", "decomposition_heures_productives",
+            "objectif_marge_nette", "taux_tva_defaut",
             "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]

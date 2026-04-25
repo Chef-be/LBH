@@ -241,6 +241,27 @@ class ChargeFixeStructureViewSet(viewsets.ModelViewSet):
     queryset = ChargeFixeStructure.objects.all()
 
 
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_reference_smic(request):
+    zone = (request.query_params.get("zone") or "").lower()
+    est_mayotte = "mayotte" in zone or zone in {"976", "yt"}
+    valeur = Decimal("9.33") if est_mayotte else Decimal("12.02")
+    source = (
+        "https://www.mayotte.gouv.fr/Actualites/Communiques-de-presse/Communique-de-presse-2026/Revalorisation-du-SMIC-au-1er-janvier-2026"
+        if est_mayotte
+        else "https://www.info.gouv.fr/actualite/le-smic-revalorise-au-1er-janvier-2026"
+    )
+    return Response(
+        {
+            "zone": "Mayotte" if est_mayotte else "France hors Mayotte",
+            "smic_horaire_brut": str(valeur),
+            "date_effet": "2026-01-01",
+            "source": source,
+        }
+    )
+
+
 def _profil_horaire_par_defaut_utilisateur(utilisateur_id: str | None):
     if not utilisateur_id:
         return None

@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
-import { ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire } from "@/types/societe";
+import { ParametreSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire } from "@/types/societe";
 import {
   Plus, Pencil, Trash2, Check, X, ChevronDown, ChevronRight,
   Calculator, TrendingUp, Users, ToggleLeft, ToggleRight,
@@ -65,6 +65,17 @@ function profilVersForm(p: ProfilHoraire): FormProfil {
     taux_charges_patronales: p.taux_charges_patronales,
     heures_productives_an: p.heures_productives_an,
     taux_marge_vente: p.taux_marge_vente,
+  };
+}
+
+function appliquerParametresSociete(data: FormProfil, parametre?: ParametreSociete): FormProfil {
+  if (!parametre) return data;
+  return {
+    ...data,
+    taux_charges_salariales: parametre.taux_charges_salariales,
+    taux_charges_patronales: parametre.taux_charges_patronales,
+    heures_productives_an: parametre.heures_productives_be,
+    taux_marge_vente: parametre.objectif_marge_nette,
   };
 }
 
@@ -232,7 +243,7 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
                         title={s.actif ? "Exclure de la moyenne" : "Inclure dans la moyenne"}
                         style={{ color: s.actif ? "var(--c-base)" : "var(--texte-3)" }}
                       >
-                        {s.actif ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                        {s.actif ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
                       </button>
                       <span style={{ color: s.actif ? "var(--texte)" : "var(--texte-3)", opacity: s.actif ? 1 : 0.5 }}>
                         {s.libelle}
@@ -242,7 +253,7 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
                         className="opacity-40 hover:opacity-100 transition"
                         style={{ color: "#ef4444" }}
                       >
-                        <Trash2 size={11} />
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </th>
@@ -505,15 +516,17 @@ function CarteProfil({
 // ─── Formulaire profil ──────────────────────────────────────────────────────
 
 function FormulaireProfil({
-  form, setForm, onSave, onCancel, enCours,
+  form, setForm, onSave, onCancel, enCours, parametre,
 }: {
   form: FormProfil;
   setForm: (f: FormProfil) => void;
   onSave: () => void;
   onCancel: () => void;
   enCours: boolean;
+  parametre?: ParametreSociete;
 }) {
   const ch = (k: keyof FormProfil, v: string | boolean | number) => setForm({ ...form, [k]: v });
+  const param = parametre ? appliquerParametresSociete(form, parametre) : form;
 
   return (
     <div
@@ -563,46 +576,33 @@ function FormulaireProfil({
       </div>
 
       <p className="font-semibold text-sm pt-2" style={{ color: "var(--texte)" }}>Paramètres de calcul salarial</p>
+      <p className="text-xs" style={{ color: "var(--texte-3)" }}>
+        Ces données proviennent de Société &gt; Charges société &gt; Masse salariale.
+      </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
           <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>
-            Charges salariales (ex : 0.22)
+            Charges salariales
           </label>
-          <input type="number" value={form.taux_charges_salariales}
-            onChange={(e) => ch("taux_charges_salariales", e.target.value)}
-            min="0" max="1" step="0.01"
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono"
-            style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }} />
+          <div className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>{pct(param.taux_charges_salariales)}</div>
         </div>
         <div>
           <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>
-            Charges patronales (ex : 0.42)
+            Charges patronales
           </label>
-          <input type="number" value={form.taux_charges_patronales}
-            onChange={(e) => ch("taux_charges_patronales", e.target.value)}
-            min="0" max="1" step="0.01"
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono"
-            style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }} />
+          <div className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>{pct(param.taux_charges_patronales)}</div>
         </div>
         <div>
           <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>
             Heures productives/an
           </label>
-          <input type="number" value={form.heures_productives_an}
-            onChange={(e) => ch("heures_productives_an", e.target.value)}
-            min="100" max="2200" step="10"
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono"
-            style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }} />
+          <div className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>{fmt(param.heures_productives_an, 0)} h</div>
         </div>
         <div>
           <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>
-            Marge de vente (ex : 0.15)
+            Marge de vente
           </label>
-          <input type="number" value={form.taux_marge_vente}
-            onChange={(e) => ch("taux_marge_vente", e.target.value)}
-            min="0" max="0.99" step="0.01"
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono"
-            style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }} />
+          <div className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>{pct(param.taux_marge_vente)}</div>
         </div>
       </div>
 
@@ -676,11 +676,22 @@ export default function PageTauxHoraires() {
     },
   });
 
+  const { data: parametresSociete = [] } = useQuery<ParametreSociete[]>({
+    queryKey: ["societe-parametres"],
+    queryFn: async () => {
+      const r = await api.get<{ results?: ParametreSociete[] } | ParametreSociete[]>("/api/societe/parametres-societe/");
+      return Array.isArray(r) ? r : (r.results ?? []);
+    },
+  });
+  const parametreSociete = parametresSociete[0];
+
   const sauvegarder = useMutation({
-    mutationFn: (data: FormProfil) =>
-      modifierId
-        ? api.put<ProfilHoraire>(`/api/societe/profils-horaires/${modifierId}/`, { ...data, utiliser_calcul: true })
-        : api.post<ProfilHoraire>("/api/societe/profils-horaires/", { ...data, utiliser_calcul: true }),
+    mutationFn: (data: FormProfil) => {
+      const donnees = appliquerParametresSociete(data, parametreSociete);
+      return modifierId
+        ? api.put<ProfilHoraire>(`/api/societe/profils-horaires/${modifierId}/`, { ...donnees, utiliser_calcul: true })
+        : api.post<ProfilHoraire>("/api/societe/profils-horaires/", { ...donnees, utiliser_calcul: true });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["profils-horaires"] });
       setModifierId(null);
@@ -738,7 +749,7 @@ export default function PageTauxHoraires() {
       )}
 
       {creer && (
-        <FormulaireProfil form={form} setForm={setForm}
+        <FormulaireProfil form={form} setForm={setForm} parametre={parametreSociete}
           onSave={() => sauvegarder.mutate(form)} onCancel={annuler}
           enCours={sauvegarder.isPending} />
       )}
@@ -746,7 +757,7 @@ export default function PageTauxHoraires() {
       <div className="space-y-3">
         {profils.map((p) => (
           modifierId === p.id ? (
-            <FormulaireProfil key={p.id} form={form} setForm={setForm}
+            <FormulaireProfil key={p.id} form={form} setForm={setForm} parametre={parametreSociete}
               onSave={() => sauvegarder.mutate(form)} onCancel={annuler}
               enCours={sauvegarder.isPending} />
           ) : (

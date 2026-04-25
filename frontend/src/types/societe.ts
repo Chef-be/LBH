@@ -158,6 +158,7 @@ export interface ParametreSociete {
   taux_charges_salariales: string;
   taux_charges_patronales: string;
   heures_productives_be: string;
+  decomposition_heures_productives: Record<string, number>;
   objectif_marge_nette: string;
   taux_tva_defaut: string;
   date_creation: string;

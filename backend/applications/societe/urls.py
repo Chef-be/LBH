@@ -15,6 +15,7 @@ from .views import (
     DevisHonorairesViewSet,
     FactureViewSet,
     vue_tableau_de_bord,
+    vue_reference_smic,
     vue_validation_devis_client,
     vue_simulations_profil,
     vue_previsualiser_simulation,
@@ -32,6 +33,7 @@ router.register(r"factures", FactureViewSet, basename="facture")
 
 urlpatterns = [
     path("tableau-de-bord/", vue_tableau_de_bord, name="societe-tableau-de-bord"),
+    path("references/smic/", vue_reference_smic, name="societe-reference-smic"),
     path(
         "validation-client/devis/<str:jeton>/",
         vue_validation_devis_client,
