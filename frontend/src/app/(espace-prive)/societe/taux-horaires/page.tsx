@@ -548,13 +548,17 @@ function FormulaireProfil({
         </div>
         <div>
           <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>
-            Taux horaire HT (€/h) — saisie manuelle
+            Taux horaire HT (€/h) — calcul automatique
           </label>
-          <input type="number" value={form.taux_horaire_ht}
-            onChange={(e) => ch("taux_horaire_ht", e.target.value)}
-            min="0" step="0.50"
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono"
-            style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }} />
+          <div
+            className="rounded-lg px-3 py-2 text-sm font-mono"
+            style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}
+          >
+            {fmt(form.taux_horaire_ht)} €/h
+          </div>
+          <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>
+            Alimenté par les simulations salariales actives du profil.
+          </p>
         </div>
       </div>
 
@@ -675,8 +679,8 @@ export default function PageTauxHoraires() {
   const sauvegarder = useMutation({
     mutationFn: (data: FormProfil) =>
       modifierId
-        ? api.put<ProfilHoraire>(`/api/societe/profils-horaires/${modifierId}/`, data)
-        : api.post<ProfilHoraire>("/api/societe/profils-horaires/", data),
+        ? api.put<ProfilHoraire>(`/api/societe/profils-horaires/${modifierId}/`, { ...data, utiliser_calcul: true })
+        : api.post<ProfilHoraire>("/api/societe/profils-horaires/", { ...data, utiliser_calcul: true }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["profils-horaires"] });
       setModifierId(null);

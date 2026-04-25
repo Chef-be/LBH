@@ -1141,13 +1141,21 @@ export function FormulaireNouveauProjet() {
     if (champ.type_champ === "multi_selection") {
       const selection = Array.isArray(valeur) ? valeur : [];
       return (
-        <div key={champ.code} className="rounded-xl border border-slate-200 bg-white p-4 xl:col-span-2">
-          <p className="text-sm font-medium text-slate-900">{champ.libelle}{champ.obligatoire ? " *" : ""}</p>
+        <div
+          key={champ.code}
+          className="rounded-xl p-4 xl:col-span-2"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <p className="text-sm font-medium" style={{ color: "var(--texte)" }}>{champ.libelle}{champ.obligatoire ? " *" : ""}</p>
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {champ.options.map((option) => {
               const coche = selection.includes(option.value);
               return (
-                <label key={option.value} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                <label
+                  key={option.value}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
+                  style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte-2)" }}
+                >
                   <input
                     type="checkbox"
                     checked={coche}
@@ -1170,7 +1178,11 @@ export function FormulaireNouveauProjet() {
 
     if (champ.type_champ === "booleen") {
       return (
-        <label key={champ.code} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+        <label
+          key={champ.code}
+          className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)", color: "var(--texte-2)" }}
+        >
           <input
             type="checkbox"
             checked={Boolean(valeur)}

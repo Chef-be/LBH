@@ -17,10 +17,12 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
+from .models import ChargeFixeStructure, ParametreSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
 from .serializers import (
     ProfilHoraireSerializer,
     ProfilHoraireUtilisateurSerializer,
+    ParametreSocieteSerializer,
+    ChargeFixeStructureSerializer,
     SimulationSalaireSerializer,
     DevisHonorairesListeSerializer, DevisHonorairesDetailSerializer,
     LigneDevisSerializer,
@@ -225,6 +227,18 @@ class ProfilHoraireUtilisateurViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return ProfilHoraireUtilisateur.objects.select_related("utilisateur", "profil_horaire")
+
+
+class ParametreSocieteViewSet(viewsets.ModelViewSet):
+    serializer_class = ParametreSocieteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ParametreSociete.objects.all()
+
+
+class ChargeFixeStructureViewSet(viewsets.ModelViewSet):
+    serializer_class = ChargeFixeStructureSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ChargeFixeStructure.objects.all()
 
 
 def _profil_horaire_par_defaut_utilisateur(utilisateur_id: str | None):

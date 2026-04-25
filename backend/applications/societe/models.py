@@ -194,6 +194,54 @@ class ProfilHoraireUtilisateur(models.Model):
 
 
 # ─────────────────────────────────────────────
+# Paramètres économiques société
+# ─────────────────────────────────────────────
+
+class ParametreSociete(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    annee = models.PositiveSmallIntegerField(default=2026, unique=True)
+    zone_smic = models.CharField(max_length=80, default="Mayotte")
+    smic_horaire_brut = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("9.33"))
+    pmss = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("4005.00"))
+    pass_annuel = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("48060.00"))
+    taux_charges_salariales = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.2200"))
+    taux_charges_patronales = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.4200"))
+    heures_productives_be = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("1600.00"))
+    objectif_marge_nette = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.1500"))
+    taux_tva_defaut = models.DecimalField(max_digits=5, decimal_places=3, default=Decimal("0.200"))
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_parametre"
+        ordering = ["-annee"]
+
+    def __str__(self):
+        return f"Paramètres société {self.annee}"
+
+
+class ChargeFixeStructure(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    libelle = models.CharField(max_length=200)
+    montant_mensuel = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    actif = models.BooleanField(default=True)
+    ordre = models.PositiveSmallIntegerField(default=0)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_charge_fixe_structure"
+        ordering = ["ordre", "libelle"]
+
+    @property
+    def montant_annuel(self):
+        return (self.montant_mensuel * Decimal("12")).quantize(Decimal("0.01"))
+
+    def __str__(self):
+        return self.libelle
+
+
+# ─────────────────────────────────────────────
 # Devis d'honoraires
 # ─────────────────────────────────────────────
 

@@ -3,7 +3,19 @@ Sérialiseurs — Module Pilotage Société
 """
 
 from rest_framework import serializers
-from .models import ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
+from .models import (
+    ChargeFixeStructure,
+    ParametreSociete,
+    ProfilHoraire,
+    ProfilHoraireUtilisateur,
+    SimulationSalaire,
+    DevisHonoraires,
+    LigneDevis,
+    Facture,
+    LigneFacture,
+    Paiement,
+    TempsPasse,
+)
 
 
 # ─────────────────────────────────────────────
@@ -70,6 +82,30 @@ class ProfilHoraireUtilisateurSerializer(serializers.ModelSerializer):
             "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class ParametreSocieteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ParametreSociete
+        fields = [
+            "id", "annee", "zone_smic", "smic_horaire_brut", "pmss", "pass_annuel",
+            "taux_charges_salariales", "taux_charges_patronales",
+            "heures_productives_be", "objectif_marge_nette", "taux_tva_defaut",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class ChargeFixeStructureSerializer(serializers.ModelSerializer):
+    montant_annuel = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = ChargeFixeStructure
+        fields = [
+            "id", "libelle", "montant_mensuel", "montant_annuel",
+            "actif", "ordre", "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "montant_annuel", "date_creation", "date_modification"]
 
 
 # ─────────────────────────────────────────────

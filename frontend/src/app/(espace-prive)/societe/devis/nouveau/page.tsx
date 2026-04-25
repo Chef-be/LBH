@@ -35,6 +35,28 @@ interface UtilisateurOption {
   fonction: string;
 }
 
+interface OrganisationOption {
+  id: string;
+  nom: string;
+  type_organisation: string;
+  siret: string;
+  adresse: string;
+  code_postal: string;
+  ville: string;
+  pays: string;
+  telephone: string;
+  courriel: string;
+}
+
+interface EntreprisePubliqueOption {
+  siret: string;
+  nom: string;
+  adresse: string;
+  code_postal: string;
+  ville: string;
+  pays: string;
+}
+
 interface DevisForm {
   intitule: string;
   client_nom: string;
@@ -128,6 +150,7 @@ export default function PageNouveauDevis() {
   const [enCours, setEnCours] = useState(false);
   const [assistantInitialise, setAssistantInitialise] = useState(false);
   const [utilisateurPressenti, setUtilisateurPressenti] = useState("");
+  const [clientLocalId, setClientLocalId] = useState("");
 
   const requeteParcours = useMemo(() => {
     const params = new URLSearchParams();
@@ -202,6 +225,30 @@ export default function PageNouveauDevis() {
     },
   });
 
+  const rechercheClient = form.client_nom.trim();
+
+  const { data: clientsLocaux = [] } = useQuery<OrganisationOption[]>({
+    queryKey: ["societe-clients-locaux", rechercheClient],
+    enabled: rechercheClient.length >= 2,
+    queryFn: async () => {
+      const r = await api.get<{ results?: OrganisationOption[] } | OrganisationOption[]>(
+        `/api/organisations/?search=${encodeURIComponent(rechercheClient)}`,
+      );
+      return Array.isArray(r) ? r : (r.results ?? []);
+    },
+  });
+
+  const { data: clientsPublics = [] } = useQuery<EntreprisePubliqueOption[]>({
+    queryKey: ["societe-clients-publics", rechercheClient],
+    enabled: rechercheClient.length >= 3 && clientsLocaux.length === 0,
+    queryFn: async () => {
+      const r = await api.get<{ results: EntreprisePubliqueOption[] }>(
+        `/api/organisations/recherche-entreprises/?q=${encodeURIComponent(rechercheClient)}&limit=5`,
+      );
+      return r.results ?? [];
+    },
+  });
+
   useEffect(() => {
     setMissionsSelectionnees([]);
     setAssistantInitialise(false);
@@ -246,9 +293,74 @@ export default function PageNouveauDevis() {
   const totalHT = lignes.reduce((somme, ligne) => somme + calculerMontantLigne(ligne), 0);
   const totalTVA = totalHT * (parseFloat(form.taux_tva) || 0);
   const totalTTC = totalHT + totalTVA;
+  const analyseRentabilite = useMemo(() => {
+    const coutBe = lignes.reduce((somme, ligne) => {
+      if (ligne.type_ligne !== "horaire") return somme;
+      const profil = profils.find((item) => item.id === ligne.profil);
+      const simulations = profil?.simulations.filter((simulation) => simulation.actif) ?? [];
+      const dhmo = simulations.length
+        ? simulations.reduce((s, simulation) => s + Number(simulation.dhmo), 0) / simulations.length
+        : (Number(ligne.taux_horaire) || 0) * 0.75;
+      return somme + (Number(ligne.nb_heures) || 0) * dhmo;
+    }, 0);
+    const marge = totalHT - coutBe;
+    const tauxMarge = totalHT > 0 ? marge / totalHT : 0;
+    const seuilBas = 0.15;
+    const seuilHaut = 0.55;
+    const statut = tauxMarge < seuilBas ? "sous_evalue" : tauxMarge > seuilHaut ? "surevalue" : "coherent";
+    return { coutBe, marge, tauxMarge, statut };
+  }, [lignes, profils, totalHT]);
 
   const mettreAJourFormulaire = <K extends keyof DevisForm>(champ: K, valeur: DevisForm[K]) => {
     setForm((courant) => ({ ...courant, [champ]: valeur }));
+    if (champ === "client_nom") setClientLocalId("");
+  };
+
+  const appliquerClientLocal = (client: OrganisationOption) => {
+    setClientLocalId(client.id);
+    setForm((courant) => ({
+      ...courant,
+      client_nom: client.nom,
+      client_email: client.courriel || courant.client_email,
+      client_telephone: client.telephone || courant.client_telephone,
+      client_adresse: [client.adresse, client.code_postal, client.ville, client.pays].filter(Boolean).join(" "),
+    }));
+  };
+
+  const appliquerClientPublic = (client: EntreprisePubliqueOption) => {
+    setClientLocalId("");
+    setForm((courant) => ({
+      ...courant,
+      client_nom: client.nom,
+      client_adresse: [client.adresse, client.code_postal, client.ville, client.pays].filter(Boolean).join(" "),
+    }));
+  };
+
+  const typeOrganisationDepuisClient = () => {
+    if (form.famille_client === "entreprise") return "entreprise";
+    if (form.famille_client === "maitrise_ouvrage") return "maitre_ouvrage";
+    return "partenaire";
+  };
+
+  const enregistrerClientSiNecessaire = async () => {
+    if (clientLocalId || !form.client_nom.trim()) return;
+    const existe = clientsLocaux.some((client) => client.nom.toLowerCase() === form.client_nom.trim().toLowerCase());
+    if (existe) return;
+    try {
+      const client = await api.post<OrganisationOption>("/api/organisations/", {
+        code: `CLIENT-${Date.now()}`,
+        nom: form.client_nom.trim(),
+        type_organisation: typeOrganisationDepuisClient(),
+        adresse: form.client_adresse,
+        telephone: form.client_telephone,
+        courriel: form.client_email,
+        pays: "France",
+        est_active: true,
+      });
+      setClientLocalId(client.id);
+    } catch {
+      // La création du devis ne doit pas être bloquée par une fiche client incomplète.
+    }
   };
 
   const mettreAJourLigne = (index: number, champ: keyof LigneForm, valeur: string) => {
@@ -375,6 +487,7 @@ export default function PageNouveauDevis() {
     setErreur(null);
 
     try {
+      await enregistrerClientSiNecessaire();
       const assistant = assistantQuery.data;
       const contexteProjetSaisi = assistant?.contexte_projet_saisi
         ? {
@@ -811,9 +924,25 @@ export default function PageNouveauDevis() {
       <section className="rounded-xl p-6 space-y-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
         <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Client destinataire</h3>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
+          <div className="relative">
             <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Nom du client</label>
             <input type="text" value={form.client_nom} onChange={(e) => mettreAJourFormulaire("client_nom", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
+            {rechercheClient.length >= 2 && (clientsLocaux.length > 0 || clientsPublics.length > 0) ? (
+              <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-xl p-2 shadow-xl" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+                {clientsLocaux.map((client) => (
+                  <button key={client.id} type="button" onClick={() => appliquerClientLocal(client)} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:opacity-80" style={{ color: "var(--texte)" }}>
+                    <span className="font-medium">{client.nom}</span>
+                    <span className="block text-xs" style={{ color: "var(--texte-3)" }}>{client.ville || client.siret || "Client enregistré"}</span>
+                  </button>
+                ))}
+                {clientsLocaux.length === 0 && clientsPublics.map((client) => (
+                  <button key={client.siret} type="button" onClick={() => appliquerClientPublic(client)} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:opacity-80" style={{ color: "var(--texte)" }}>
+                    <span className="font-medium">{client.nom}</span>
+                    <span className="block text-xs" style={{ color: "var(--texte-3)" }}>{client.siret} · {client.ville}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Interlocuteur</label>
@@ -832,6 +961,34 @@ export default function PageNouveauDevis() {
             <textarea value={form.client_adresse} onChange={(e) => mettreAJourFormulaire("client_adresse", e.target.value)} rows={2} className="w-full resize-none rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
         </div>
+      </section>
+
+      <section className="rounded-xl p-6 space-y-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+        <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Analyse de rentabilité</h3>
+        <div className="grid gap-4 md:grid-cols-4">
+          {[
+            ["Montant HT", totalHT.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) + " €"],
+            ["Coût BE estimé", analyseRentabilite.coutBe.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) + " €"],
+            ["Marge brute", analyseRentabilite.marge.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) + " €"],
+            ["Taux de marge", (analyseRentabilite.tauxMarge * 100).toLocaleString("fr-FR", { minimumFractionDigits: 1 }) + " %"],
+          ].map(([label, valeur]) => (
+            <div key={label} className="rounded-xl p-4" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+              <p className="text-xs uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>{label}</p>
+              <p className="mt-1 text-lg font-bold" style={{ color: "var(--texte)" }}>{valeur}</p>
+            </div>
+          ))}
+        </div>
+        <p className="rounded-xl px-4 py-3 text-sm" style={{
+          background: analyseRentabilite.statut === "coherent" ? "color-mix(in srgb, #16a34a 12%, var(--fond-carte))" : "color-mix(in srgb, #f59e0b 14%, var(--fond-carte))",
+          border: `1px solid ${analyseRentabilite.statut === "coherent" ? "#16a34a" : "#f59e0b"}`,
+          color: "var(--texte)",
+        }}>
+          {analyseRentabilite.statut === "sous_evalue"
+            ? "Le devis semble sous-évalué au regard du coût BE estimé."
+            : analyseRentabilite.statut === "surevalue"
+              ? "Le devis présente une marge élevée : vérifier la cohérence commerciale avant envoi."
+              : "Le devis est cohérent avec le coût BE estimé."}
+        </p>
       </section>
 
       <section className="rounded-xl p-6 space-y-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>

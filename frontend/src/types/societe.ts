@@ -148,6 +148,33 @@ export interface ProfilHoraireUtilisateur {
   date_modification: string;
 }
 
+export interface ParametreSociete {
+  id: string;
+  annee: number;
+  zone_smic: string;
+  smic_horaire_brut: string;
+  pmss: string;
+  pass_annuel: string;
+  taux_charges_salariales: string;
+  taux_charges_patronales: string;
+  heures_productives_be: string;
+  objectif_marge_nette: string;
+  taux_tva_defaut: string;
+  date_creation: string;
+  date_modification: string;
+}
+
+export interface ChargeFixeStructure {
+  id: string;
+  libelle: string;
+  montant_mensuel: string;
+  montant_annuel: string;
+  actif: boolean;
+  ordre: number;
+  date_creation: string;
+  date_modification: string;
+}
+
 export interface LigneDevis {
   id: string;
   ordre: number;

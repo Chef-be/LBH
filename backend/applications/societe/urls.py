@@ -8,6 +8,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ProfilHoraireViewSet,
     ProfilHoraireUtilisateurViewSet,
+    ParametreSocieteViewSet,
+    ChargeFixeStructureViewSet,
     SimulationSalaireViewSet,
     TempsPasseViewSet,
     DevisHonorairesViewSet,
@@ -21,6 +23,8 @@ from .views import (
 router = DefaultRouter()
 router.register(r"profils-horaires", ProfilHoraireViewSet, basename="profil-horaire")
 router.register(r"profils-horaires-utilisateurs", ProfilHoraireUtilisateurViewSet, basename="profil-horaire-utilisateur")
+router.register(r"parametres-societe", ParametreSocieteViewSet, basename="parametre-societe")
+router.register(r"charges-fixes", ChargeFixeStructureViewSet, basename="charge-fixe-structure")
 router.register(r"simulations-salaire", SimulationSalaireViewSet, basename="simulation-salaire")
 router.register(r"temps-passes", TempsPasseViewSet, basename="temps-passe")
 router.register(r"devis", DevisHonorairesViewSet, basename="devis-honoraires")
