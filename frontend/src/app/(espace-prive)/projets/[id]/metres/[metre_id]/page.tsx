@@ -1828,15 +1828,11 @@ ${lignesLegende.map((z) => `
         setChargementImage(false);
       }
     }
-    // Charger la géométrie DXF pour l'accroche objet (silencieux si absent ou non-DXF)
-    const estDxf = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(fp.url_fichier ?? "");
-    if (estDxf) {
-      api.get<{ points: Array<[number, number]> }>(`/api/metres/${metreId}/fonds-plan/${fp.id}/geometrie/`)
-        .then((geo) => { setPointsAccroche(geo.points ?? []); })
-        .catch(() => { setPointsAccroche([]); });
-    } else {
-      setPointsAccroche([]);
-    }
+    // Charger les points d'accroche (tous formats : DXF, PDF, image)
+    setPointsAccroche([]);
+    api.get<{ points: Array<[number, number]>; nb_points: number }>(`/api/metres/${metreId}/fonds-plan/${fp.id}/geometrie/`)
+      .then((geo) => { if ((geo.nb_points ?? 0) > 0) setPointsAccroche(geo.points); })
+      .catch(() => { /* silencieux — accroche indisponible */ });
 
     // Charger les zones pour ce fond de plan
     const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;

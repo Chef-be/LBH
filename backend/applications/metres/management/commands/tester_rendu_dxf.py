@@ -42,7 +42,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         import tempfile
         import os
-        from applications.metres.services import convertir_dxf_en_png, extraire_geometrie_dxf
+        from applications.metres.services import convertir_dxf_en_png, extraire_geometrie_fond_plan
 
         erreurs = []
         ok_count = 0
@@ -92,7 +92,7 @@ class Command(BaseCommand):
                 ok_count += 1
             else:
                 for fp in fps[:3]:
-                    geo = extraire_geometrie_dxf(fp)
+                    geo = extraire_geometrie_fond_plan(fp)
                     n = len(geo.get("points", []))
                     self.stdout.write(self.style.SUCCESS(f"  OK — {fp.fichier.name[:60]} → {n} points"))
                 ok_count += 1

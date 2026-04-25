@@ -590,13 +590,298 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     return True
 
 
-def extraire_geometrie_dxf(fond_plan) -> dict:
+def _dedupliquer_points(points: list, tolerance: float = 0.0015) -> list:
+    """Déduplique une liste de points [x,y] normalisés par grille."""
+    grille: dict = {}
+    resultat: list = []
+    for p in points:
+        clef = (int(p[0] / tolerance), int(p[1] / tolerance))
+        if clef not in grille:
+            grille[clef] = True
+            resultat.append(p)
+    return resultat
+
+
+def _normaliser_point(x: float, y: float, x0: float, y0: float, total_w: float, total_h: float):
+    """Convertit des coordonnées monde → [0,1] normalisées (Y flippé, 0=haut image)."""
+    nx = (x - x0) / total_w
+    ny = 1.0 - (y - y0) / total_h
+    if -0.02 <= nx <= 1.02 and -0.02 <= ny <= 1.02:
+        return [round(max(0.0, min(1.0, nx)), 6), round(max(0.0, min(1.0, ny)), 6)]
+    return None
+
+
+def _extraire_points_dxf(chemin: str) -> list:
     """
-    Extrait les points d'accroche (endpoints, vertices) du DXF en coordonnées normalisées [0,1].
-    x=0 bord gauche, y=0 bord haut de l'image rendue.
-    Retourne {"points": [[x, y], ...]} pour l'accroche objet du canvas.
+    Extrait les points d'accroche d'un fichier DXF :
+    endpoints, milieux de segments, sommets de polylignes, arcs, cercles, blocs.
+    Retourne une liste de [x, y] en coordonnées normalisées [0,1].
     """
     import math
+    import ezdxf
+    import ezdxf.recover
+
+    try:
+        doc = ezdxf.readfile(chemin)
+    except Exception:
+        doc, _ = ezdxf.recover.readfile(chemin)
+
+    ext = _extents_valides(doc)
+    if not ext:
+        return []
+
+    xmin, ymin, xmax, ymax = ext
+    dx = xmax - xmin
+    dy = ymax - ymin
+    marge = max(dx, dy) * 0.03
+    x0, y0 = xmin - marge, ymin - marge
+    total_w, total_h = dx + 2 * marge, dy + 2 * marge
+
+    def norm(x, y):
+        return _normaliser_point(x, y, x0, y0, total_w, total_h)
+
+    def appliquer_transform(lx, ly, ox, oy, sx, sy, cos_r, sin_r):
+        cx, cy = lx * sx, ly * sy
+        if cos_r != 1.0 or sin_r != 0.0:
+            cx, cy = cx * cos_r - cy * sin_r, cx * sin_r + cy * cos_r
+        return cx + ox, cy + oy
+
+    points: list = []
+    MAX = 10000
+
+    def ajouter(wx, wy):
+        if len(points) < MAX:
+            p = norm(wx, wy)
+            if p:
+                points.append(p)
+
+    def ajouter_milieu(ax, ay, bx, by):
+        ajouter((ax + bx) / 2, (ay + by) / 2)
+
+    def traiter(entity, ox=0.0, oy=0.0, sx=1.0, sy=1.0, cos_r=1.0, sin_r=0.0, profondeur=0):
+        if len(points) >= MAX or profondeur > 5:
+            return
+        t = entity.dxftype()
+        try:
+            if t == "LINE":
+                s, e = entity.dxf.start, entity.dxf.end
+                ax, ay = appliquer_transform(s.x, s.y, ox, oy, sx, sy, cos_r, sin_r)
+                bx, by = appliquer_transform(e.x, e.y, ox, oy, sx, sy, cos_r, sin_r)
+                ajouter(ax, ay)
+                ajouter(bx, by)
+                ajouter_milieu(ax, ay, bx, by)
+
+            elif t == "LWPOLYLINE":
+                pts_lw = list(entity.get_points())
+                for i, v in enumerate(pts_lw):
+                    wx, wy = appliquer_transform(v[0], v[1], ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter(wx, wy)
+                    if i > 0:
+                        px, py = appliquer_transform(pts_lw[i - 1][0], pts_lw[i - 1][1], ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter_milieu(px, py, wx, wy)
+                if entity.is_closed and len(pts_lw) > 1:
+                    ax, ay = appliquer_transform(pts_lw[-1][0], pts_lw[-1][1], ox, oy, sx, sy, cos_r, sin_r)
+                    bx, by = appliquer_transform(pts_lw[0][0], pts_lw[0][1], ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter_milieu(ax, ay, bx, by)
+
+            elif t == "POLYLINE":
+                verts = list(entity.vertices)
+                for i, vertex in enumerate(verts):
+                    loc = vertex.dxf.location
+                    wx, wy = appliquer_transform(loc.x, loc.y, ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter(wx, wy)
+                    if i > 0:
+                        prev = verts[i - 1].dxf.location
+                        px, py = appliquer_transform(prev.x, prev.y, ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter_milieu(px, py, wx, wy)
+
+            elif t == "SPLINE":
+                pts_spl = list(entity.control_points)
+                for i, v in enumerate(pts_spl):
+                    wx, wy = appliquer_transform(v[0], v[1], ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter(wx, wy)
+                    if i > 0:
+                        px, py = appliquer_transform(pts_spl[i - 1][0], pts_spl[i - 1][1], ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter_milieu(px, py, wx, wy)
+
+            elif t == "ARC":
+                c, r = entity.dxf.center, entity.dxf.radius
+                sa, ea = math.radians(entity.dxf.start_angle), math.radians(entity.dxf.end_angle)
+                for angle in (sa, ea, (sa + ea) / 2):
+                    lx, ly = c.x + r * math.cos(angle), c.y + r * math.sin(angle)
+                    wx, wy = appliquer_transform(lx, ly, ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter(wx, wy)
+                wx, wy = appliquer_transform(c.x, c.y, ox, oy, sx, sy, cos_r, sin_r)
+                ajouter(wx, wy)
+
+            elif t == "CIRCLE":
+                wx, wy = appliquer_transform(entity.dxf.center.x, entity.dxf.center.y, ox, oy, sx, sy, cos_r, sin_r)
+                ajouter(wx, wy)
+
+            elif t == "ELLIPSE":
+                c = entity.dxf.center
+                wx, wy = appliquer_transform(c.x, c.y, ox, oy, sx, sy, cos_r, sin_r)
+                ajouter(wx, wy)
+
+            elif t in ("TEXT", "MTEXT"):
+                ins = entity.dxf.insert if entity.dxf.hasattr("insert") else None
+                if ins:
+                    wx, wy = appliquer_transform(ins.x, ins.y, ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter(wx, wy)
+
+            elif t == "INSERT":
+                ins = entity.dxf.insert
+                isx = entity.dxf.xscale if entity.dxf.hasattr("xscale") else 1.0
+                isy = entity.dxf.yscale if entity.dxf.hasattr("yscale") else 1.0
+                irot = math.radians(entity.dxf.rotation) if entity.dxf.hasattr("rotation") else 0.0
+                # Compose la rotation avec le parent
+                icos, isin = math.cos(irot), math.sin(irot)
+                new_cos = cos_r * icos - sin_r * isin
+                new_sin = cos_r * isin + sin_r * icos
+                # Compose l'offset (le point d'insertion est lui-même transformé par le parent)
+                ix, iy = appliquer_transform(ins.x, ins.y, ox, oy, sx, sy, cos_r, sin_r)
+                block_name = entity.dxf.name
+                if block_name in doc.blocks:
+                    for blk_ent in doc.blocks[block_name]:
+                        traiter(blk_ent, ix, iy, isx * sx, isy * sy, new_cos, new_sin, profondeur + 1)
+
+            elif t == "DIMENSION":
+                for attr in ("defpoint", "defpoint2", "defpoint3", "text_midpoint"):
+                    if entity.dxf.hasattr(attr):
+                        v = getattr(entity.dxf, attr)
+                        wx, wy = appliquer_transform(v.x, v.y, ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx, wy)
+        except Exception:
+            pass
+
+    for entity in doc.modelspace():
+        traiter(entity)
+
+    return points
+
+
+def _extraire_points_pdf(chemin: str) -> list:
+    """
+    Extrait les points d'accroche d'un PDF via PyMuPDF.
+    Retourne une liste de [x, y] en coordonnées normalisées [0,1].
+    """
+    import fitz
+
+    doc = fitz.open(chemin)
+    page = doc[0]
+    rect = page.rect
+    w, h = rect.width, rect.height
+    if w <= 0 or h <= 0:
+        return []
+
+    points: list = []
+
+    def norm(px, py):
+        nx, ny = px / w, py / h
+        if 0 <= nx <= 1 and 0 <= ny <= 1:
+            return [round(nx, 6), round(ny, 6)]
+        return None
+
+    def milieu(ax, ay, bx, by):
+        return norm((ax + bx) / 2, (ay + by) / 2)
+
+    for path in page.get_drawings():
+        for item in path.get("items", []):
+            try:
+                op = item[0]
+                if op == "l":  # segment
+                    p1, p2 = item[1], item[2]
+                    for pt in (norm(p1.x, p1.y), norm(p2.x, p2.y), milieu(p1.x, p1.y, p2.x, p2.y)):
+                        if pt:
+                            points.append(pt)
+                elif op == "re":  # rectangle
+                    r = item[1]
+                    corners = [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)]
+                    for i, (cx, cy) in enumerate(corners):
+                        p = norm(cx, cy)
+                        if p:
+                            points.append(p)
+                    # Milieux des côtés
+                    for i in range(4):
+                        ax, ay = corners[i]
+                        bx, by = corners[(i + 1) % 4]
+                        pm = milieu(ax, ay, bx, by)
+                        if pm:
+                            points.append(pm)
+                elif op == "c":  # courbe de Bézier
+                    p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
+                    for pt in (norm(p1.x, p1.y), norm(p4.x, p4.y), milieu(p1.x, p1.y, p4.x, p4.y)):
+                        if pt:
+                            points.append(pt)
+                elif op == "qu":  # quadrant arc
+                    p1, p2 = item[1], item[2]
+                    for pt in (norm(p1.x, p1.y), norm(p2.x, p2.y)):
+                        if pt:
+                            points.append(pt)
+            except Exception:
+                pass
+
+    doc.close()
+    return points
+
+
+def _extraire_points_image(chemin: str) -> list:
+    """
+    Détecte les coins saillants d'une image raster (JPG, PNG, TIFF) via OpenCV.
+    Retourne une liste de [x, y] en coordonnées normalisées [0,1].
+    """
+    import cv2
+    import numpy as np
+
+    img = cv2.imread(chemin, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return []
+
+    h, w = img.shape
+    if w <= 0 or h <= 0:
+        return []
+
+    # Réduction pour les très grandes images (garde la précision suffisante)
+    MAX_DIM = 2000
+    facteur = min(MAX_DIM / max(w, h), 1.0)
+    if facteur < 1.0:
+        img = cv2.resize(img, (int(w * facteur), int(h * facteur)), interpolation=cv2.INTER_AREA)
+        rh, rw = img.shape
+    else:
+        rw, rh = w, h
+
+    # Pré-traitement : contraste adaptatif + flou léger
+    img = cv2.equalizeHist(img)
+    blurred = cv2.GaussianBlur(img, (3, 3), 0)
+
+    # Détection de coins via Shi-Tomasi (goodFeaturesToTrack)
+    coins = cv2.goodFeaturesToTrack(
+        blurred,
+        maxCorners=3000,
+        qualityLevel=0.005,
+        minDistance=max(5, int(min(rw, rh) * 0.003)),
+        blockSize=5,
+    )
+
+    if coins is None:
+        return []
+
+    points = []
+    for c in coins:
+        px, py = float(c[0][0]), float(c[0][1])
+        nx, ny = px / rw, py / rh
+        if 0 <= nx <= 1 and 0 <= ny <= 1:
+            points.append([round(nx, 6), round(ny, 6)])
+
+    return points
+
+
+def extraire_geometrie_fond_plan(fond_plan) -> dict:
+    """
+    Point d'entrée unique pour l'extraction des points d'accroche.
+    Dispatche vers la méthode adaptée selon le format du fond de plan.
+    Retourne {"points": [[x, y], ...], "format": str, "nb_points": int}.
+    """
     import os
     import tempfile
     import logging
@@ -604,134 +889,41 @@ def extraire_geometrie_dxf(fond_plan) -> dict:
     logger = logging.getLogger(__name__)
 
     if not (fond_plan.fichier and fond_plan.fichier.name):
-        return {"points": []}
+        return {"points": [], "format": "inconnu", "nb_points": 0}
+
     nom = fond_plan.fichier.name.lower()
-    if not nom.endswith(".dxf"):
-        return {"points": []}
+    fmt = fond_plan.format_fichier or ""
 
-    try:
-        import ezdxf
-        import ezdxf.recover
-    except ImportError:
-        return {"points": []}
+    # Déterminer le format et l'extension de téléchargement
+    if fmt == "dxf" or nom.endswith(".dxf"):
+        suffix, extracteur = ".dxf", _extraire_points_dxf
+    elif fmt == "pdf" or nom.endswith(".pdf"):
+        suffix, extracteur = ".pdf", _extraire_points_pdf
+    elif fmt == "image" or any(nom.endswith(e) for e in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")):
+        suffix = os.path.splitext(nom)[1] or ".png"
+        extracteur = _extraire_points_image
+    else:
+        return {"points": [], "format": fmt, "nb_points": 0}
 
-    with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(fond_plan.fichier.read())
         chemin = tmp.name
 
     try:
-        try:
-            doc = ezdxf.readfile(chemin)
-        except Exception:
-            doc, _ = ezdxf.recover.readfile(chemin)
-
-        ext = _extents_valides(doc)
-        if not ext:
-            return {"points": []}
-
-        xmin, ymin, xmax, ymax = ext
-        dx = xmax - xmin
-        dy = ymax - ymin
-        marge = max(dx, dy) * 0.03
-        x0 = xmin - marge
-        y0 = ymin - marge
-        total_w = dx + 2 * marge
-        total_h = dy + 2 * marge
-
-        def normaliser(x: float, y: float):
-            nx = (x - x0) / total_w
-            ny = 1.0 - (y - y0) / total_h  # Y flipped : 0 = haut image
-            if -0.01 <= nx <= 1.01 and -0.01 <= ny <= 1.01:
-                return [round(max(0.0, min(1.0, nx)), 6), round(max(0.0, min(1.0, ny)), 6)]
-            return None
-
-        points: list = []
-        MAX_POINTS = 6000
-
-        def extraire_entite(entity, ox: float = 0.0, oy: float = 0.0, sx: float = 1.0, sy: float = 1.0, rot: float = 0.0):
-            if len(points) >= MAX_POINTS:
-                return
-            t = entity.dxftype()
-            try:
-                if t == "LINE":
-                    for attr in ("start", "end"):
-                        v = getattr(entity.dxf, attr)
-                        cx, cy = v.x * sx, v.y * sy
-                        if rot:
-                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
-                        p = normaliser(cx + ox, cy + oy)
-                        if p:
-                            points.append(p)
-                elif t == "LWPOLYLINE":
-                    for v in entity.get_points():
-                        cx, cy = v[0] * sx, v[1] * sy
-                        if rot:
-                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
-                        p = normaliser(cx + ox, cy + oy)
-                        if p:
-                            points.append(p)
-                elif t == "POLYLINE":
-                    for vertex in entity.vertices:
-                        loc = vertex.dxf.location
-                        cx, cy = loc.x * sx, loc.y * sy
-                        if rot:
-                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
-                        p = normaliser(cx + ox, cy + oy)
-                        if p:
-                            points.append(p)
-                elif t == "ARC":
-                    c = entity.dxf.center
-                    r = entity.dxf.radius
-                    for deg in (entity.dxf.start_angle, entity.dxf.end_angle):
-                        a = math.radians(deg)
-                        cx, cy = (c.x + r * math.cos(a)) * sx, (c.y + r * math.sin(a)) * sy
-                        if rot:
-                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
-                        p = normaliser(cx + ox, cy + oy)
-                        if p:
-                            points.append(p)
-                elif t == "CIRCLE":
-                    cx, cy = entity.dxf.center.x * sx, entity.dxf.center.y * sy
-                    if rot:
-                        cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
-                    p = normaliser(cx + ox, cy + oy)
-                    if p:
-                        points.append(p)
-                elif t == "INSERT":
-                    ins = entity.dxf.insert
-                    isx = entity.dxf.xscale if entity.dxf.hasattr("xscale") else 1.0
-                    isy = entity.dxf.yscale if entity.dxf.hasattr("yscale") else 1.0
-                    irot = math.radians(entity.dxf.rotation) if entity.dxf.hasattr("rotation") else 0.0
-                    block_name = entity.dxf.name
-                    if block_name in doc.blocks:
-                        for blk_ent in doc.blocks[block_name]:
-                            extraire_entite(blk_ent, ins.x + ox, ins.y + oy, isx * sx, isy * sy, irot + rot)
-            except Exception:
-                pass
-
-        for entity in doc.modelspace():
-            extraire_entite(entity)
-            if len(points) >= MAX_POINTS:
-                break
-
-        # Dédupliquer par grille (tolérance 0.15% du plan)
-        TOLERANCE = 0.0015
-        grille: dict = {}
-        points_uniques: list = []
-        for p in points:
-            clef = (int(p[0] / TOLERANCE), int(p[1] / TOLERANCE))
-            if clef not in grille:
-                grille[clef] = True
-                points_uniques.append(p)
-
-        logger.info("Géométrie DXF extraite : %d points d'accroche pour %s", len(points_uniques), fond_plan.fichier.name)
-        return {"points": points_uniques}
-
+        points_bruts = extracteur(chemin)
+        points = _dedupliquer_points(points_bruts)
+        logger.info("Accroche %s : %d points extraits pour %s", fmt or suffix, len(points), fond_plan.fichier.name)
+        return {"points": points, "format": fmt or suffix, "nb_points": len(points)}
     except Exception:
-        logger.error("Extraction géométrie DXF échouée pour %s", fond_plan.fichier.name, exc_info=True)
-        return {"points": []}
+        logger.error("Extraction accroche échouée pour %s", fond_plan.fichier.name, exc_info=True)
+        return {"points": [], "format": fmt, "nb_points": 0}
     finally:
         os.unlink(chemin)
+
+
+# Alias pour compatibilité avec la commande tester_rendu_dxf
+def extraire_geometrie_dxf(fond_plan) -> dict:
+    return extraire_geometrie_fond_plan(fond_plan)
 
 
 def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):

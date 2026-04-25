@@ -182,9 +182,9 @@ def vue_geometrie_fond_plan(request, metre_id, pk):
     Retourne les points d'accroche du DXF en coordonnées normalisées [0,1].
     Utilisé par le canvas pour le snapping (accroche objet).
     """
-    from .services import extraire_geometrie_dxf
+    from .services import extraire_geometrie_fond_plan
     fond = generics.get_object_or_404(FondPlan, pk=pk, metre_id=metre_id)
-    return Response(extraire_geometrie_dxf(fond))
+    return Response(extraire_geometrie_fond_plan(fond))
 
 
 @api_view(["POST"])
