@@ -317,22 +317,34 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         ax.set_ylim(ymin - marge, ymax + marge)
 
     from ezdxf.addons.drawing.config import Configuration, HatchPolicy
+    import matplotlib.patches as mpatches
 
     ctx = RenderContext(doc)
     ctx.current_layout_properties.set_colors(BG)
     out = MatplotlibBackend(ax)
-    # SHOW_OUTLINE : affiche uniquement le contour des hachures (pas de remplissage)
-    # évite les débordements de remplissage solide hors limites du plan
-    config = Configuration.defaults()
-    config = config.with_changes(hatch_policy=HatchPolicy.SHOW_OUTLINE)
+
+    # À basse résolution (apercu) : SHOW_OUTLINE — contours sans remplissage pour éviter
+    # que les fonds colorés solides masquent les détails (pattern invisible < 2px).
+    # À haute résolution (HD) : NORMAL — les lignes ANSI31 sont visibles (~9px d'espacement).
+    px_par_metre = largeur_px / (dx if ext else largeur_px)
+    espacement_ansi31 = 0.635  # mètres pour scale=0.2
+    lignes_visibles = espacement_ansi31 * px_par_metre >= 2.5
+    hatch_policy = HatchPolicy.NORMAL if lignes_visibles else HatchPolicy.SHOW_OUTLINE
+    config = Configuration.defaults().with_changes(hatch_policy=hatch_policy)
+
     # finalize=False : évite que ezdxf rappelle set_aspect + autoscale
     Frontend(ctx, out, config=config).draw_layout(msp, finalize=False)
 
-    # Re-appliquer les limites après le rendu (sécurité anti-débordement)
+    # Forcer le clipping de tous les artistes aux limites de l'axe (anti-débordement)
     if ext:
         ax.autoscale(False)
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)
+        for artist in ax.get_children():
+            try:
+                artist.set_clip_on(True)
+            except Exception:
+                pass
 
     tampon = io.BytesIO()
     fig.savefig(tampon, format="png", dpi=100, facecolor=BG, bbox_inches=None)
