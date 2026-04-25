@@ -316,12 +316,23 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)
 
+    from ezdxf.addons.drawing.config import Configuration, HatchPolicy
+
     ctx = RenderContext(doc)
     ctx.current_layout_properties.set_colors(BG)
     out = MatplotlibBackend(ax)
+    # SHOW_OUTLINE : affiche uniquement le contour des hachures (pas de remplissage)
+    # évite les débordements de remplissage solide hors limites du plan
+    config = Configuration.defaults()
+    config = config.with_changes(hatch_policy=HatchPolicy.SHOW_OUTLINE)
     # finalize=False : évite que ezdxf rappelle set_aspect + autoscale
-    # qui élargissent la vue aux blocs en (0,0) et rendent le plan invisible
-    Frontend(ctx, out).draw_layout(msp, finalize=False)
+    Frontend(ctx, out, config=config).draw_layout(msp, finalize=False)
+
+    # Re-appliquer les limites après le rendu (sécurité anti-débordement)
+    if ext:
+        ax.autoscale(False)
+        ax.set_xlim(xmin - marge, xmax + marge)
+        ax.set_ylim(ymin - marge, ymax + marge)
 
     tampon = io.BytesIO()
     fig.savefig(tampon, format="png", dpi=100, facecolor=BG, bbox_inches=None)
