@@ -77,7 +77,7 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
   const telechargerPdf = useMutation({
     mutationFn: () => api.telecharger(`/api/societe/devis/${id}/export-pdf/`),
     onSuccess: (reponse) => {
-      telechargerBlob(reponse.blob, reponse.nomFichier || `${devis.reference}.pdf`);
+      telechargerBlob(reponse.blob, reponse.nomFichier || `devis-${id}.pdf`);
     },
     onError: (error) => setErreur(error instanceof ErreurApi ? error.detail : "Impossible de générer le PDF."),
   });
