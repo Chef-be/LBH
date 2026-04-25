@@ -62,7 +62,7 @@ def lister_missions_livrables(
     return missions
 
 
-def construire_suggestions_prestations(missions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def construire_suggestions_prestations(missions: list[dict[str, Any]], profil_horaire=None) -> list[dict[str, Any]]:
     suggestions: list[dict[str, Any]] = []
     for ordre, mission in enumerate(missions):
         livrables = mission.get("livrables", [])
@@ -76,7 +76,7 @@ def construire_suggestions_prestations(missions: list[dict[str, Any]]) -> list[d
             suffixe = f"Livrables: {', '.join(libelles_livrables)}."
             description = f"{description}\n\n{suffixe}".strip()
 
-        suggestions.append({
+        suggestion = {
             "ordre": ordre,
             "mission_code": mission["code"],
             "intitule": designation,
@@ -87,7 +87,20 @@ def construire_suggestions_prestations(missions: list[dict[str, Any]]) -> list[d
             "type_ligne": "forfait",
             "quantite": "1",
             "unite": "forfait",
-        })
+            "nb_heures_suggerees": "8.00",
+            "profil_horaire_id": "",
+            "profil_horaire_libelle": "",
+            "taux_horaire_suggere": "0.00",
+        }
+        if profil_horaire is not None:
+            suggestion.update({
+                "type_ligne": "horaire",
+                "unite": "h",
+                "profil_horaire_id": str(profil_horaire.id),
+                "profil_horaire_libelle": profil_horaire.libelle,
+                "taux_horaire_suggere": str(profil_horaire.taux_horaire_ht),
+            })
+        suggestions.append(suggestion)
     return suggestions
 
 

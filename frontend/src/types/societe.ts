@@ -77,6 +77,10 @@ export interface SuggestionPrestationDevis {
   type_ligne: "horaire" | "forfait" | "frais" | "sous_traitance";
   quantite: string;
   unite: string;
+  nb_heures_suggerees: string;
+  profil_horaire_id: string;
+  profil_horaire_libelle: string;
+  taux_horaire_suggere: string;
 }
 
 export interface AssistantDevisResponse {
@@ -84,6 +88,11 @@ export interface AssistantDevisResponse {
   missions: MissionAssistantSociete[];
   suggestions_prestations: SuggestionPrestationDevis[];
   contexte_projet_saisi: ContexteProjetSaisiDevis;
+  profil_horaire_suggere: {
+    id: string;
+    libelle: string;
+    taux_horaire_ht: string;
+  };
 }
 
 export interface ProfilHoraire {

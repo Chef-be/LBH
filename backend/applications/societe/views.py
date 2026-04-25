@@ -395,13 +395,15 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
         contexte_contractuel = request.query_params.get("contexte_contractuel", "")
         nature_marche = request.query_params.get("nature_marche", "")
         role_lbh = request.query_params.get("role_lbh", "")
+        utilisateur_id = request.query_params.get("utilisateur", "")
 
         missions = lister_missions_livrables(
             famille_client=famille_client,
             sous_type_client=sous_type_client,
             nature_ouvrage=nature_ouvrage,
         )
-        suggestions = construire_suggestions_prestations(missions)
+        profil_horaire = _profil_horaire_par_defaut_utilisateur(utilisateur_id)
+        suggestions = construire_suggestions_prestations(missions, profil_horaire=profil_horaire)
         contexte = construire_contexte_projet_saisi(
             famille_client=famille_client,
             sous_type_client=sous_type_client,
@@ -423,6 +425,11 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
             "missions": missions,
             "suggestions_prestations": suggestions,
             "contexte_projet_saisi": contexte,
+            "profil_horaire_suggere": {
+                "id": str(profil_horaire.id) if profil_horaire else "",
+                "libelle": profil_horaire.libelle if profil_horaire else "",
+                "taux_horaire_ht": str(profil_horaire.taux_horaire_ht) if profil_horaire else "0.00",
+            },
         })
 
     @action(detail=True, methods=["post"])

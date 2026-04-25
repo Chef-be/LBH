@@ -11,6 +11,7 @@ import type {
   MissionSelectionneeDevis,
   ParcoursProjetSociete,
   ProfilHoraire,
+  ProfilHoraireUtilisateur,
 } from "@/types/societe";
 
 interface LigneForm {
@@ -25,6 +26,13 @@ interface LigneForm {
   montant_unitaire_ht: string;
   quantite: string;
   unite: string;
+}
+
+interface UtilisateurOption {
+  id: string;
+  prenom: string;
+  nom: string;
+  fonction: string;
 }
 
 interface DevisForm {
@@ -119,6 +127,7 @@ export default function PageNouveauDevis() {
   const [erreur, setErreur] = useState<string | null>(null);
   const [enCours, setEnCours] = useState(false);
   const [assistantInitialise, setAssistantInitialise] = useState(false);
+  const [utilisateurPressenti, setUtilisateurPressenti] = useState("");
 
   const requeteParcours = useMemo(() => {
     const params = new URLSearchParams();
@@ -150,6 +159,7 @@ export default function PageNouveauDevis() {
       form.nature_ouvrage,
       form.nature_marche,
       form.role_lbh,
+      utilisateurPressenti,
     ],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -159,6 +169,7 @@ export default function PageNouveauDevis() {
       params.set("nature_ouvrage", form.nature_ouvrage);
       params.set("nature_marche", form.nature_marche);
       if (form.role_lbh) params.set("role_lbh", form.role_lbh);
+      if (utilisateurPressenti) params.set("utilisateur", utilisateurPressenti);
       return api.get<AssistantDevisResponse>(`/api/societe/devis/assistant/?${params.toString()}`);
     },
     enabled: Boolean(form.famille_client && form.contexte_contractuel),
@@ -175,6 +186,22 @@ export default function PageNouveauDevis() {
     },
   });
 
+  const { data: utilisateurs = [] } = useQuery<UtilisateurOption[]>({
+    queryKey: ["societe-devis-utilisateurs"],
+    queryFn: async () => {
+      const reponse = await api.get<{ results?: UtilisateurOption[] } | UtilisateurOption[]>("/api/auth/utilisateurs/");
+      return Array.isArray(reponse) ? reponse : (reponse.results ?? []);
+    },
+  });
+
+  const { data: profilsUtilisateurs = [] } = useQuery<ProfilHoraireUtilisateur[]>({
+    queryKey: ["societe-devis-profils-utilisateurs"],
+    queryFn: async () => {
+      const reponse = await api.get<{ results?: ProfilHoraireUtilisateur[] } | ProfilHoraireUtilisateur[]>("/api/societe/profils-horaires-utilisateurs/");
+      return Array.isArray(reponse) ? reponse : (reponse.results ?? []);
+    },
+  });
+
   useEffect(() => {
     setMissionsSelectionnees([]);
     setAssistantInitialise(false);
@@ -185,6 +212,7 @@ export default function PageNouveauDevis() {
     form.nature_ouvrage,
     form.nature_marche,
     form.role_lbh,
+    utilisateurPressenti,
   ]);
 
   useEffect(() => {
@@ -310,9 +338,9 @@ export default function PageNouveauDevis() {
         phase_code: suggestion?.phase_code ?? "",
         intitule: suggestion?.intitule ?? mission.missionLabel ?? mission.missionCode,
         description: suggestion?.description ?? "",
-        profil: "",
-        nb_heures: "8",
-        taux_horaire: "0",
+        profil: suggestion?.profil_horaire_id ?? "",
+        nb_heures: suggestion?.nb_heures_suggerees ?? "8",
+        taux_horaire: suggestion?.taux_horaire_suggere ?? "0",
         montant_unitaire_ht: "0",
         quantite: suggestion?.quantite ?? "1",
         unite: suggestion?.unite ?? "forfait",
@@ -561,6 +589,29 @@ export default function PageNouveauDevis() {
               style={stylesChamp}
               placeholder="Économiste principal, associé, sous-traitant…"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Collaborateur pressenti
+            </label>
+            <select
+              value={utilisateurPressenti}
+              onChange={(e) => setUtilisateurPressenti(e.target.value)}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="">Aucun</option>
+              {utilisateurs.map((utilisateur) => {
+                const nom = [utilisateur.prenom, utilisateur.nom].filter(Boolean).join(" ");
+                const profil = profilsUtilisateurs.find((item) => item.utilisateur === utilisateur.id);
+                return (
+                  <option key={utilisateur.id} value={utilisateur.id}>
+                    {nom}{profil ? ` · ${profil.profil_horaire_libelle}` : ""}
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
 

@@ -128,6 +128,31 @@ class ApiSocieteTests(TestCase):
         self.assertEqual(response.data["missions"][0]["livrables"][0]["code"], "cctp-lot")
         self.assertTrue(response.data["suggestions_prestations"])
 
+    def test_assistant_devis_reutilise_le_profil_horaire_du_salarie_pressenti(self):
+        ProfilHoraireUtilisateur.objects.create(
+            utilisateur=self.utilisateur,
+            profil_horaire=self.profil,
+        )
+        response = self.client.get(
+            "/api/societe/devis/assistant/",
+            {
+                "famille_client": "maitrise_oeuvre",
+                "sous_type_client": "architecte",
+                "nature_ouvrage": "batiment",
+                "contexte_contractuel": "mission_complete",
+                "nature_marche": "prive",
+                "role_lbh": "economiste",
+                "utilisateur": str(self.utilisateur.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["profil_horaire_suggere"]["id"], str(self.profil.id))
+        suggestion = response.data["suggestions_prestations"][0]
+        self.assertEqual(suggestion["type_ligne"], "horaire")
+        self.assertEqual(suggestion["profil_horaire_id"], str(self.profil.id))
+        self.assertEqual(str(suggestion["taux_horaire_suggere"]), "95.00")
+
     @patch("applications.societe.views.envoyer_courriel")
     def test_envoi_client_genere_un_jeton_et_passe_le_devis_a_envoye(self, mock_envoyer):
         devis = self._creer_devis()
