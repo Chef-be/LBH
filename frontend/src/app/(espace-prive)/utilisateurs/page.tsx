@@ -2,8 +2,14 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { api, extraireListeResultats } from "@/crochets/useApi";
-import { Plus, Search, UserCheck, UserX, Pencil, Users } from "lucide-react";
+import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
+import { Plus, Search, UserCheck, UserX, Pencil, Users, Trash2, KeyRound, MailPlus, X, Save } from "lucide-react";
+
+interface ProfilDroit {
+  id: number;
+  code: string;
+  libelle: string;
+}
 
 interface Utilisateur {
   id: string;
@@ -11,7 +17,9 @@ interface Utilisateur {
   prenom: string;
   nom: string;
   nom_complet: string;
+  telephone: string;
   fonction: string;
+  profil: number | null;
   profil_libelle: string | null;
   organisation_nom: string | null;
   est_actif: boolean;
@@ -24,16 +32,88 @@ interface Utilisateur {
 
 export default function PageUtilisateurs() {
   const [utilisateurs, setUtilisateurs] = useState<Utilisateur[]>([]);
+  const [profils, setProfils] = useState<ProfilDroit[]>([]);
   const [chargement, setChargement] = useState(true);
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState<"tous" | "actifs" | "inactifs">("actifs");
+  const [utilisateurEdition, setUtilisateurEdition] = useState<Utilisateur | null>(null);
+  const [utilisateurSuppression, setUtilisateurSuppression] = useState<Utilisateur | null>(null);
+  const [form, setForm] = useState({ prenom: "", nom: "", telephone: "", fonction: "", profil: "" as number | "" });
+  const [actionEnCours, setActionEnCours] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [erreur, setErreur] = useState<string | null>(null);
 
-  useEffect(() => {
+  const chargerUtilisateurs = () =>
     api.get<Utilisateur[]>("/api/auth/utilisateurs/")
       .then((data) => setUtilisateurs(extraireListeResultats(data)))
       .catch(() => setUtilisateurs([]))
       .finally(() => setChargement(false));
+
+  useEffect(() => {
+    chargerUtilisateurs();
+    api.get<ProfilDroit[]>("/api/auth/profils/")
+      .then((data) => setProfils(extraireListeResultats(data)))
+      .catch(() => setProfils([]));
   }, []);
+
+  const ouvrirEdition = (utilisateur: Utilisateur) => {
+    setMessage(null);
+    setErreur(null);
+    setUtilisateurEdition(utilisateur);
+    setForm({
+      prenom: utilisateur.prenom,
+      nom: utilisateur.nom,
+      telephone: utilisateur.telephone ?? "",
+      fonction: utilisateur.fonction ?? "",
+      profil: (utilisateur as Utilisateur & { profil?: number | null }).profil ?? "",
+    });
+  };
+
+  const executerAction = async (cle: string, action: () => Promise<void>, succes: string) => {
+    setActionEnCours(cle);
+    setMessage(null);
+    setErreur(null);
+    try {
+      await action();
+      await chargerUtilisateurs();
+      setMessage(succes);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Action impossible.");
+    } finally {
+      setActionEnCours(null);
+    }
+  };
+
+  const enregistrerEdition = () => {
+    if (!utilisateurEdition) return;
+    executerAction(
+      `edition-${utilisateurEdition.id}`,
+      async () => {
+        const utilisateur = await api.patch<Utilisateur>(`/api/auth/utilisateurs/${utilisateurEdition.id}/`, {
+          prenom: form.prenom,
+          nom: form.nom,
+          telephone: form.telephone,
+          fonction: form.fonction,
+          profil: form.profil || null,
+        });
+        setUtilisateurEdition(null);
+        setUtilisateurs((prev) => prev.map((u) => u.id === utilisateur.id ? utilisateur : u));
+      },
+      "Profil utilisateur mis à jour."
+    );
+  };
+
+  const supprimerUtilisateur = () => {
+    if (!utilisateurSuppression) return;
+    executerAction(
+      `suppression-${utilisateurSuppression.id}`,
+      async () => {
+        await api.supprimer(`/api/auth/utilisateurs/${utilisateurSuppression.id}/`);
+        setUtilisateurSuppression(null);
+      },
+      "Compte utilisateur supprimé de l'accès actif."
+    );
+  };
 
   const filtrés = utilisateurs.filter((u) => {
     const matchTexte =
@@ -68,6 +148,17 @@ export default function PageUtilisateurs() {
           Nouvel utilisateur
         </Link>
       </div>
+
+      {message && (
+        <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          {message}
+        </div>
+      )}
+      {erreur && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {erreur}
+        </div>
+      )}
 
       {/* Filtres */}
       <div className="flex flex-wrap items-center gap-3">
@@ -171,13 +262,56 @@ export default function PageUtilisateurs() {
                       )}
                     </td>
                     <td className="py-3 text-right">
-                      <Link
-                        href={`/utilisateurs/${u.id}`}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-primaire-600 hover:bg-primaire-50 rounded-lg transition-colors"
-                      >
+                      <div className="flex flex-wrap justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => ouvrirEdition(u)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-primaire-600 hover:bg-primaire-50 rounded-lg transition-colors"
+                        >
                         <Pencil className="w-3.5 h-3.5" />
                         Modifier
-                      </Link>
+                        </button>
+                        {!u.est_actif && (
+                          <button
+                            type="button"
+                            disabled={actionEnCours === `invitation-${u.id}`}
+                            onClick={() => executerAction(
+                              `invitation-${u.id}`,
+                              () => api.post(`/api/auth/utilisateurs/${u.id}/renvoyer-invitation/`, {}),
+                              "Invitation envoyée."
+                            )}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-primaire-600 hover:bg-primaire-50 rounded-lg transition-colors disabled:opacity-60"
+                          >
+                            <MailPlus className="w-3.5 h-3.5" />
+                            Invitation
+                          </button>
+                        )}
+                        {u.est_actif && (
+                          <button
+                            type="button"
+                            disabled={actionEnCours === `reset-${u.id}`}
+                            onClick={() => executerAction(
+                              `reset-${u.id}`,
+                              () => api.post(`/api/auth/utilisateurs/${u.id}/envoyer-reinitialisation/`, {}),
+                              "Lien de réinitialisation envoyé."
+                            )}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-primaire-600 hover:bg-primaire-50 rounded-lg transition-colors disabled:opacity-60"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            MDP
+                          </button>
+                        )}
+                        {!u.est_super_admin && (
+                          <button
+                            type="button"
+                            onClick={() => setUtilisateurSuppression(u)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -191,6 +325,89 @@ export default function PageUtilisateurs() {
           {filtre !== "tous" ? ` ${filtre}` : ""}
         </div>
       </div>
+
+      {utilisateurEdition && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Modifier le profil</h2>
+                <p className="text-sm text-slate-500">{utilisateurEdition.courriel}</p>
+              </div>
+              <button type="button" onClick={() => setUtilisateurEdition(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+              <div>
+                <label className="libelle-champ">Prénom</label>
+                <input className="champ-saisie w-full" value={form.prenom} onChange={(e) => setForm((p) => ({ ...p, prenom: e.target.value }))} />
+              </div>
+              <div>
+                <label className="libelle-champ">Nom</label>
+                <input className="champ-saisie w-full" value={form.nom} onChange={(e) => setForm((p) => ({ ...p, nom: e.target.value }))} />
+              </div>
+              <div>
+                <label className="libelle-champ">Téléphone</label>
+                <input className="champ-saisie w-full" value={form.telephone} onChange={(e) => setForm((p) => ({ ...p, telephone: e.target.value }))} />
+              </div>
+              <div>
+                <label className="libelle-champ">Fonction</label>
+                <input className="champ-saisie w-full" value={form.fonction} onChange={(e) => setForm((p) => ({ ...p, fonction: e.target.value }))} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="libelle-champ">Profil de droits</label>
+                <select
+                  className="champ-saisie w-full bg-white"
+                  value={form.profil}
+                  onChange={(e) => setForm((p) => ({ ...p, profil: e.target.value ? parseInt(e.target.value) : "" }))}
+                  disabled={utilisateurEdition.est_super_admin}
+                >
+                  <option value="">Aucun profil</option>
+                  {profils.map((profil) => (
+                    <option key={profil.id} value={profil.id}>{profil.libelle}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button type="button" onClick={() => setUtilisateurEdition(null)} className="btn-secondaire">Annuler</button>
+              <button
+                type="button"
+                disabled={actionEnCours === `edition-${utilisateurEdition.id}`}
+                onClick={enregistrerEdition}
+                className="btn-primaire disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                {actionEnCours === `edition-${utilisateurEdition.id}` ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {utilisateurSuppression && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="text-lg font-semibold text-slate-900">Confirmer la suppression</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Le compte de {utilisateurSuppression.nom_complet} ne pourra plus accéder à la plateforme.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setUtilisateurSuppression(null)} className="btn-secondaire">Annuler</button>
+              <button
+                type="button"
+                disabled={actionEnCours === `suppression-${utilisateurSuppression.id}`}
+                onClick={supprimerUtilisateur}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                <Trash2 className="h-4 w-4" />
+                {actionEnCours === `suppression-${utilisateurSuppression.id}` ? "Suppression…" : "Supprimer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ from .views import (
     VueDeconnexion,
     VueDetailJetonReinitialisation,
     VueDetailUtilisateur,
+    VueEnvoyerReinitialisationUtilisateur,
+    VueEnvoyerVerificationCourriel,
     VueInvitationDetail,
     VueListeProfilsDroits,
     VueRenvoyerInvitationUtilisateur,
@@ -27,6 +29,7 @@ urlpatterns = [
 
     # Profil utilisateur connecté
     path("moi/", VueMoiMeme.as_view(), name="auth-moi"),
+    path("moi/envoyer-verification/", VueEnvoyerVerificationCourriel.as_view(), name="auth-moi-verification"),
     path("modifier-mot-de-passe/", VueModificationMotDePasse.as_view(), name="auth-modifier-mdp"),
     path("mot-de-passe-oublie/", VueDemandeReinitialisationMotDePasse.as_view(), name="auth-mdp-oublie"),
     path("reinitialisation/<str:token>/", VueDetailJetonReinitialisation.as_view(), name="auth-reinitialisation-detail"),
@@ -41,4 +44,5 @@ urlpatterns = [
     path("utilisateurs/", VueListeUtilisateurs.as_view(), name="utilisateurs-liste"),
     path("utilisateurs/<uuid:pk>/", VueDetailUtilisateur.as_view(), name="utilisateurs-detail"),
     path("utilisateurs/<uuid:pk>/renvoyer-invitation/", VueRenvoyerInvitationUtilisateur.as_view(), name="utilisateurs-renvoyer-invitation"),
+    path("utilisateurs/<uuid:pk>/envoyer-reinitialisation/", VueEnvoyerReinitialisationUtilisateur.as_view(), name="utilisateurs-envoyer-reinitialisation"),
 ]

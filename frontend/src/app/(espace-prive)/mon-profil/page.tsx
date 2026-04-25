@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, ShieldCheck } from "lucide-react";
+import { MailCheck, Save, ShieldCheck } from "lucide-react";
 
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
@@ -32,6 +32,7 @@ export default function PageMonProfil() {
   const [chargement, setChargement] = useState(true);
   const [enregistrement, setEnregistrement] = useState(false);
   const [changementMdp, setChangementMdp] = useState(false);
+  const [envoiVerification, setEnvoiVerification] = useState(false);
 
   useEffect(() => {
     api.get<ProfilUtilisateur>("/api/auth/moi/")
@@ -47,10 +48,7 @@ export default function PageMonProfil() {
     setMessage(null);
     try {
       const reponse = await api.patch<ProfilUtilisateur>("/api/auth/moi/", {
-        prenom: profil.prenom,
-        nom: profil.nom,
         telephone: profil.telephone,
-        fonction: profil.fonction,
         langue: profil.langue,
         fuseau_horaire: profil.fuseau_horaire,
         notifications_courriel: profil.notifications_courriel,
@@ -97,6 +95,20 @@ export default function PageMonProfil() {
     }
   }
 
+  async function envoyerVerification() {
+    setEnvoiVerification(true);
+    setErreur(null);
+    setMessage(null);
+    try {
+      const reponse = await api.post<{ detail: string }>("/api/auth/moi/envoyer-verification/", {});
+      setMessage(reponse.detail);
+    } catch (err) {
+      setErreur(err instanceof ErreurApi ? err.detail : "Impossible d'envoyer le lien de vérification.");
+    } finally {
+      setEnvoiVerification(false);
+    }
+  }
+
   if (chargement) {
     return <div className="py-16 text-center text-sm text-slate-500">Chargement du profil…</div>;
   }
@@ -137,11 +149,11 @@ export default function PageMonProfil() {
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="libelle-champ">Prénom</label>
-              <input className="champ-saisie" value={profil.prenom} onChange={(e) => setProfil((prev) => prev ? { ...prev, prenom: e.target.value } : prev)} />
+              <input className="champ-saisie cursor-not-allowed bg-slate-50 text-slate-500" value={profil.prenom} readOnly />
             </div>
             <div>
               <label className="libelle-champ">Nom</label>
-              <input className="champ-saisie" value={profil.nom} onChange={(e) => setProfil((prev) => prev ? { ...prev, nom: e.target.value } : prev)} />
+              <input className="champ-saisie cursor-not-allowed bg-slate-50 text-slate-500" value={profil.nom} readOnly />
             </div>
             <div>
               <label className="libelle-champ">Téléphone</label>
@@ -149,7 +161,7 @@ export default function PageMonProfil() {
             </div>
             <div>
               <label className="libelle-champ">Fonction</label>
-              <input className="champ-saisie" value={profil.fonction} onChange={(e) => setProfil((prev) => prev ? { ...prev, fonction: e.target.value } : prev)} />
+              <input className="champ-saisie cursor-not-allowed bg-slate-50 text-slate-500" value={profil.fonction} readOnly />
             </div>
             <div>
               <label className="libelle-champ">Langue</label>
@@ -166,9 +178,21 @@ export default function PageMonProfil() {
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <p><span className="font-medium text-slate-800">Courriel :</span> {profil.courriel}</p>
-            <p className="mt-1"><span className="font-medium text-slate-800">Organisation :</span> {profil.organisation_nom || "Aucune"}</p>
             <p className="mt-1"><span className="font-medium text-slate-800">Profil :</span> {profil.profil_libelle || "Non défini"}</p>
-            <p className="mt-1"><span className="font-medium text-slate-800">Adresse vérifiée :</span> {profil.courriel_verifie_le ? "Oui" : "Non"}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <p><span className="font-medium text-slate-800">Adresse vérifiée :</span> {profil.courriel_verifie_le ? "Oui" : "Non"}</p>
+              {!profil.courriel_verifie_le && (
+                <button
+                  type="button"
+                  onClick={envoyerVerification}
+                  disabled={envoiVerification}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 disabled:opacity-60"
+                >
+                  <MailCheck className="h-3.5 w-3.5" />
+                  {envoiVerification ? "Envoi…" : "Envoyer le lien"}
+                </button>
+              )}
+            </div>
           </div>
 
           <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">

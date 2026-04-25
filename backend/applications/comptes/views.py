@@ -243,6 +243,25 @@ class VueModificationMotDePasse(generics.GenericAPIView):
         return Response({"detail": "Mot de passe modifié avec succès."})
 
 
+class VueEnvoyerVerificationCourriel(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, requete):
+        utilisateur = requete.user
+        if utilisateur.courriel_verifie_le:
+            return Response({"detail": "Adresse de courriel déjà vérifiée."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            invitation = _creer_invitation(utilisateur, utilisateur, requete)
+        except MessagerieErreur as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "detail": "Lien de vérification envoyé.",
+                "invitation": {"id": str(invitation.id), "expire_le": invitation.expire_le},
+            }
+        )
+
+
 class VueListeUtilisateurs(generics.ListCreateAPIView):
     """Liste les utilisateurs et crée de nouveaux comptes sur invitation."""
 
@@ -316,6 +335,31 @@ class VueRenvoyerInvitationUtilisateur(generics.GenericAPIView):
             {
                 "detail": "Invitation renvoyée.",
                 "invitation": {"id": str(invitation.id), "expire_le": invitation.expire_le},
+            }
+        )
+
+
+class VueEnvoyerReinitialisationUtilisateur(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, requete, pk):
+        if not requete.user.est_super_admin:
+            return Response({"detail": "Accès réservé au super-administrateur."}, status=status.HTTP_403_FORBIDDEN)
+
+        utilisateur = get_object_or_404(Utilisateur.objects.select_related("profil"), pk=pk)
+        if not utilisateur.est_actif:
+            return Response(
+                {"detail": "Le compte doit être actif pour envoyer une réinitialisation de mot de passe."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            jeton = _creer_jeton_reinitialisation(utilisateur, requete)
+        except MessagerieErreur as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "detail": "Lien de réinitialisation envoyé.",
+                "jeton": {"id": str(jeton.id), "expire_le": jeton.expire_le},
             }
         )
 

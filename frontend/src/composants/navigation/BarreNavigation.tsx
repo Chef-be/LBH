@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { LogOut, Sun, Moon, Monitor, ChevronRight, Bell, CheckCheck, X } from "lucide-react";
+import { LogOut, Sun, Moon, Monitor, ChevronRight, Bell, CheckCheck, X, UserCog, Save } from "lucide-react";
 import { useSessionStore } from "@/crochets/useSession";
 import { useTheme } from "@/contextes/FournisseurTheme";
 import { useNotifications } from "@/contextes/FournisseurNotifications";
 import type { ModeTheme } from "@/contextes/FournisseurConfiguration";
+import { api, ErreurApi } from "@/crochets/useApi";
 import Link from "next/link";
 
 // ---------------------------------------------------------------------------
@@ -253,24 +254,196 @@ function CentreNotifications() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Composant principal
-// ---------------------------------------------------------------------------
-
-export function BarreNavigation() {
+function MenuUtilisateur() {
   const router = useRouter();
-  const { utilisateur, deconnecter } = useSessionStore();
+  const { utilisateur, deconnecter, definirUtilisateur } = useSessionStore();
+  const [ouvert, setOuvert] = useState(false);
+  const [modalProfil, setModalProfil] = useState(false);
+  const [form, setForm] = useState({
+    telephone: utilisateur?.telephone ?? "",
+    langue: utilisateur?.langue ?? "fr",
+    fuseau_horaire: utilisateur?.fuseau_horaire ?? "Europe/Paris",
+    notifications_courriel: utilisateur?.notifications_courriel ?? true,
+  });
+  const [enregistrement, setEnregistrement] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const conteneurRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setForm({
+      telephone: utilisateur?.telephone ?? "",
+      langue: utilisateur?.langue ?? "fr",
+      fuseau_horaire: utilisateur?.fuseau_horaire ?? "Europe/Paris",
+      notifications_courriel: utilisateur?.notifications_courriel ?? true,
+    });
+  }, [utilisateur]);
+
+  useEffect(() => {
+    if (!ouvert) return;
+    const handler = (event: MouseEvent) => {
+      if (conteneurRef.current && !conteneurRef.current.contains(event.target as Node)) {
+        setOuvert(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ouvert]);
+
+  if (!utilisateur) return null;
+
+  const initiales = utilisateur.nom_complet
+    ? utilisateur.nom_complet.split(" ").map((m) => m[0]).join("").slice(0, 2).toUpperCase()
+    : "?";
 
   const gererDeconnexion = async () => {
     await deconnecter();
     router.push("/connexion");
   };
 
-  // Initiales pour l'avatar
-  const initiales = utilisateur?.nom_complet
-    ? utilisateur.nom_complet.split(" ").map((m) => m[0]).join("").slice(0, 2).toUpperCase()
-    : "?";
+  const enregistrerProfil = async () => {
+    setEnregistrement(true);
+    setErreur(null);
+    try {
+      const reponse = await api.patch<typeof utilisateur>("/api/auth/moi/", form);
+      definirUtilisateur({ ...utilisateur, ...reponse });
+      setModalProfil(false);
+      setOuvert(false);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible d'enregistrer le profil.");
+    } finally {
+      setEnregistrement(false);
+    }
+  };
 
+  return (
+    <div ref={conteneurRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOuvert((v) => !v)}
+        className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-black/5"
+      >
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+          style={{ background: "var(--c-base)" }}
+          title={utilisateur.nom_complet}
+        >
+          {initiales}
+        </div>
+        <div className="hidden md:block text-right">
+          <p className="text-sm font-medium leading-none" style={{ color: "var(--texte)" }}>
+            {utilisateur.nom_complet}
+          </p>
+          {utilisateur.profil_libelle && (
+            <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>
+              {utilisateur.profil_libelle}
+            </p>
+          )}
+        </div>
+      </button>
+
+      {ouvert && (
+        <div
+          className="absolute right-0 top-11 z-40 w-72 rounded-2xl border p-2 shadow-2xl"
+          style={{ background: "var(--fond-carte)", borderColor: "var(--bordure)" }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setModalProfil(true);
+              setOuvert(false);
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-black/5"
+            style={{ color: "var(--texte)" }}
+          >
+            <UserCog size={15} />
+            Éditer mon profil
+          </button>
+          <div className="my-2 rounded-xl border p-3" style={{ borderColor: "var(--bordure)" }}>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Thème
+            </p>
+            <BasculeTheme />
+          </div>
+          <button
+            type="button"
+            onClick={gererDeconnexion}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50"
+          >
+            <LogOut size={15} />
+            Déconnexion
+          </button>
+        </div>
+      )}
+
+      {modalProfil && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Mon profil</h2>
+                <p className="text-sm text-slate-500">{utilisateur.courriel}</p>
+              </div>
+              <button type="button" onClick={() => setModalProfil(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
+              {erreur && <div className="sm:col-span-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erreur}</div>}
+              <div>
+                <label className="libelle-champ">Prénom</label>
+                <input className="champ-saisie cursor-not-allowed bg-slate-50 text-slate-500" value={utilisateur.prenom} readOnly />
+              </div>
+              <div>
+                <label className="libelle-champ">Nom</label>
+                <input className="champ-saisie cursor-not-allowed bg-slate-50 text-slate-500" value={utilisateur.nom} readOnly />
+              </div>
+              <div>
+                <label className="libelle-champ">Téléphone</label>
+                <input className="champ-saisie" value={form.telephone} onChange={(e) => setForm((p) => ({ ...p, telephone: e.target.value }))} />
+              </div>
+              <div>
+                <label className="libelle-champ">Fonction</label>
+                <input className="champ-saisie cursor-not-allowed bg-slate-50 text-slate-500" value={utilisateur.fonction} readOnly />
+              </div>
+              <div>
+                <label className="libelle-champ">Langue</label>
+                <select className="champ-saisie" value={form.langue} onChange={(e) => setForm((p) => ({ ...p, langue: e.target.value }))}>
+                  <option value="fr">Français</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+              <div>
+                <label className="libelle-champ">Fuseau horaire</label>
+                <input className="champ-saisie" value={form.fuseau_horaire} onChange={(e) => setForm((p) => ({ ...p, fuseau_horaire: e.target.value }))} />
+              </div>
+              <label className="sm:col-span-2 inline-flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.notifications_courriel}
+                  onChange={(e) => setForm((p) => ({ ...p, notifications_courriel: e.target.checked }))}
+                />
+                Recevoir les notifications par courriel
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button type="button" onClick={() => setModalProfil(false)} className="btn-secondaire">Annuler</button>
+              <button type="button" onClick={enregistrerProfil} disabled={enregistrement} className="btn-primaire disabled:opacity-60">
+                <Save className="h-4 w-4" />
+                {enregistrement ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Composant principal
+// ---------------------------------------------------------------------------
+
+export function BarreNavigation() {
   return (
     <header
       className="h-14 flex items-center justify-between px-4 sm:px-6 gap-4 shrink-0 z-20"
@@ -286,46 +459,8 @@ export function BarreNavigation() {
 
       {/* Actions droite */}
       <div className="flex items-center gap-3 shrink-0">
-        <BasculeTheme />
         <CentreNotifications />
-
-        {utilisateur && (
-          <div className="flex items-center gap-2">
-            <Link href="/mon-profil" className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-black/5">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-                style={{ background: "var(--c-base)" }}
-                title={utilisateur.nom_complet}
-              >
-                {initiales}
-              </div>
-
-              <div className="hidden md:block text-right">
-                <p className="text-sm font-medium leading-none" style={{ color: "var(--texte)" }}>
-                  {utilisateur.nom_complet}
-                </p>
-                {utilisateur.profil_libelle && (
-                  <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>
-                    {utilisateur.profil_libelle}
-                  </p>
-                )}
-              </div>
-            </Link>
-
-            {/* Déconnexion */}
-            <button
-              onClick={gererDeconnexion}
-              className="flex items-center gap-1.5 text-sm px-2 py-1.5 rounded-lg transition-colors"
-              style={{ color: "var(--texte-3)" }}
-              title="Se déconnecter"
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#dc2626")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--texte-3)")}
-            >
-              <LogOut size={15} />
-              <span className="hidden sm:inline">Déconnexion</span>
-            </button>
-          </div>
-        )}
+        <MenuUtilisateur />
       </div>
     </header>
   );

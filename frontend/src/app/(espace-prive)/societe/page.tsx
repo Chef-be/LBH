@@ -137,14 +137,7 @@ export default function PageTableauDeBordSociete() {
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition hover:opacity-90"
           style={{ background: "var(--c-base)" }}
         >
-          <Plus size={14} /> Nouveau devis
-        </Link>
-        <Link
-          href="/societe/factures/nouvelle"
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium border transition hover:opacity-80"
-          style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
-        >
-          <Plus size={14} /> Nouvelle facture
+          <Plus size={14} /> Nouvelle affaire
         </Link>
       </div>
 

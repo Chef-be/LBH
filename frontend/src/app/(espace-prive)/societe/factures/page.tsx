@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
 import { Facture } from "@/types/societe";
-import { Plus, Receipt, ChevronRight, AlertTriangle } from "lucide-react";
+import { Receipt, ChevronRight, AlertTriangle } from "lucide-react";
 
 function formaterMontant(val: string): string {
   const n = parseFloat(val);
@@ -50,13 +50,6 @@ export default function PageListeFactures() {
             {factures.length} facture{factures.length > 1 ? "s" : ""}
           </p>
         </div>
-        <Link
-          href="/societe/factures/nouvelle"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-          style={{ background: "var(--c-base)" }}
-        >
-          <Plus size={14} /> Nouvelle facture
-        </Link>
       </div>
 
       {/* Filtres */}

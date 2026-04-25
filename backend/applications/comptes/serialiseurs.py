@@ -100,6 +100,10 @@ class ProfilPersonnelSerialiseur(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "courriel",
+            "prenom",
+            "nom",
+            "nom_complet",
+            "fonction",
             "organisation_nom",
             "profil_libelle",
             "courriel_verifie_le",

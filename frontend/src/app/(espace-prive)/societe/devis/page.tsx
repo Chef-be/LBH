@@ -55,7 +55,7 @@ export default function PageListeDevis() {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
           style={{ background: "var(--c-base)" }}
         >
-          <Plus size={14} /> Nouveau devis
+          <Plus size={14} /> Nouvelle affaire
         </Link>
       </div>
 
@@ -99,7 +99,7 @@ export default function PageListeDevis() {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
             style={{ background: "var(--c-base)" }}
           >
-            <Plus size={14} /> Nouveau devis
+            <Plus size={14} /> Nouvelle affaire
           </Link>
         </div>
       )}

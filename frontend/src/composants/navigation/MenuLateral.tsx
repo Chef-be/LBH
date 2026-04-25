@@ -30,11 +30,16 @@ interface GroupeMenu {
 
 const GROUPES_MENU: GroupeMenu[] = [
   {
-    titre: "Pilotage",
+    titre: "Affaires",
     entrees: [
       { libelle: "Tableau de bord", chemin: "/tableau-de-bord", icone: LayoutDashboard },
       { libelle: "Projets", chemin: "/projets", icone: FolderKanban },
-      { libelle: "Société", chemin: "/societe", icone: Briefcase },
+    ],
+  },
+  {
+    titre: "Société",
+    entrees: [
+      { libelle: "Pilotage société", chemin: "/societe", icone: Briefcase },
     ],
   },
   {

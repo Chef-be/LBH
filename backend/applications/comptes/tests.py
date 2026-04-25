@@ -115,3 +115,43 @@ class ComptesInvitationEtReinitialisationTests(TestCase):
 
         self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
         self.assertTrue(JetonReinitialisationMotDePasse.objects.filter(utilisateur=utilisateur).exists())
+
+    @patch("applications.comptes.views.envoyer_courriel")
+    def test_admin_envoie_reinitialisation_utilisateur(self, mock_envoyer_courriel):
+        mock_envoyer_courriel.return_value = {"message_id": "<admin-reset@test>", "expediteur": "noreply@example.com", "destinataires": ["salarie@example.com"]}
+        utilisateur = get_user_model().objects.create_user(
+            courriel="salarie@example.com",
+            password="secret-test-123",
+            prenom="Salarie",
+            nom="Actif",
+            organisation=self.organisation,
+            est_actif=True,
+        )
+
+        reponse = self.client.post(
+            f"/api/auth/utilisateurs/{utilisateur.id}/envoyer-reinitialisation/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertTrue(JetonReinitialisationMotDePasse.objects.filter(utilisateur=utilisateur).exists())
+
+    @patch("applications.comptes.views.envoyer_courriel")
+    def test_utilisateur_envoie_lien_verification_profil(self, mock_envoyer_courriel):
+        mock_envoyer_courriel.return_value = {"message_id": "<verification@test>", "expediteur": "noreply@example.com", "destinataires": ["nonverifie@example.com"]}
+        utilisateur = get_user_model().objects.create_user(
+            courriel="nonverifie@example.com",
+            password="secret-test-123",
+            prenom="Non",
+            nom="Verifie",
+            organisation=self.organisation,
+            est_actif=True,
+            courriel_verifie_le=None,
+        )
+        self.client.force_authenticate(utilisateur)
+
+        reponse = self.client.post("/api/auth/moi/envoyer-verification/", {}, format="json")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertTrue(InvitationUtilisateur.objects.filter(utilisateur=utilisateur).exists())
