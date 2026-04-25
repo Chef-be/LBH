@@ -344,7 +344,6 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     Les deux couches sont composées (fills sous les lignes).
     """
     import io
-    import numpy as np
     import ezdxf
     import ezdxf.recover
     from ezdxf.addons.drawing import RenderContext, Frontend
@@ -381,9 +380,11 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         marge = None
 
     # --- Phase 1 : rendu ezdxf + matplotlib (SHOW_OUTLINE uniquement) ---
+    # fond transparent : matplotlib exporte le PNG avec alpha=0 sur le fond,
+    # ce qui préserve tous les textes et lignes de toute couleur.
     fig, ax = plt.subplots(figsize=(w, h), dpi=100)
-    ax.set_facecolor(BG)
-    fig.patch.set_facecolor(BG)
+    fig.patch.set_alpha(0)
+    ax.set_facecolor((0, 0, 0, 0))
     ax.axis("off")
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
     ax.set_aspect("equal", adjustable="box")
@@ -403,17 +404,11 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         ax.set_ylim(ymin - marge, ymax + marge)
 
     tampon = io.BytesIO()
-    fig.savefig(tampon, format="png", dpi=100, facecolor=BG, bbox_inches=None)
+    fig.savefig(tampon, format="png", dpi=100, transparent=True, bbox_inches=None)
     plt.close(fig)
     tampon.seek(0)
     img_lignes = Image.open(tampon).convert("RGBA")
     img_w, img_h = img_lignes.size
-
-    # Rendre le fond blanc transparent pour que les fills apparaissent derrière les lignes
-    arr = np.array(img_lignes)
-    blanc = (arr[:, :, 0] > 240) & (arr[:, :, 1] > 240) & (arr[:, :, 2] > 240)
-    arr[blanc, 3] = 0
-    img_lignes = Image.fromarray(arr, "RGBA")
 
     # --- Phase 2 : remplissages HATCH via PIL (clipping natif par polygone) ---
     if ext:
@@ -529,9 +524,9 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
 
     nom_base = os.path.splitext(os.path.basename(fond_plan.fichier.name))[0]
 
-    # 1. Aperçu rapide basse résolution — disponible rapidement pour le canvas
+    # 1. Aperçu rapide (1200px) — disponible rapidement pour le canvas
     try:
-        apercu_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=800, hauteur_px=566)
+        apercu_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=1200, hauteur_px=850)
     except Exception as exc:
         logger.warning("Aperçu CAO échoué pour %s : %s", fond_plan.fichier.name, exc)
         apercu_bytes = _generer_placeholder_dwg_png()
@@ -539,9 +534,9 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     fond_plan.apercu.save(f"{nom_base}_apercu.png", ContentFile(apercu_bytes), save=True)
     logger.info("Aperçu CAO généré pour %s", fond_plan.fichier.name)
 
-    # 2. Miniature haute résolution — chargée en arrière-plan pour le zoom
+    # 2. Miniature haute résolution (7016px ≈ A1 à 150 DPI) — pour le zoom
     try:
-        hd_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=4960, hauteur_px=3508)
+        hd_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=7016, hauteur_px=4961)
     except Exception as exc:
         logger.warning("Miniature HD CAO échouée pour %s : %s — copie de l'aperçu.", fond_plan.fichier.name, exc)
         hd_bytes = apercu_bytes
