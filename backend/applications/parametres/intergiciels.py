@@ -18,7 +18,6 @@ PREFIXES_FONCTIONNALITES = {
     r"^/api/pieces-ecrites/": "PIECES_ECRITES",
     r"^/api/appels-offres/": "APPELS_OFFRES",
     r"^/api/execution/": "SUIVI_EXECUTION",
-    r"^/api/messagerie/": "MODULE_WEBMAIL",
     r"^/api/supervision/": "SUPERVISION",
 }
 

@@ -12,7 +12,6 @@ import {
   CarteSectionAdmin,
   EntetePageAdmin,
 } from "@/composants/administration/Presentation";
-import { GestionMessagerie } from "@/composants/parametres/GestionMessagerie";
 import type { SuggestionAdressePublique } from "@/lib/organisations";
 
 interface DiapositiveCarrousel {
@@ -63,13 +62,12 @@ interface ConfigurationSite {
   mots_cles: string;
 }
 
-type OngletId = "identite" | "accueil" | "coordonnees" | "messagerie" | "sections" | "apparence" | "carrousel" | "seo";
+type OngletId = "identite" | "accueil" | "coordonnees" | "sections" | "apparence" | "carrousel" | "seo";
 
 const ONGLETS: { id: OngletId; libelle: string }[] = [
   { id: "identite",   libelle: "Identité" },
   { id: "accueil",    libelle: "Page d'accueil" },
   { id: "coordonnees", libelle: "Coordonnées" },
-  { id: "messagerie", libelle: "Messagerie" },
   { id: "sections",   libelle: "Sections" },
   { id: "apparence",  libelle: "Apparence" },
   { id: "carrousel",  libelle: "Carrousel" },
@@ -241,7 +239,7 @@ export default function PageConfiguration() {
   }
 
   return (
-    <div className={`space-y-6 ${onglet === "messagerie" ? "max-w-7xl" : "max-w-3xl"}`}>
+    <div className="space-y-6 max-w-3xl">
       {/* En-tête */}
       <EntetePageAdmin
         titre="Configuration du site"
@@ -304,9 +302,6 @@ export default function PageConfiguration() {
       </div>
 
       {/* Contenu onglet */}
-      {onglet === "messagerie" ? (
-        <GestionMessagerie />
-      ) : (
       <CarteSectionAdmin
         titre={ONGLETS.find((item) => item.id === onglet)?.libelle}
         description="Les contenus riches et les encarts éditoriaux avancés se pilotent depuis l’écran dédié."
@@ -953,10 +948,9 @@ export default function PageConfiguration() {
         )}
       </div>
       </CarteSectionAdmin>
-      )}
 
       {/* Bouton bas de page */}
-      {onglet !== "messagerie" && <div className="flex justify-end">
+      <div className="flex justify-end">
         <button
           onClick={enregistrer}
           disabled={enregistrement}
@@ -969,7 +963,7 @@ export default function PageConfiguration() {
             </>
           )}
         </button>
-      </div>}
+      </div>
     </div>
   );
 }

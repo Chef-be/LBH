@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Mail, Save, Send, Server, Trash2 } from "lucide-react";
+import { ExternalLink, Inbox, Mail, Save, Send, Server, Trash2 } from "lucide-react";
 
-import { api, extraireListeResultats, type ReponsePaginee, ErreurApi } from "@/crochets/useApi";
+import { api, ErreurApi, extraireListeResultats, type ReponsePaginee } from "@/crochets/useApi";
 
 interface ServeurMessagerie {
   id: string;
@@ -113,6 +113,14 @@ interface FormulaireRoundcube {
   url_aide: string;
 }
 
+type OngletMessagerie = "smtp" | "webmail" | "journal";
+
+const ONGLETS: { id: OngletMessagerie; libelle: string; description: string }[] = [
+  { id: "smtp", libelle: "SMTP applicatif", description: "Serveur utilisé par la plateforme pour envoyer les e-mails." },
+  { id: "webmail", libelle: "Webmail / IMAP", description: "Connexion entrante, dossiers et habillage Roundcube." },
+  { id: "journal", libelle: "Journal", description: "Historique des e-mails envoyés par l’application." },
+];
+
 function formulaireVide(): FormulaireServeur {
   return {
     nom: "",
@@ -159,8 +167,47 @@ function formaterDate(iso: string | null | undefined) {
   return new Date(iso).toLocaleString("fr-FR");
 }
 
+function ChampTexte({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  label: string;
+  value: string | number;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="libelle-champ">{label}</label>
+      <input type={type} className="champ-saisie" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function CaseOption({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "var(--bordure)" }}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span style={{ color: "var(--texte)" }}>{label}</span>
+    </label>
+  );
+}
+
 export function GestionMessagerie() {
   const queryClient = useQueryClient();
+  const [onglet, setOnglet] = useState<OngletMessagerie>("smtp");
   const [serveurEditionId, setServeurEditionId] = useState<string | null>(null);
   const [formulaire, setFormulaire] = useState<FormulaireServeur>(formulaireVide());
   const [formulaireRoundcube, setFormulaireRoundcube] = useState<FormulaireRoundcube>(formulaireRoundcubeVide());
@@ -169,7 +216,7 @@ export function GestionMessagerie() {
 
   const { data } = useQuery<ReponsePaginee<ServeurMessagerie> | ServeurMessagerie[]>({
     queryKey: ["messagerie-serveurs"],
-    queryFn: () => api.get<ReponsePaginee<ServeurMessagerie> | ServeurMessagerie[]>("/api/messagerie/serveurs/"),
+    queryFn: () => api.get<ReponsePaginee<ServeurMessagerie> | ServeurMessagerie[]>("/api/supervision/serveurs-mail/"),
   });
   const { data: parametresRoundcubeData } = useQuery<ReponsePaginee<ParametreMessagerie> | ParametreMessagerie[]>({
     queryKey: ["messagerie-roundcube-parametres"],
@@ -186,7 +233,9 @@ export function GestionMessagerie() {
 
   const serveurs = extraireListeResultats(data);
   const parametresRoundcube = extraireListeResultats(parametresRoundcubeData);
-  const lignesJournal = extraireListeResultats(journalCourriels).slice(0, 12);
+  const lignesJournal = extraireListeResultats(journalCourriels).slice(0, 20);
+  const serveurDefaut = serveurs.find((serveur) => serveur.est_defaut);
+  const serveursActifs = serveurs.filter((serveur) => serveur.est_actif).length;
   const parametresRoundcubeParCle = useMemo(
     () => Object.fromEntries(parametresRoundcube.map((parametre) => [parametre.cle, parametre])),
     [parametresRoundcube]
@@ -198,7 +247,7 @@ export function GestionMessagerie() {
     setTestCourant(null);
   };
 
-  const charger = (serveur: ServeurMessagerie) => {
+  const charger = (serveur: ServeurMessagerie, cible: OngletMessagerie = onglet) => {
     setServeurEditionId(serveur.id);
     setFormulaire({
       nom: serveur.nom,
@@ -228,6 +277,7 @@ export function GestionMessagerie() {
       est_defaut: serveur.est_defaut,
       notes: serveur.notes || "",
     });
+    setOnglet(cible);
     setRetour(null);
     setTestCourant(null);
   };
@@ -246,9 +296,9 @@ export function GestionMessagerie() {
   const { mutate: enregistrerServeur, isPending: enregistrement } = useMutation({
     mutationFn: (payload: FormulaireServeur) => {
       if (serveurEditionId) {
-        return api.patch(`/api/messagerie/serveurs/${serveurEditionId}/`, payload);
+        return api.patch(`/api/supervision/serveurs-mail/${serveurEditionId}/`, payload);
       }
-      return api.post("/api/messagerie/serveurs/", payload);
+      return api.post("/api/supervision/serveurs-mail/", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messagerie-serveurs"] });
@@ -264,7 +314,7 @@ export function GestionMessagerie() {
   });
 
   const { mutate: supprimerServeur, isPending: suppression } = useMutation({
-    mutationFn: (id: string) => api.supprimer(`/api/messagerie/serveurs/${id}/`),
+    mutationFn: (id: string) => api.supprimer(`/api/supervision/serveurs-mail/${id}/`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messagerie-serveurs"] });
       setRetour({ type: "succes", texte: "Serveur de messagerie supprimé." });
@@ -317,7 +367,7 @@ export function GestionMessagerie() {
     },
   });
 
-  const serveursActifs = serveurs.filter((serveur) => serveur.est_actif).length;
+  const enregistrer = () => enregistrerServeur(formulaire);
 
   return (
     <div className="space-y-6">
@@ -331,15 +381,14 @@ export function GestionMessagerie() {
       >
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
-            <span className="badge-info">Messagerie unifiée</span>
+            <span className="badge-info">Communication plateforme</span>
             <div>
               <h2 className="flex items-center gap-2">
                 <Mail size={18} />
-                Messagerie sortante, entrante et webmail
+                Messagerie et envois applicatifs
               </h2>
               <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                Cette configuration est réutilisée pour les envois applicatifs, les notifications du site
-                vitrine et l’accès au webmail intégré.
+                Le SMTP applicatif reste disponible pour les devis, validations, invitations et notifications, indépendamment du webmail utilisateur.
               </p>
             </div>
           </div>
@@ -347,7 +396,7 @@ export function GestionMessagerie() {
             {[
               { libelle: "Serveurs", valeur: serveurs.length.toString() },
               { libelle: "Actifs", valeur: serveursActifs.toString() },
-              { libelle: "Défaut", valeur: serveurs.find((serveur) => serveur.est_defaut)?.nom || "Aucun" },
+              { libelle: "Défaut", valeur: serveurDefaut?.nom || "Aucun" },
             ].map((item) => (
               <div key={item.libelle} className="rounded-2xl border px-4 py-3" style={{ borderColor: "var(--bordure)", background: "var(--fond-carte)" }}>
                 <p className="text-xs uppercase tracking-[0.18em]" style={{ color: "var(--texte-3)" }}>{item.libelle}</p>
@@ -358,386 +407,332 @@ export function GestionMessagerie() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.95fr,1.25fr]">
-        <div className="space-y-4">
-          <div className="carte flex items-center justify-between gap-3">
-            <div>
-              <h3 className="flex items-center gap-2">
-                <Server size={16} />
-                Serveurs configurés
-              </h3>
-              <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-                Le serveur par défaut pilote les usages sortants de la plateforme.
-              </p>
-            </div>
-            <button onClick={reinitialiser} className="btn-secondaire text-xs">Nouveau</button>
-          </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {ONGLETS.map((item) => {
+          const actif = onglet === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setOnglet(item.id)}
+              className="rounded-2xl border px-4 py-3 text-left transition"
+              style={{
+                borderColor: actif ? "var(--c-base)" : "var(--bordure)",
+                background: actif ? "color-mix(in srgb, var(--c-leger) 70%, var(--fond-carte))" : "var(--fond-carte)",
+              }}
+            >
+              <span className="text-sm font-semibold" style={{ color: "var(--texte)" }}>{item.libelle}</span>
+              <span className="mt-1 block text-xs" style={{ color: "var(--texte-2)" }}>{item.description}</span>
+            </button>
+          );
+        })}
+      </div>
 
-          {serveurs.length === 0 ? (
-            <div className="carte py-10 text-center text-sm" style={{ color: "var(--texte-2)" }}>
-              Aucun serveur de messagerie n&apos;est encore configuré.
-            </div>
-          ) : (
-            serveurs.map((serveur) => (
-              <div key={serveur.id} className="carte space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold" style={{ color: "var(--texte)" }}>{serveur.nom}</p>
-                      {serveur.est_defaut && <span className="badge-info">Défaut</span>}
-                      {!serveur.est_actif && <span className="badge-danger">Inactif</span>}
-                    </div>
-                    <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-                      SMTP {serveur.hote}:{serveur.port} • {serveur.chiffrement_libelle}
-                    </p>
-                    <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-                      IMAP {serveur.imap_hote || "non renseigné"}:{serveur.imap_port} • {serveur.imap_chiffrement_libelle}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => testerServeur(serveur.id)} disabled={testEnCours} className="btn-secondaire text-xs">
-                      <Send size={12} />
-                      Tester
-                    </button>
-                    <button onClick={() => charger(serveur)} className="btn-secondaire text-xs">Modifier</button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs" style={{ color: "var(--texte-3)" }}>
-                  <span>Plateforme : {serveur.usage_envoi_plateforme ? "oui" : "non"}</span>
-                  <span>Notifications : {serveur.usage_notifications ? "oui" : "non"}</span>
-                  <span>IMAP : {serveur.imap_hote ? "oui" : "non"}</span>
-                </div>
-                <p className="text-xs" style={{ color: "var(--texte-3)" }}>
-                  Dernière modification : {formaterDate(serveur.date_modification)}
-                  {serveur.modifie_par_nom ? ` par ${serveur.modifie_par_nom}` : ""}
+      {retour && (
+        <div
+          className="rounded-2xl border px-4 py-3 text-sm"
+          style={{
+            borderColor: retour.type === "succes" ? "#22c55e" : "#ef4444",
+            background: retour.type === "succes" ? "rgba(34, 197, 94, 0.08)" : "rgba(239, 68, 68, 0.08)",
+            color: retour.type === "succes" ? "#15803d" : "#b91c1c",
+          }}
+        >
+          {retour.texte}
+        </div>
+      )}
+
+      {onglet !== "journal" && (
+        <div className="grid gap-6 xl:grid-cols-[0.9fr,1.3fr]">
+          <div className="space-y-4">
+            <div className="carte flex items-center justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2">
+                  <Server size={16} />
+                  Serveurs configurés
+                </h3>
+                <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+                  Un serveur peut porter les réglages SMTP applicatifs et les réglages IMAP du webmail.
                 </p>
               </div>
-            ))
+              <button onClick={reinitialiser} className="btn-secondaire text-xs">Nouveau</button>
+            </div>
+
+            {serveurs.length === 0 ? (
+              <div className="carte py-10 text-center text-sm" style={{ color: "var(--texte-2)" }}>
+                Aucun serveur de messagerie n&apos;est configuré.
+              </div>
+            ) : (
+              serveurs.map((serveur) => (
+                <div key={serveur.id} className="carte space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold" style={{ color: "var(--texte)" }}>{serveur.nom}</p>
+                        {serveur.est_defaut && <span className="badge-info">Défaut</span>}
+                        {!serveur.est_actif && <span className="badge-danger">Inactif</span>}
+                      </div>
+                      <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+                        SMTP {serveur.hote}:{serveur.port} · {serveur.chiffrement_libelle}
+                      </p>
+                      <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+                        IMAP {serveur.imap_hote || "non renseigné"}:{serveur.imap_port} · {serveur.imap_chiffrement_libelle}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button onClick={() => testerServeur(serveur.id)} disabled={testEnCours} className="btn-secondaire text-xs">
+                        <Send size={12} />
+                        Tester
+                      </button>
+                      <button onClick={() => charger(serveur, onglet)} className="btn-secondaire text-xs">Modifier</button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs" style={{ color: "var(--texte-3)" }}>
+                    <span>Plateforme : {serveur.usage_envoi_plateforme ? "oui" : "non"}</span>
+                    <span>Notifications : {serveur.usage_notifications ? "oui" : "non"}</span>
+                    <span>IMAP : {serveur.imap_hote ? "oui" : "non"}</span>
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--texte-3)" }}>
+                    Dernière modification : {formaterDate(serveur.date_modification)}
+                    {serveur.modifie_par_nom ? ` par ${serveur.modifie_par_nom}` : ""}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+
+          {onglet === "smtp" && (
+            <div className="carte space-y-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3>{serveurEditionId ? "Modifier le SMTP applicatif" : "Ajouter un SMTP applicatif"}</h3>
+                  <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+                    Ces réglages alimentent les e-mails envoyés par la plateforme.
+                  </p>
+                </div>
+                {serveurEditionId && <button onClick={reinitialiser} className="btn-secondaire text-xs">Annuler</button>}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <ChampTexte label="Nom du serveur" value={formulaire.nom} onChange={(value) => setFormulaire((prev) => ({ ...prev, nom: value }))} />
+                <ChampTexte label="Expéditeur par défaut" value={formulaire.expediteur_defaut} onChange={(value) => setFormulaire((prev) => ({ ...prev, expediteur_defaut: value }))} />
+                <ChampTexte label="Hôte SMTP" value={formulaire.hote} onChange={(value) => setFormulaire((prev) => ({ ...prev, hote: value }))} />
+                <ChampTexte label="Port SMTP" type="number" value={formulaire.port} onChange={(value) => setFormulaire((prev) => ({ ...prev, port: Number(value || 0) }))} />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="libelle-champ">Chiffrement SMTP</label>
+                  <select className="champ-saisie" value={formulaire.chiffrement} onChange={(e) => setFormulaire((prev) => ({ ...prev, chiffrement: e.target.value as FormulaireServeur["chiffrement"] }))}>
+                    <option value="aucun">Aucun</option>
+                    <option value="starttls">STARTTLS</option>
+                    <option value="ssl_tls">SSL / TLS</option>
+                  </select>
+                </div>
+                <ChampTexte label="Adresse de réponse" value={formulaire.reponse_a} onChange={(value) => setFormulaire((prev) => ({ ...prev, reponse_a: value }))} />
+                <ChampTexte label="Utilisateur SMTP" value={formulaire.utilisateur} onChange={(value) => setFormulaire((prev) => ({ ...prev, utilisateur: value }))} />
+                <ChampTexte label="Mot de passe SMTP" type="password" value={formulaire.mot_de_passe} onChange={(value) => setFormulaire((prev) => ({ ...prev, mot_de_passe: value }))} />
+                <ChampTexte label="Délai de connexion" type="number" value={formulaire.delai_connexion} onChange={(value) => setFormulaire((prev) => ({ ...prev, delai_connexion: Number(value || 0) }))} />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <CaseOption checked={formulaire.verifier_certificat} label="Vérifier le certificat SMTP" onChange={(checked) => setFormulaire((prev) => ({ ...prev, verifier_certificat: checked }))} />
+                <CaseOption checked={formulaire.usage_envoi_plateforme} label="Utiliser pour les e-mails applicatifs" onChange={(checked) => setFormulaire((prev) => ({ ...prev, usage_envoi_plateforme: checked }))} />
+                <CaseOption checked={formulaire.usage_notifications} label="Utiliser pour les notifications" onChange={(checked) => setFormulaire((prev) => ({ ...prev, usage_notifications: checked }))} />
+                <CaseOption checked={formulaire.est_actif} label="Serveur actif" onChange={(checked) => setFormulaire((prev) => ({ ...prev, est_actif: checked }))} />
+                <CaseOption checked={formulaire.est_defaut} label="Serveur par défaut" onChange={(checked) => setFormulaire((prev) => ({ ...prev, est_defaut: checked }))} />
+              </div>
+
+              <div>
+                <label className="libelle-champ">Notes</label>
+                <textarea rows={4} className="champ-saisie" value={formulaire.notes} onChange={(e) => setFormulaire((prev) => ({ ...prev, notes: e.target.value }))} />
+              </div>
+
+              {testCourant && (
+                <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "var(--bordure)" }}>
+                  Dernier test SMTP : {testCourant.detail} ({testCourant.latence_ms} ms)
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  {serveurEditionId && (
+                    <button onClick={() => supprimerServeur(serveurEditionId)} disabled={suppression} className="btn-danger text-xs">
+                      <Trash2 size={12} />
+                      Supprimer
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {serveurEditionId && (
+                    <button onClick={() => testerServeur(serveurEditionId)} disabled={testEnCours} className="btn-secondaire">
+                      <Send size={14} />
+                      Tester SMTP
+                    </button>
+                  )}
+                  <button onClick={enregistrer} disabled={enregistrement || !formulaire.nom || !formulaire.hote} className="btn-primaire">
+                    <Save size={14} />
+                    {enregistrement ? "Enregistrement…" : "Enregistrer"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {onglet === "webmail" && (
+            <div className="space-y-6">
+              <div className="carte space-y-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="flex items-center gap-2">
+                      <Inbox size={16} />
+                      Connexion IMAP
+                    </h3>
+                    <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+                      Sélectionnez un serveur à gauche pour modifier ses paramètres entrants.
+                    </p>
+                  </div>
+                  {serveurEditionId && <button onClick={reinitialiser} className="btn-secondaire text-xs">Annuler</button>}
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <ChampTexte label="Nom du serveur" value={formulaire.nom} onChange={(value) => setFormulaire((prev) => ({ ...prev, nom: value }))} />
+                  <ChampTexte label="Hôte IMAP" value={formulaire.imap_hote} placeholder="mail.exemple.com" onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_hote: value }))} />
+                  <ChampTexte label="Port IMAP" type="number" value={formulaire.imap_port} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_port: Number(value || 0) }))} />
+                  <div>
+                    <label className="libelle-champ">Chiffrement IMAP</label>
+                    <select className="champ-saisie" value={formulaire.imap_chiffrement} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_chiffrement: e.target.value as FormulaireServeur["imap_chiffrement"] }))}>
+                      <option value="aucun">Aucun</option>
+                      <option value="starttls">STARTTLS</option>
+                      <option value="ssl_tls">SSL / TLS</option>
+                    </select>
+                  </div>
+                  <ChampTexte label="Utilisateur IMAP" value={formulaire.imap_utilisateur} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_utilisateur: value }))} />
+                  <ChampTexte label="Mot de passe IMAP" type="password" value={formulaire.imap_mot_de_passe} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_mot_de_passe: value }))} />
+                  <ChampTexte label="Dossier envoyés" value={formulaire.imap_dossier_envoyes} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_dossier_envoyes: value }))} />
+                  <ChampTexte label="Dossier brouillons" value={formulaire.imap_dossier_brouillons} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_dossier_brouillons: value }))} />
+                  <ChampTexte label="Dossier archives" value={formulaire.imap_dossier_archives} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_dossier_archives: value }))} />
+                  <ChampTexte label="Dossier indésirables" value={formulaire.imap_dossier_indesirables} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_dossier_indesirables: value }))} />
+                  <ChampTexte label="Dossier corbeille" value={formulaire.imap_dossier_corbeille} onChange={(value) => setFormulaire((prev) => ({ ...prev, imap_dossier_corbeille: value }))} />
+                </div>
+
+                <CaseOption checked={formulaire.imap_verifier_certificat} label="Vérifier le certificat IMAP" onChange={(checked) => setFormulaire((prev) => ({ ...prev, imap_verifier_certificat: checked }))} />
+
+                <div className="flex justify-end">
+                  <button onClick={enregistrer} disabled={enregistrement || !formulaire.nom} className="btn-primaire">
+                    <Save size={14} />
+                    {enregistrement ? "Enregistrement…" : "Enregistrer IMAP"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="carte space-y-5">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h3>Webmail Roundcube</h3>
+                    <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+                      Paramètres d’affichage de la messagerie intégrée.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link href="/webmail" className="btn-primaire">
+                      <Mail size={14} />
+                      Ouvrir
+                    </Link>
+                    <Link href="/roundcube/" target="_blank" rel="noopener noreferrer" className="btn-secondaire">
+                      <ExternalLink size={14} />
+                      Nouvel onglet
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                  <ChampTexte label="Nom affiché" value={formulaireRoundcube.nom_application} onChange={(value) => setFormulaireRoundcube((prev) => ({ ...prev, nom_application: value }))} />
+                  <ChampTexte label="Langue" value={formulaireRoundcube.langue} onChange={(value) => setFormulaireRoundcube((prev) => ({ ...prev, langue: value }))} />
+                  <div>
+                    <label className="libelle-champ">Écran d&apos;arrivée</label>
+                    <select className="champ-saisie" value={formulaireRoundcube.tache_defaut} onChange={(e) => setFormulaireRoundcube((prev) => ({ ...prev, tache_defaut: e.target.value }))}>
+                      <option value="mail">Courrier</option>
+                      <option value="addressbook">Carnet d&apos;adresses</option>
+                      <option value="settings">Préférences</option>
+                    </select>
+                  </div>
+                  <ChampTexte label="Lien du logo" value={formulaireRoundcube.lien_logo} onChange={(value) => setFormulaireRoundcube((prev) => ({ ...prev, lien_logo: value }))} />
+                  <ChampTexte label="URL d'aide" value={formulaireRoundcube.url_aide} onChange={(value) => setFormulaireRoundcube((prev) => ({ ...prev, url_aide: value }))} />
+                </div>
+
+                <div className="rounded-2xl border px-4 py-4 text-sm" style={{ borderColor: "var(--bordure)" }}>
+                  <p className="font-medium" style={{ color: "var(--texte)" }}>Aperçu actuel</p>
+                  <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4" style={{ color: "var(--texte-2)" }}>
+                    <p>Produit : {configurationRoundcube?.product_name || "Messagerie"}</p>
+                    <p>Langue : {configurationRoundcube?.language || "fr_FR"}</p>
+                    <p>Écran : {configurationRoundcube?.default_task || "mail"}</p>
+                    <p>Logo : {configurationRoundcube?.logo_url ? "Configuré" : "Aucun logo"}</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button onClick={() => enregistrerRoundcube(formulaireRoundcube)} disabled={enregistrementRoundcube} className="btn-primaire">
+                    <Save size={14} />
+                    {enregistrementRoundcube ? "Enregistrement…" : "Enregistrer Roundcube"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
+      )}
 
-        <div className="space-y-6">
-          <div className="carte space-y-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3>{serveurEditionId ? "Modifier un service de messagerie" : "Ajouter un service de messagerie"}</h3>
-                <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-                  Un même enregistrement regroupe la partie SMTP, l’entrée IMAP et les dossiers webmail.
-                </p>
-              </div>
-              {serveurEditionId && (
-                <button onClick={reinitialiser} className="btn-secondaire text-xs">Annuler</button>
-              )}
-            </div>
-
-            {retour && (
-              <div
-                className="rounded-2xl border px-4 py-3 text-sm"
-                style={{
-                  borderColor: retour.type === "succes" ? "#22c55e" : "#ef4444",
-                  background: retour.type === "succes" ? "rgba(34, 197, 94, 0.08)" : "rgba(239, 68, 68, 0.08)",
-                  color: retour.type === "succes" ? "#15803d" : "#b91c1c",
-                }}
-              >
-                {retour.texte}
-              </div>
-            )}
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="libelle-champ">Nom du serveur</label>
-                <input className="champ-saisie" value={formulaire.nom} onChange={(e) => setFormulaire((prev) => ({ ...prev, nom: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Expéditeur par défaut</label>
-                <input className="champ-saisie" value={formulaire.expediteur_defaut} onChange={(e) => setFormulaire((prev) => ({ ...prev, expediteur_defaut: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="rounded-2xl border p-4 space-y-4" style={{ borderColor: "var(--bordure)" }}>
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Sortie SMTP</p>
-                  <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>Courriels applicatifs, notifications et envois webmail.</p>
-                </div>
-                <div className="grid gap-4">
-                  <div>
-                    <label className="libelle-champ">Hôte SMTP</label>
-                    <input className="champ-saisie" value={formulaire.hote} onChange={(e) => setFormulaire((prev) => ({ ...prev, hote: e.target.value }))} />
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="libelle-champ">Port</label>
-                      <input type="number" className="champ-saisie" value={formulaire.port} onChange={(e) => setFormulaire((prev) => ({ ...prev, port: Number(e.target.value || 0) }))} />
-                    </div>
-                    <div>
-                      <label className="libelle-champ">Chiffrement</label>
-                      <select className="champ-saisie" value={formulaire.chiffrement} onChange={(e) => setFormulaire((prev) => ({ ...prev, chiffrement: e.target.value as FormulaireServeur["chiffrement"] }))}>
-                        <option value="aucun">Aucun</option>
-                        <option value="starttls">STARTTLS</option>
-                        <option value="ssl_tls">SSL / TLS</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="libelle-champ">Utilisateur SMTP</label>
-                    <input className="champ-saisie" value={formulaire.utilisateur} onChange={(e) => setFormulaire((prev) => ({ ...prev, utilisateur: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="libelle-champ">Mot de passe SMTP</label>
-                    <input type="password" className="champ-saisie" value={formulaire.mot_de_passe} onChange={(e) => setFormulaire((prev) => ({ ...prev, mot_de_passe: e.target.value }))} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border p-4 space-y-4" style={{ borderColor: "var(--bordure)" }}>
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Entrée IMAP</p>
-                  <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>Connexion utilisée par le webmail intégré.</p>
-                </div>
-                <div className="grid gap-4">
-                  <div>
-                    <label className="libelle-champ">Hôte IMAP</label>
-                    <input className="champ-saisie" value={formulaire.imap_hote} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_hote: e.target.value }))} placeholder="mail.exemple.com" />
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="libelle-champ">Port IMAP</label>
-                      <input type="number" className="champ-saisie" value={formulaire.imap_port} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_port: Number(e.target.value || 0) }))} />
-                    </div>
-                    <div>
-                      <label className="libelle-champ">Chiffrement IMAP</label>
-                      <select className="champ-saisie" value={formulaire.imap_chiffrement} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_chiffrement: e.target.value as FormulaireServeur["imap_chiffrement"] }))}>
-                        <option value="aucun">Aucun</option>
-                        <option value="starttls">STARTTLS</option>
-                        <option value="ssl_tls">SSL / TLS</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="libelle-champ">Utilisateur IMAP</label>
-                    <input className="champ-saisie" value={formulaire.imap_utilisateur} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_utilisateur: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="libelle-champ">Mot de passe IMAP</label>
-                    <input type="password" className="champ-saisie" value={formulaire.imap_mot_de_passe} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_mot_de_passe: e.target.value }))} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <div>
-                <label className="libelle-champ">Adresse de réponse</label>
-                <input className="champ-saisie" value={formulaire.reponse_a} onChange={(e) => setFormulaire((prev) => ({ ...prev, reponse_a: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Délai de connexion</label>
-                <input type="number" className="champ-saisie" value={formulaire.delai_connexion} onChange={(e) => setFormulaire((prev) => ({ ...prev, delai_connexion: Number(e.target.value || 0) }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Dossier des envoyés</label>
-                <input className="champ-saisie" value={formulaire.imap_dossier_envoyes} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_dossier_envoyes: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Dossier des archives</label>
-                <input className="champ-saisie" value={formulaire.imap_dossier_archives} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_dossier_archives: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Dossier des indésirables</label>
-                <input className="champ-saisie" value={formulaire.imap_dossier_indesirables} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_dossier_indesirables: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="libelle-champ">Dossier des brouillons</label>
-                <input className="champ-saisie" value={formulaire.imap_dossier_brouillons} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_dossier_brouillons: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Dossier de la corbeille</label>
-                <input className="champ-saisie" value={formulaire.imap_dossier_corbeille} onChange={(e) => setFormulaire((prev) => ({ ...prev, imap_dossier_corbeille: e.target.value }))} />
-              </div>
-            </div>
-
-            <div>
-              <label className="libelle-champ">Notes</label>
-              <textarea rows={4} className="champ-saisie" value={formulaire.notes} onChange={(e) => setFormulaire((prev) => ({ ...prev, notes: e.target.value }))} />
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {[
-                ["verifier_certificat", "Vérifier le certificat SMTP"],
-                ["imap_verifier_certificat", "Vérifier le certificat IMAP"],
-                ["usage_envoi_plateforme", "Utiliser pour les courriels applicatifs"],
-                ["usage_notifications", "Utiliser pour les notifications"],
-                ["est_actif", "Serveur actif"],
-                ["est_defaut", "Serveur par défaut"],
-              ].map(([champ, libelle]) => (
-                <label key={champ} className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "var(--bordure)" }}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(formulaire[champ as keyof FormulaireServeur])}
-                    onChange={(e) => setFormulaire((prev) => ({ ...prev, [champ]: e.target.checked }))}
-                  />
-                  <span style={{ color: "var(--texte)" }}>{libelle}</span>
-                </label>
-              ))}
-            </div>
-
-            {testCourant && (
-              <div className="rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "var(--bordure)" }}>
-                Dernier test SMTP : {testCourant.detail} ({testCourant.latence_ms} ms)
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                {serveurEditionId && (
-                  <button onClick={() => supprimerServeur(serveurEditionId)} disabled={suppression} className="btn-danger text-xs">
-                    <Trash2 size={12} />
-                    Supprimer
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {serveurEditionId && (
-                  <button onClick={() => testerServeur(serveurEditionId)} disabled={testEnCours} className="btn-secondaire">
-                    <Send size={14} />
-                    Tester SMTP
-                  </button>
-                )}
-                <button onClick={() => enregistrerServeur(formulaire)} disabled={enregistrement || !formulaire.nom || !formulaire.hote} className="btn-primaire">
-                  <Save size={14} />
-                  {enregistrement ? "Enregistrement…" : "Enregistrer"}
-                </button>
-              </div>
-            </div>
+      {onglet === "journal" && (
+        <div className="carte space-y-4">
+          <div>
+            <h3>Journal des e-mails envoyés</h3>
+            <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
+              Historique des invitations, notifications, réinitialisations et autres envois de la plateforme.
+            </p>
           </div>
 
-          <div className="carte space-y-5">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div>
-                <h3>Roundcube dans l&apos;interface</h3>
-                <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-                  La messagerie s&apos;ouvre désormais dans l&apos;espace utilisateur, avec votre logo et vos réglages.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link href="/webmail" className="btn-primaire">
-                  <Mail size={14} />
-                  Ouvrir la messagerie
-                </Link>
-                <Link href="/roundcube/" target="_blank" rel="noopener noreferrer" className="btn-secondaire">
-                  <ExternalLink size={14} />
-                  Nouvel onglet
-                </Link>
-              </div>
+          {lignesJournal.length === 0 ? (
+            <div className="rounded-2xl border px-4 py-8 text-center text-sm" style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}>
+              Aucun e-mail journalisé pour le moment.
             </div>
-
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <div>
-                <label className="libelle-champ">Nom affiché</label>
-                <input className="champ-saisie" value={formulaireRoundcube.nom_application} onChange={(e) => setFormulaireRoundcube((prev) => ({ ...prev, nom_application: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Langue</label>
-                <input className="champ-saisie" value={formulaireRoundcube.langue} onChange={(e) => setFormulaireRoundcube((prev) => ({ ...prev, langue: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">Écran d&apos;arrivée</label>
-                <select className="champ-saisie" value={formulaireRoundcube.tache_defaut} onChange={(e) => setFormulaireRoundcube((prev) => ({ ...prev, tache_defaut: e.target.value }))}>
-                  <option value="mail">Courrier</option>
-                  <option value="addressbook">Carnet d&apos;adresses</option>
-                  <option value="settings">Préférences</option>
-                </select>
-              </div>
-              <div>
-                <label className="libelle-champ">Lien du logo</label>
-                <input className="champ-saisie" value={formulaireRoundcube.lien_logo} onChange={(e) => setFormulaireRoundcube((prev) => ({ ...prev, lien_logo: e.target.value }))} />
-              </div>
-              <div>
-                <label className="libelle-champ">URL d&apos;aide</label>
-                <input className="champ-saisie" value={formulaireRoundcube.url_aide} onChange={(e) => setFormulaireRoundcube((prev) => ({ ...prev, url_aide: e.target.value }))} />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border px-4 py-4 text-sm" style={{ borderColor: "var(--bordure)" }}>
-              <p className="font-medium" style={{ color: "var(--texte)" }}>
-                Aperçu actuel
-              </p>
-              <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4" style={{ color: "var(--texte-2)" }}>
-                <p>Produit : {configurationRoundcube?.product_name || "Messagerie"}</p>
-                <p>Langue : {configurationRoundcube?.language || "fr_FR"}</p>
-                <p>Écran d&apos;arrivée : {configurationRoundcube?.default_task || "mail"}</p>
-                <p>Logo : {configurationRoundcube?.logo_url ? "Configuré" : "Aucun logo"}</p>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button onClick={() => enregistrerRoundcube(formulaireRoundcube)} disabled={enregistrementRoundcube} className="btn-primaire">
-                <Save size={14} />
-                {enregistrementRoundcube ? "Enregistrement…" : "Enregistrer Roundcube"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="carte space-y-4">
-        <div>
-          <h3>Journal des e-mails envoyés</h3>
-          <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
-            Historique réservé au super-administrateur pour contrôler les invitations, notifications,
-            réinitialisations et autres envois de la plateforme.
-          </p>
-        </div>
-
-        {lignesJournal.length === 0 ? (
-          <div className="rounded-2xl border px-4 py-8 text-sm text-center" style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}>
-            Aucun e-mail journalisé pour le moment.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b" style={{ borderColor: "var(--bordure)" }}>
-                  <th className="py-3 pr-4 text-left font-medium">Date</th>
-                  <th className="py-3 pr-4 text-left font-medium">Origine</th>
-                  <th className="py-3 pr-4 text-left font-medium">Sujet</th>
-                  <th className="py-3 pr-4 text-left font-medium">Destinataires</th>
-                  <th className="py-3 pr-4 text-left font-medium">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lignesJournal.map((ligne) => (
-                  <tr key={ligne.id} className="border-b align-top" style={{ borderColor: "var(--bordure)" }}>
-                    <td className="py-3 pr-4 whitespace-nowrap">{formaterDate(ligne.date_envoi)}</td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium" style={{ color: "var(--texte)" }}>{ligne.origine}</div>
-                      {ligne.utilisateur_nom && (
-                        <div className="text-xs" style={{ color: "var(--texte-3)" }}>{ligne.utilisateur_nom}</div>
-                      )}
-                    </td>
-                    <td className="py-3 pr-4">
-                      <div style={{ color: "var(--texte)" }}>{ligne.sujet}</div>
-                      {ligne.erreur && (
-                        <div className="mt-1 text-xs text-red-600">{ligne.erreur}</div>
-                      )}
-                    </td>
-                    <td className="py-3 pr-4">{ligne.destinataires.join(", ") || "—"}</td>
-                    <td className="py-3 pr-4">
-                      <span className={ligne.statut === "succes" ? "badge-succes" : "badge-danger"}>
-                        {ligne.statut === "succes" ? "Succès" : "Échec"}
-                      </span>
-                    </td>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: "var(--bordure)" }}>
+                    <th className="py-3 pr-4 text-left font-medium">Date</th>
+                    <th className="py-3 pr-4 text-left font-medium">Origine</th>
+                    <th className="py-3 pr-4 text-left font-medium">Sujet</th>
+                    <th className="py-3 pr-4 text-left font-medium">Destinataires</th>
+                    <th className="py-3 pr-4 text-left font-medium">Statut</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {lignesJournal.map((ligne) => (
+                    <tr key={ligne.id} className="border-b align-top" style={{ borderColor: "var(--bordure)" }}>
+                      <td className="py-3 pr-4 whitespace-nowrap">{formaterDate(ligne.date_envoi)}</td>
+                      <td className="py-3 pr-4">
+                        <div className="font-medium" style={{ color: "var(--texte)" }}>{ligne.origine}</div>
+                        {ligne.utilisateur_nom && <div className="text-xs" style={{ color: "var(--texte-3)" }}>{ligne.utilisateur_nom}</div>}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <div style={{ color: "var(--texte)" }}>{ligne.sujet}</div>
+                        {ligne.erreur && <div className="mt-1 text-xs text-red-600">{ligne.erreur}</div>}
+                      </td>
+                      <td className="py-3 pr-4">{ligne.destinataires.join(", ") || "—"}</td>
+                      <td className="py-3 pr-4">
+                        <span className={ligne.statut === "succes" ? "badge-succes" : "badge-danger"}>
+                          {ligne.statut === "succes" ? "Succès" : "Échec"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

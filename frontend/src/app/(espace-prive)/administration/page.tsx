@@ -15,7 +15,6 @@ import {
   FileText,
   FileCog,
   Globe,
-  HardHat,
   Heart,
   Link2,
   Mail,
@@ -120,6 +119,21 @@ const SECTIONS: SectionAdmin[] = [
     ],
   },
   {
+    titre: "Communication plateforme",
+    description: "Paramètres techniques des e-mails applicatifs et du webmail.",
+    iconeSection: Mail,
+    couleurSection: "text-blue-600",
+    cartes: [
+      {
+        chemin: "/administration/messagerie",
+        icone: Mail,
+        titre: "Messagerie",
+        description: "SMTP applicatif, connexion IMAP, Roundcube et journal des e-mails envoyés.",
+        couleur: "text-blue-600 bg-blue-50",
+      },
+    ],
+  },
+  {
     titre: "Bases de données métier",
     description: "Gestion des référentiels techniques au cœur de l'économie de la construction.",
     iconeSection: BookOpen,
@@ -138,13 +152,6 @@ const SECTIONS: SectionAdmin[] = [
         titre: "CCTP — Lots & Articles",
         description: "Gestion des lots CCTP, articles, prescriptions et normes associées.",
         couleur: "text-emerald-600 bg-emerald-50",
-      },
-      {
-        chemin: "/administration/dhmo",
-        icone: HardHat,
-        titre: "DHMO — Main-d'œuvre",
-        description: "Déboursé horaire de main-d'œuvre par type d'ouvrier BTP : salaires, charges, HS, panier, DHMO calculé.",
-        couleur: "text-orange-600 bg-orange-50",
       },
       {
         chemin: "/administration/phases-etudes",

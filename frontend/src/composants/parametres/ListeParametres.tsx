@@ -251,7 +251,7 @@ export function ListeParametres() {
     select: (data) => (Array.isArray(data) ? data : ((data as { results?: JournalModification[] }).results ?? [])),
   });
 
-  // Paramètres : exclure le module messagerie (géré dans /administration/configuration)
+  // Paramètres : exclure le module messagerie (géré dans /administration/messagerie)
   const parametresFiltres = useMemo(() => {
     return parametres
       .filter((p) => p.module !== "messagerie")
@@ -321,11 +321,11 @@ export function ListeParametres() {
             </div>
             <div className="ml-auto shrink-0">
               <Link
-                href="/administration/configuration"
+                href="/administration/messagerie"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:border-primaire-300 hover:text-primaire-700"
               >
                 <Settings2 className="h-3.5 w-3.5" />
-                Configuration messagerie
+                Messagerie
               </Link>
             </div>
           </div>
@@ -364,7 +364,7 @@ export function ListeParametres() {
             </div>
             <p className="mt-2 text-xs text-slate-400">
               Les paramètres de messagerie (SMTP/IMAP) sont gérés dans{" "}
-              <Link href="/administration/configuration" className="text-primaire-600 hover:underline">Administration → Configuration</Link>.
+              <Link href="/administration/messagerie" className="text-primaire-600 hover:underline">Administration → Messagerie</Link>.
             </p>
           </div>
 
