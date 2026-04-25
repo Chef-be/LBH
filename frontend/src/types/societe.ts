@@ -95,6 +95,26 @@ export interface AssistantDevisResponse {
   };
 }
 
+export interface SimulationSalaire {
+  id: string;
+  profil: string;
+  libelle: string;
+  salaire_net_mensuel: string;
+  primes_mensuelles: string;
+  avantages_mensuels: string;
+  salaire_brut_estime: string;
+  charges_salariales: string;
+  charges_patronales: string;
+  cout_employeur_mensuel: string;
+  cout_annuel: string;
+  dhmo: string;
+  taux_vente_horaire: string;
+  actif: boolean;
+  ordre: number;
+  date_creation: string;
+  date_modification: string;
+}
+
 export interface ProfilHoraire {
   id: string;
   code: string;
@@ -104,6 +124,17 @@ export interface ProfilHoraire {
   couleur: string;
   actif: boolean;
   ordre: number;
+  type_profil: "be" | "chantier" | "autre";
+  taux_charges_salariales: string;
+  taux_charges_patronales: string;
+  heures_productives_an: string;
+  taux_marge_vente: string;
+  taux_horaire_ht_calcule: string | null;
+  utiliser_calcul: boolean;
+  simulations: SimulationSalaire[];
+  nb_simulations: number;
+  date_creation: string;
+  date_modification: string;
 }
 
 export interface ProfilHoraireUtilisateur {

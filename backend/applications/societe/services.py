@@ -15,6 +15,85 @@ from applications.projets.models import MissionClient
 from applications.site_public.models import ConfigurationSite
 
 
+def calculer_fiche_salaire(
+    *,
+    salaire_net: Any,
+    primes: Any = 0,
+    avantages: Any = 0,
+    taux_sal: Any,
+    taux_pat: Any,
+    heures_an: Any,
+    taux_marge: Any,
+) -> dict[str, Any]:
+    """
+    Calcule la fiche de paie analytique depuis le salaire net mensuel.
+    Reproduit la logique Excel 02_Param_BE :
+      Brut = (Net + primes + avantages) / (1 - taux_sal)
+      Charges_pat = Brut × taux_pat
+      Coût_annuel = (Brut + Charges_pat) × 12
+      DHMO = Coût_annuel / heures_an
+      Taux_vente = DHMO / (1 - taux_marge)
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+
+    def d(v) -> Decimal:
+        return Decimal(str(v))
+
+    net = d(salaire_net)
+    pr = d(primes)
+    av = d(avantages)
+    ts = d(taux_sal)
+    tp = d(taux_pat)
+    h = d(heures_an)
+    tm = d(taux_marge)
+
+    base_remuneration = net + pr + av
+    brut = (base_remuneration / (1 - ts)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    charges_sal = (brut - base_remuneration).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    charges_pat = (brut * tp).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    cout_mensuel = (brut + charges_pat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    cout_annuel = (cout_mensuel * 12).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    dhmo = (cout_annuel / h).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    taux_vente = (dhmo / (1 - tm)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    return {
+        "salaire_net_mensuel": net,
+        "primes_mensuelles": pr,
+        "avantages_mensuels": av,
+        "salaire_brut_estime": brut,
+        "charges_salariales": charges_sal,
+        "charges_patronales": charges_pat,
+        "cout_employeur_mensuel": cout_mensuel,
+        "cout_annuel": cout_annuel,
+        "heures_productives_an": h,
+        "dhmo": dhmo,
+        "taux_marge_vente": tm,
+        "taux_vente_horaire": taux_vente,
+    }
+
+
+def recalculer_taux_profil(profil) -> None:
+    """
+    Recalcule taux_horaire_ht_calcule du profil depuis la moyenne des
+    simulations actives. Si utiliser_calcul est True, met également à jour
+    taux_horaire_ht.
+    """
+    from decimal import Decimal
+    sims = list(profil.simulations.filter(actif=True))
+    if sims:
+        moyenne = sum(s.taux_vente_horaire for s in sims) / len(sims)
+        from decimal import ROUND_HALF_UP
+        moyenne = Decimal(str(moyenne)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        moyenne = None
+
+    champs = {"taux_horaire_ht_calcule": moyenne}
+    if profil.utiliser_calcul and moyenne is not None:
+        champs["taux_horaire_ht"] = moyenne
+
+    type(profil).objects.filter(pk=profil.pk).update(**champs)
+
+
 def lister_missions_livrables(
     *,
     famille_client: str = "",

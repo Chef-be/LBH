@@ -16,8 +16,15 @@ from django.utils import timezone
 class ProfilHoraire(models.Model):
     """
     Profil de facturation avec taux horaire.
-    Chaque profil correspond à un type d'intervenant (économiste senior, chef de projet…).
+    Le taux peut être saisi manuellement ou calculé automatiquement depuis
+    les simulations salariales (moyenne des DHMO × marge de vente).
     """
+    TYPE_PROFIL_CHOICES = [
+        ("be", "Bureau d'études"),
+        ("chantier", "Chantier"),
+        ("autre", "Autre"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     code = models.CharField(max_length=50, unique=True, verbose_name="Code")
     libelle = models.CharField(max_length=150, verbose_name="Libellé")
@@ -28,6 +35,44 @@ class ProfilHoraire(models.Model):
     couleur = models.CharField(max_length=7, default="#6366f1", verbose_name="Couleur affichage")
     actif = models.BooleanField(default=True, verbose_name="Actif")
     ordre = models.PositiveSmallIntegerField(default=0, verbose_name="Ordre d'affichage")
+
+    # Paramètres de calcul salarial
+    type_profil = models.CharField(
+        max_length=10, choices=TYPE_PROFIL_CHOICES, default="be",
+        verbose_name="Type de profil",
+    )
+    taux_charges_salariales = models.DecimalField(
+        max_digits=6, decimal_places=4, default=Decimal("0.2200"),
+        verbose_name="Taux charges salariales",
+        help_text="Part salariale : Net = Brut × (1 − taux). Défaut 22 %.",
+    )
+    taux_charges_patronales = models.DecimalField(
+        max_digits=6, decimal_places=4, default=Decimal("0.4200"),
+        verbose_name="Taux charges patronales",
+        help_text="Charges employeur sur brut. Défaut 42 %.",
+    )
+    heures_productives_an = models.DecimalField(
+        max_digits=7, decimal_places=2, default=Decimal("1600.00"),
+        verbose_name="Heures productives / an",
+        help_text="BE : 1 600 h ; chantier : 1 490 h.",
+    )
+    taux_marge_vente = models.DecimalField(
+        max_digits=6, decimal_places=4, default=Decimal("0.1500"),
+        verbose_name="Marge de vente cible",
+        help_text="Taux de marge sur prix de vente. Défaut 15 %.",
+    )
+
+    # Taux calculé (moyenne des simulations) et mode de pilotage
+    taux_horaire_ht_calcule = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        verbose_name="Taux calculé (moyenne simulations)",
+    )
+    utiliser_calcul = models.BooleanField(
+        default=False,
+        verbose_name="Piloter par les simulations",
+        help_text="Si activé, taux_horaire_ht est mis à jour automatiquement depuis la moyenne des simulations.",
+    )
+
     date_creation = models.DateTimeField(auto_now_add=True)
     date_modification = models.DateTimeField(auto_now=True)
 
@@ -39,6 +84,85 @@ class ProfilHoraire(models.Model):
 
     def __str__(self):
         return f"{self.libelle} — {self.taux_horaire_ht} €/h"
+
+
+class SimulationSalaire(models.Model):
+    """
+    Simulation salariale rattachée à un profil horaire.
+    Saisie : salaire net → calcul automatique de la fiche de paie analytique.
+    La moyenne des DHMO des simulations actives alimente le taux horaire du profil.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    profil = models.ForeignKey(
+        ProfilHoraire,
+        on_delete=models.CASCADE,
+        related_name="simulations",
+        verbose_name="Profil horaire",
+    )
+    libelle = models.CharField(max_length=150, verbose_name="Libellé de la simulation",
+                               help_text="Ex : Hypothèse basse, Salarié actuel, Recrutement prévu…")
+    salaire_net_mensuel = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="Salaire net mensuel (€)"
+    )
+    primes_mensuelles = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Primes mensuelles (€)",
+    )
+    avantages_mensuels = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Avantages en nature mensuels (€)",
+    )
+
+    # Champs calculés — stockés pour export et affichage rapide
+    salaire_brut_estime = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    charges_salariales = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    charges_patronales = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    cout_employeur_mensuel = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    cout_annuel = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    dhmo = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0"),
+                               verbose_name="DHMO (€/h coût)")
+    taux_vente_horaire = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0"),
+                                             verbose_name="Taux de vente horaire (€/h)")
+
+    actif = models.BooleanField(default=True, verbose_name="Inclus dans la moyenne")
+    ordre = models.PositiveSmallIntegerField(default=0)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_simulation_salaire"
+        verbose_name = "Simulation salariale"
+        verbose_name_plural = "Simulations salariales"
+        ordering = ["profil", "ordre", "date_creation"]
+
+    def __str__(self):
+        return f"{self.profil.libelle} — {self.libelle} ({self.taux_vente_horaire} €/h)"
+
+    def calculer(self):
+        """Recalcule tous les champs dérivés depuis le salaire net et les paramètres du profil."""
+        from applications.societe.services import calculer_fiche_salaire
+        fiche = calculer_fiche_salaire(
+            salaire_net=self.salaire_net_mensuel,
+            primes=self.primes_mensuelles,
+            avantages=self.avantages_mensuels,
+            taux_sal=self.profil.taux_charges_salariales,
+            taux_pat=self.profil.taux_charges_patronales,
+            heures_an=self.profil.heures_productives_an,
+            taux_marge=self.profil.taux_marge_vente,
+        )
+        self.salaire_brut_estime = fiche["salaire_brut_estime"]
+        self.charges_salariales = fiche["charges_salariales"]
+        self.charges_patronales = fiche["charges_patronales"]
+        self.cout_employeur_mensuel = fiche["cout_employeur_mensuel"]
+        self.cout_annuel = fiche["cout_annuel"]
+        self.dhmo = fiche["dhmo"]
+        self.taux_vente_horaire = fiche["taux_vente_horaire"]
+
+    def save(self, *args, **kwargs):
+        self.calculer()
+        super().save(*args, **kwargs)
+        from applications.societe.services import recalculer_taux_profil
+        recalculer_taux_profil(self.profil)
 
 
 class ProfilHoraireUtilisateur(models.Model):

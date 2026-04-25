@@ -17,10 +17,11 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import ProfilHoraire, ProfilHoraireUtilisateur, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
+from .models import ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
 from .serializers import (
     ProfilHoraireSerializer,
     ProfilHoraireUtilisateurSerializer,
+    SimulationSalaireSerializer,
     DevisHonorairesListeSerializer, DevisHonorairesDetailSerializer,
     LigneDevisSerializer,
     FactureListeSerializer, FactureDetailSerializer,
@@ -182,7 +183,7 @@ def _heures_suggerees_pour_affectation(devis, affectation) -> Decimal:
 # ─────────────────────────────────────────────
 
 class ProfilHoraireViewSet(viewsets.ModelViewSet):
-    queryset = ProfilHoraire.objects.all()
+    queryset = ProfilHoraire.objects.prefetch_related("simulations").all()
     serializer_class = ProfilHoraireSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -191,6 +192,31 @@ class ProfilHoraireViewSet(viewsets.ModelViewSet):
         if self.request.query_params.get("actif") == "true":
             qs = qs.filter(actif=True)
         return qs
+
+    @action(detail=True, methods=["post"], url_path="appliquer-calcul")
+    def appliquer_calcul(self, request, pk=None):
+        """Active le pilotage par simulations et applique immédiatement la moyenne."""
+        from .services import recalculer_taux_profil
+        profil = self.get_object()
+        profil.utiliser_calcul = True
+        profil.save(update_fields=["utiliser_calcul"])
+        recalculer_taux_profil(profil)
+        profil.refresh_from_db()
+        return Response(ProfilHoraireSerializer(profil).data)
+
+    @action(detail=True, methods=["post"], url_path="desactiver-calcul")
+    def desactiver_calcul(self, request, pk=None):
+        """Repasse en mode manuel : taux_horaire_ht n'est plus mis à jour automatiquement."""
+        profil = self.get_object()
+        profil.utiliser_calcul = False
+        profil.save(update_fields=["utiliser_calcul"])
+        return Response(ProfilHoraireSerializer(profil).data)
+
+
+class SimulationSalaireViewSet(viewsets.ModelViewSet):
+    serializer_class = SimulationSalaireSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = SimulationSalaire.objects.select_related("profil").all()
 
 
 class ProfilHoraireUtilisateurViewSet(viewsets.ModelViewSet):
@@ -960,6 +986,45 @@ def vue_tableau_de_bord(request):
         "rentabilite_par_salarie": rentabilite_par_salarie,
         "rentabilite_par_dossier": rentabilite_par_dossier,
     })
+
+
+# ─────────────────────────────────────────────
+# Simulations salariales imbriquées dans un profil
+# ─────────────────────────────────────────────
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_simulations_profil(request, profil_pk):
+    profil = get_object_or_404(ProfilHoraire, pk=profil_pk)
+    if request.method == "GET":
+        sims = SimulationSalaire.objects.filter(profil=profil).order_by("ordre", "date_creation")
+        return Response(SimulationSalaireSerializer(sims, many=True).data)
+    # POST — création
+    ser = SimulationSalaireSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    ser.save(profil=profil)
+    return Response(ser.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_previsualiser_simulation(request, profil_pk):
+    """Calcule une fiche sans persister — prévisualisation temps réel."""
+    from .services import calculer_fiche_salaire
+    profil = get_object_or_404(ProfilHoraire, pk=profil_pk)
+    try:
+        fiche = calculer_fiche_salaire(
+            salaire_net=request.query_params.get("salaire_net", "0"),
+            primes=request.query_params.get("primes", "0"),
+            avantages=request.query_params.get("avantages", "0"),
+            taux_sal=profil.taux_charges_salariales,
+            taux_pat=profil.taux_charges_patronales,
+            heures_an=profil.heures_productives_an,
+            taux_marge=profil.taux_marge_vente,
+        )
+    except Exception as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({k: str(v) for k, v in fiche.items()})
 
 
 @api_view(["GET"])

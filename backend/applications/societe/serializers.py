@@ -3,22 +3,53 @@ Sérialiseurs — Module Pilotage Société
 """
 
 from rest_framework import serializers
-from .models import ProfilHoraire, ProfilHoraireUtilisateur, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
+from .models import ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
 
 
 # ─────────────────────────────────────────────
-# Profils horaires
+# Profils horaires + simulations salariales
 # ─────────────────────────────────────────────
+
+class SimulationSalaireSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SimulationSalaire
+        fields = [
+            "id", "profil", "libelle",
+            "salaire_net_mensuel", "primes_mensuelles", "avantages_mensuels",
+            "salaire_brut_estime", "charges_salariales", "charges_patronales",
+            "cout_employeur_mensuel", "cout_annuel",
+            "dhmo", "taux_vente_horaire",
+            "actif", "ordre",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = [
+            "id", "profil",
+            "salaire_brut_estime", "charges_salariales", "charges_patronales",
+            "cout_employeur_mensuel", "cout_annuel", "dhmo", "taux_vente_horaire",
+            "date_creation", "date_modification",
+        ]
+
 
 class ProfilHoraireSerializer(serializers.ModelSerializer):
+    simulations = SimulationSalaireSerializer(many=True, read_only=True)
+    nb_simulations = serializers.SerializerMethodField()
+
     class Meta:
         model = ProfilHoraire
         fields = [
             "id", "code", "libelle", "description",
             "taux_horaire_ht", "couleur", "actif", "ordre",
+            "type_profil",
+            "taux_charges_salariales", "taux_charges_patronales",
+            "heures_productives_an", "taux_marge_vente",
+            "taux_horaire_ht_calcule", "utiliser_calcul",
+            "simulations", "nb_simulations",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "date_creation", "date_modification"]
+        read_only_fields = ["id", "taux_horaire_ht_calcule", "date_creation", "date_modification"]
+
+    def get_nb_simulations(self, obj):
+        return obj.simulations.filter(actif=True).count()
 
 
 class ProfilHoraireUtilisateurSerializer(serializers.ModelSerializer):
