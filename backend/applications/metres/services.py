@@ -267,13 +267,90 @@ def _extents_valides(doc) -> tuple | None:
     return None
 
 
+def _couleur_hachure(entity, doc) -> tuple:
+    """Résout la couleur RGB d'une entité HATCH DXF (ACI ou true color)."""
+    import ezdxf.colors as ezc
+    try:
+        if entity.dxf.hasattr("true_color"):
+            tc = entity.dxf.true_color
+            return ((tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF)
+        aci = entity.dxf.color if entity.dxf.hasattr("color") else 256
+        if aci == 0:
+            aci = 7
+        if aci == 256:
+            layer = doc.layers.get(entity.dxf.layer, None)
+            if layer and layer.dxf.hasattr("color"):
+                aci = layer.dxf.color
+            else:
+                aci = 7
+        if 1 <= aci <= 255:
+            return ezc.aci2rgb(aci)
+    except Exception:
+        pass
+    return (100, 100, 100)
+
+
+def _dessiner_fills_hachures(doc, msp, img_w: int, img_h: int,
+                              xmin: float, ymin: float,
+                              total_w: float, total_h: float) -> "Image":
+    """
+    Dessine les remplissages des entités HATCH directement via PIL.
+    Les polygones sont clippés nativement par PIL.ImageDraw.polygon().
+    Retourne une image RGBA (fond transparent).
+    """
+    from PIL import Image, ImageDraw
+
+    def utm_vers_px(x: float, y: float):
+        px = (x - xmin) / total_w * img_w
+        py = img_h - (y - ymin) / total_h * img_h
+        return (int(round(px)), int(round(py)))
+
+    couche = Image.new("RGBA", (img_w, img_h), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(couche)
+
+    for entity in msp:
+        if entity.dxftype() != "HATCH":
+            continue
+        r, g, b = _couleur_hachure(entity, doc)
+        fill_color = (r, g, b, 200)
+
+        for boundary_path in entity.paths:
+            try:
+                vertices = None
+                if hasattr(boundary_path, "vertices"):
+                    vertices = [(v[0], v[1]) for v in boundary_path.vertices]
+                elif hasattr(boundary_path, "edges"):
+                    pts = []
+                    for edge in boundary_path.edges:
+                        if hasattr(edge, "start"):
+                            pts.append((edge.start[0], edge.start[1]))
+                        elif hasattr(edge, "center"):
+                            pts.append((edge.center[0], edge.center[1]))
+                    vertices = pts if pts else None
+                if vertices and len(vertices) >= 3:
+                    pts_px = [utm_vers_px(v[0], v[1]) for v in vertices]
+                    draw.polygon(pts_px, fill=fill_color)
+            except Exception:
+                pass
+
+    return couche
+
+
 def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> bytes:
-    """Rend un fichier DXF en PNG via ezdxf + matplotlib."""
+    """
+    Rend un fichier DXF en PNG en 2 passes :
+    1. ezdxf + matplotlib (SHOW_OUTLINE) — lignes et texte sans débordement
+    2. PIL polygones HATCH — remplissages colorés clippés nativement
+    Les deux couches sont composées (fills sous les lignes).
+    """
     import io
+    import numpy as np
     import ezdxf
     import ezdxf.recover
     from ezdxf.addons.drawing import RenderContext, Frontend
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+    from ezdxf.addons.drawing.config import Configuration, HatchPolicy
+    from PIL import Image
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -303,54 +380,61 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         w, h = largeur_px / 100, hauteur_px / 100
         marge = None
 
+    # --- Phase 1 : rendu ezdxf + matplotlib (SHOW_OUTLINE uniquement) ---
     fig, ax = plt.subplots(figsize=(w, h), dpi=100)
     ax.set_facecolor(BG)
     fig.patch.set_facecolor(BG)
     ax.axis("off")
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
-
-    # Fixer limites et aspect AVANT le rendu : les clip paths des hachures
-    # sont établis dans le système de coordonnées final, évitant tout débordement
     ax.set_aspect("equal", adjustable="box")
     if ext:
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)
 
-    from ezdxf.addons.drawing.config import Configuration, HatchPolicy
-    import matplotlib.patches as mpatches
-
     ctx = RenderContext(doc)
     ctx.current_layout_properties.set_colors(BG)
     out = MatplotlibBackend(ax)
-
-    # À basse résolution (apercu) : SHOW_OUTLINE — contours sans remplissage pour éviter
-    # que les fonds colorés solides masquent les détails (pattern invisible < 2px).
-    # À haute résolution (HD) : NORMAL — les lignes ANSI31 sont visibles (~9px d'espacement).
-    px_par_metre = largeur_px / (dx if ext else largeur_px)
-    espacement_ansi31 = 0.635  # mètres pour scale=0.2
-    lignes_visibles = espacement_ansi31 * px_par_metre >= 2.5
-    hatch_policy = HatchPolicy.NORMAL if lignes_visibles else HatchPolicy.SHOW_OUTLINE
-    config = Configuration.defaults().with_changes(hatch_policy=hatch_policy)
-
-    # finalize=False : évite que ezdxf rappelle set_aspect + autoscale
+    config = Configuration.defaults().with_changes(hatch_policy=HatchPolicy.SHOW_OUTLINE)
     Frontend(ctx, out, config=config).draw_layout(msp, finalize=False)
 
-    # Forcer le clipping de tous les artistes aux limites de l'axe (anti-débordement)
     if ext:
         ax.autoscale(False)
         ax.set_xlim(xmin - marge, xmax + marge)
         ax.set_ylim(ymin - marge, ymax + marge)
-        for artist in ax.get_children():
-            try:
-                artist.set_clip_on(True)
-            except Exception:
-                pass
 
     tampon = io.BytesIO()
     fig.savefig(tampon, format="png", dpi=100, facecolor=BG, bbox_inches=None)
     plt.close(fig)
     tampon.seek(0)
-    return tampon.read()
+    img_lignes = Image.open(tampon).convert("RGBA")
+    img_w, img_h = img_lignes.size
+
+    # Rendre le fond blanc transparent pour que les fills apparaissent derrière les lignes
+    arr = np.array(img_lignes)
+    blanc = (arr[:, :, 0] > 240) & (arr[:, :, 1] > 240) & (arr[:, :, 2] > 240)
+    arr[blanc, 3] = 0
+    img_lignes = Image.fromarray(arr, "RGBA")
+
+    # --- Phase 2 : remplissages HATCH via PIL (clipping natif par polygone) ---
+    if ext:
+        total_w = dx + 2 * marge
+        total_h = dy + 2 * marge
+        couche_fills = _dessiner_fills_hachures(
+            doc, msp, img_w, img_h,
+            xmin - marge, ymin - marge,
+            total_w, total_h,
+        )
+        fond = Image.new("RGBA", (img_w, img_h), (255, 255, 255, 255))
+        fond_avec_fills = Image.alpha_composite(fond, couche_fills)
+        img_finale = Image.alpha_composite(fond_avec_fills, img_lignes)
+    else:
+        fond = Image.new("RGBA", (img_w, img_h), (255, 255, 255, 255))
+        img_finale = Image.alpha_composite(fond, img_lignes)
+
+    tampon_final = io.BytesIO()
+    img_finale.convert("RGB").save(tampon_final, format="png")
+    tampon_final.seek(0)
+    return tampon_final.read()
 
 
 def convertir_dxf_en_png(source, largeur_px: int = 2480, hauteur_px: int = 1754) -> bytes:
