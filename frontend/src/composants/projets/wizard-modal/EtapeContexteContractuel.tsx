@@ -116,7 +116,7 @@ export function EtapeContexteContractuel({ etat, erreurs, onChange }: Props) {
                     ? "border-[color:var(--c-base)] shadow-sm"
                     : "border-[color:var(--bordure)] hover:border-[color:var(--bordure-fm)]"
                 )}
-                style={{ background: selected ? "var(--c-leger)" : "var(--fond-carte)" }}
+                style={{ background: selected ? "color-mix(in srgb, var(--c-base) 13%, var(--fond-carte))" : "var(--fond-carte)" }}
               >
                 <div className="flex items-start gap-2">
                   <span
@@ -195,10 +195,10 @@ export function EtapeContexteContractuel({ etat, erreurs, onChange }: Props) {
         </div>
       </div>
 
-      {/* Rôle LBH dans la mission */}
+      {/* Rôle de la société dans la mission */}
       <div>
         <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--texte)" }}>
-          Rôle de LBH dans la mission
+          Rôle de la société dans la mission
         </h3>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {ROLES_LBH.map((role) => {

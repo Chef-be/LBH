@@ -73,6 +73,7 @@ export default function PageChargesSociete() {
   const [onglet, setOnglet] = useState<Onglet>("charges");
   const [nouvelleCharge, setNouvelleCharge] = useState({ libelle: "", montant_mensuel: "0" });
   const [sourceSmic, setSourceSmic] = useState<{ source: string; mode: string } | null>(null);
+  const [modeSmic, setModeSmic] = useState<"manuel" | "automatique">("manuel");
 
   const { data: parametres = [] } = useQuery<ParametreSociete[]>({
     queryKey: ["societe-parametres"],
@@ -148,6 +149,7 @@ export default function PageChargesSociete() {
   const suggererSmic = async (zone: string) => {
     const r = await api.get<{ smic_horaire_brut: string; source: string; mode: string }>(`/api/societe/references/smic/?zone=${encodeURIComponent(zone)}`);
     setSourceSmic({ source: r.source, mode: r.mode });
+    setModeSmic("automatique");
     setFormParam((p) => ({ ...p, smic_horaire_brut: r.smic_horaire_brut }));
   };
 
@@ -250,20 +252,29 @@ export default function PageChargesSociete() {
                       ? tauxDepuisPourcentage(e.target.value)
                       : e.target.value,
                   }))}
+                  onFocus={() => {
+                    if (key === "smic_horaire_brut") setModeSmic("manuel");
+                  }}
                   className="w-full rounded-lg px-3 py-2 text-sm"
                   style={champ}
                 />
               </label>
             ))}
           </div>
-          <div className="mt-4 flex flex-wrap gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <button onClick={() => suggererSmic(formParam.zone_smic)} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}>
-              Suggérer le SMIC
+              Mettre à jour automatiquement le SMIC
+            </button>
+            <button type="button" onClick={() => setModeSmic("manuel")} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold" style={{ background: modeSmic === "manuel" ? "var(--c-base)" : "var(--fond-entree)", border: "1px solid var(--bordure)", color: modeSmic === "manuel" ? "#fff" : "var(--texte)" }}>
+              Saisie manuelle
             </button>
             <button onClick={() => sauverParametre.mutate()} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: "var(--c-base)" }}>
               <Save size={14} /> Enregistrer
             </button>
           </div>
+          <p className="mt-2 text-xs" style={{ color: "var(--texte-3)" }}>
+            Mode SMIC actif : {modeSmic === "automatique" ? "mise à jour automatique depuis Service-Public" : "saisie manuelle dans le champ SMIC horaire brut"}.
+          </p>
           {sourceSmic ? (
             <p className="mt-2 text-xs" style={{ color: "var(--texte-3)" }}>
               Source SMIC : <a href={sourceSmic.source} target="_blank" rel="noreferrer" className="underline">Service-Public.fr</a>

@@ -79,6 +79,16 @@ function libelleNatureOuvrage(valeur: string): string {
   return "Bâtiment";
 }
 
+const ROLES_SOCIETE = [
+  "Économiste de la construction",
+  "AMO économie",
+  "Mandataire",
+  "Cotraitant",
+  "Sous-traitant",
+  "OPC",
+  "Bureau d'études conseil",
+];
+
 export default function PageModifierDevis({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -89,6 +99,7 @@ export default function PageModifierDevis({ params }: { params: Promise<{ id: st
   const [erreur, setErreur] = useState<string | null>(null);
   const [enCours, setEnCours] = useState(false);
   const [initialiseDepuisDevis, setInitialiseDepuisDevis] = useState(false);
+  const [roleSocieteAutre, setRoleSocieteAutre] = useState(false);
 
   const { data: devis, isLoading } = useQuery<DevisHonoraires>({
     queryKey: ["devis", id],
@@ -171,6 +182,7 @@ export default function PageModifierDevis({ params }: { params: Promise<{ id: st
       role_lbh: devis.role_lbh || "",
     });
     setMissionsSelectionnees(devis.missions_selectionnees ?? []);
+    setRoleSocieteAutre(Boolean(devis.role_lbh) && !ROLES_SOCIETE.includes(devis.role_lbh));
     setLignes(
       devis.lignes.map((ligne, index) => ({
         id: ligne.id,
@@ -210,6 +222,7 @@ export default function PageModifierDevis({ params }: { params: Promise<{ id: st
 
   const mettreAJourFormulaire = <K extends keyof DevisForm>(champ: K, valeur: DevisForm[K]) => {
     setForm((courant) => (courant ? { ...courant, [champ]: valeur } : courant));
+    if (champ === "role_lbh") setRoleSocieteAutre(!ROLES_SOCIETE.includes(String(valeur)) && Boolean(valeur));
   };
 
   const mettreAJourLigne = (index: number, champ: keyof LigneForm, valeur: string) => {
@@ -513,8 +526,31 @@ export default function PageModifierDevis({ params }: { params: Promise<{ id: st
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Rôle LBH</label>
-            <input type="text" value={form.role_lbh} onChange={(e) => mettreAJourFormulaire("role_lbh", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Rôle de la société</label>
+            <select
+              value={roleSocieteAutre ? "autre" : form.role_lbh}
+              onChange={(e) => {
+                const valeur = e.target.value;
+                setRoleSocieteAutre(valeur === "autre");
+                mettreAJourFormulaire("role_lbh", valeur === "autre" ? "" : valeur);
+              }}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="">Sélectionner</option>
+              {ROLES_SOCIETE.map((role) => <option key={role} value={role}>{role}</option>)}
+              <option value="autre">Autre</option>
+            </select>
+            {roleSocieteAutre ? (
+              <input
+                type="text"
+                value={form.role_lbh}
+                onChange={(e) => mettreAJourFormulaire("role_lbh", e.target.value)}
+                className="mt-2 w-full rounded-lg px-3 py-2.5 text-sm"
+                style={stylesChamp}
+                placeholder="Préciser le rôle de la société"
+              />
+            ) : null}
           </div>
         </div>
       </section>
@@ -544,7 +580,7 @@ export default function PageModifierDevis({ params }: { params: Promise<{ id: st
             const selection = missionSelectionnee(mission.code);
             const active = Boolean(selection);
             return (
-              <div key={mission.code} className="rounded-xl p-4" style={{ background: active ? "var(--c-leger)" : "var(--fond-entree)", border: `1px solid ${active ? "var(--c-clair)" : "var(--bordure)"}` }}>
+              <div key={mission.code} className="rounded-xl p-4" style={{ background: active ? "color-mix(in srgb, var(--c-base) 13%, var(--fond-carte))" : "var(--fond-entree)", border: `1px solid ${active ? "color-mix(in srgb, var(--c-base) 45%, var(--bordure))" : "var(--bordure)"}` }}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">

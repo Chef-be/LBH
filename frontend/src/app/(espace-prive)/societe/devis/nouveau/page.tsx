@@ -117,6 +117,16 @@ function libelleNatureOuvrage(valeur: string): string {
   return "Bâtiment";
 }
 
+const ROLES_SOCIETE = [
+  "Économiste de la construction",
+  "AMO économie",
+  "Mandataire",
+  "Cotraitant",
+  "Sous-traitant",
+  "OPC",
+  "Bureau d'études conseil",
+];
+
 export default function PageNouveauDevis() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -151,6 +161,7 @@ export default function PageNouveauDevis() {
   const [assistantInitialise, setAssistantInitialise] = useState(false);
   const [utilisateurPressenti, setUtilisateurPressenti] = useState("");
   const [clientLocalId, setClientLocalId] = useState("");
+  const [roleSocieteAutre, setRoleSocieteAutre] = useState(false);
 
   const requeteParcours = useMemo(() => {
     const params = new URLSearchParams();
@@ -314,6 +325,7 @@ export default function PageNouveauDevis() {
   const mettreAJourFormulaire = <K extends keyof DevisForm>(champ: K, valeur: DevisForm[K]) => {
     setForm((courant) => ({ ...courant, [champ]: valeur }));
     if (champ === "client_nom") setClientLocalId("");
+    if (champ === "role_lbh") setRoleSocieteAutre(!ROLES_SOCIETE.includes(String(valeur)) && Boolean(valeur));
   };
 
   const appliquerClientLocal = (client: OrganisationOption) => {
@@ -692,16 +704,32 @@ export default function PageNouveauDevis() {
 
           <div>
             <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
-              Rôle LBH
+              Rôle de la société
             </label>
-            <input
-              type="text"
-              value={form.role_lbh}
-              onChange={(e) => mettreAJourFormulaire("role_lbh", e.target.value)}
+            <select
+              value={roleSocieteAutre ? "autre" : form.role_lbh}
+              onChange={(e) => {
+                const valeur = e.target.value;
+                setRoleSocieteAutre(valeur === "autre");
+                mettreAJourFormulaire("role_lbh", valeur === "autre" ? "" : valeur);
+              }}
               className="w-full rounded-lg px-3 py-2.5 text-sm"
               style={stylesChamp}
-              placeholder="Économiste principal, associé, sous-traitant…"
-            />
+            >
+              <option value="">Sélectionner</option>
+              {ROLES_SOCIETE.map((role) => <option key={role} value={role}>{role}</option>)}
+              <option value="autre">Autre</option>
+            </select>
+            {roleSocieteAutre ? (
+              <input
+                type="text"
+                value={form.role_lbh}
+                onChange={(e) => mettreAJourFormulaire("role_lbh", e.target.value)}
+                className="mt-2 w-full rounded-lg px-3 py-2.5 text-sm"
+                style={stylesChamp}
+                placeholder="Préciser le rôle de la société"
+              />
+            ) : null}
           </div>
 
           <div>
@@ -766,8 +794,10 @@ export default function PageNouveauDevis() {
                 key={mission.code}
                 className="rounded-xl p-4"
                 style={{
-                  background: active ? "var(--c-leger)" : "var(--fond-entree)",
-                  border: `1px solid ${active ? "var(--c-clair)" : "var(--bordure)"}`,
+                  background: active
+                    ? "color-mix(in srgb, var(--c-base) 13%, var(--fond-carte))"
+                    : "var(--fond-entree)",
+                  border: `1px solid ${active ? "color-mix(in srgb, var(--c-base) 45%, var(--bordure))" : "var(--bordure)"}`,
                 }}
               >
                 <div className="flex items-start justify-between gap-4">
