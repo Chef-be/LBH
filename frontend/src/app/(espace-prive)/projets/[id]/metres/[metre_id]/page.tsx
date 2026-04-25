@@ -798,6 +798,8 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   // Anti-concurrence : empêche deux saves simultanés ; stocke le dernier snapshot en attente
   const sauvegardeEnCoursRef = useRef(false);
   const pendingZonesRef = useRef<{ zones: ZoneVisualisee[]; fpId: string } | null>(null);
+  // Image en attente d'application quand le canvas n'est pas encore visible (onglet inactif)
+  const imagePendingRef = useRef<HTMLImageElement | null>(null);
   // Règle de mesure — points temporaires (max 2), réinitialisés à chaque nouvelle mesure
   const [reglePoints, setReglePoints] = useState<PointCanvas[]>([]);
   // Gestion multipage — tous les fonds de plan disponibles pour ce métré
@@ -824,6 +826,16 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
+      }
+      // Image en attente (canvas était masqué lors du chargement) → appliquer maintenant
+      if (w > 0 && imagePendingRef.current) {
+        const img = imagePendingRef.current;
+        imagePendingRef.current = null;
+        const fitZoom = Math.min(w / img.width, h / img.height) * 0.92;
+        setZoom(fitZoom);
+        setOffsetCanvas({ x: (w - img.width * fitZoom) / 2, y: (h - img.height * fitZoom) / 2 });
+        setFondPlan(img);
+        setTimeout(() => setProgressionFond(null), 600);
       }
     };
 
@@ -1664,7 +1676,6 @@ ${lignesLegende.map((z) => `
   const chargerImageDepuisUrl = (url: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.crossOrigin = "anonymous";
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error(`Impossible de charger : ${url.substring(0, 80)}`));
       img.src = url;
@@ -1687,7 +1698,7 @@ ${lignesLegende.map((z) => `
     return chargerImageDepuisUrl(dataUrl);
   };
 
-  const appliquerImageSurCanvas = (img: HTMLImageElement) => {
+  const appliquerImageSurCanvas = (img: HTMLImageElement, tentative = 0) => {
     const canvas = canvasRef.current;
     if (canvas && canvas.width > 0 && img.width > 0 && img.height > 0) {
       const fitZoom = Math.min(canvas.width / img.width, canvas.height / img.height) * 0.92;
@@ -1696,9 +1707,16 @@ ${lignesLegende.map((z) => `
         x: (canvas.width - img.width * fitZoom) / 2,
         y: (canvas.height - img.height * fitZoom) / 2,
       });
+      setFondPlan(img);
+      setTimeout(() => setProgressionFond(null), 600);
+    } else if (tentative < 20) {
+      // Canvas pas encore dimensionné par le ResizeObserver — réessayer dans 50ms
+      setTimeout(() => appliquerImageSurCanvas(img, tentative + 1), 50);
+      return;
+    } else {
+      // Canvas toujours masqué (onglet inactif) — stocker pour application au prochain resize
+      imagePendingRef.current = img;
     }
-    setFondPlan(img);
-    setTimeout(() => setProgressionFond(null), 600);
   };
 
   // Chargement complet d'un fond de plan (image + zones) — appelé au changement de plan actif
@@ -1720,13 +1738,25 @@ ${lignesLegende.map((z) => `
           setChargementImage(true);
           const img = await chargerImageDepuisUrl(urlPremier);
           appliquerImageSurCanvas(img);
-          setFondPlanEstApercu(!!urlApercu && !!urlHD && urlApercu !== urlHD);
-          // Charger la HD en arrière-plan si l'aperçu était affiché
-          if (urlApercu && urlHD && urlApercu !== urlHD) {
+          const hdDisponible = !!urlApercu && !!urlHD && urlApercu !== urlHD;
+          setFondPlanEstApercu(hdDisponible);
+          if (hdDisponible) {
+            // HD disponible → charger en arrière-plan et swapper silencieusement
             chargerImageDepuisUrl(urlHD).then((imgHD) => {
+              // Recalculer zoom/offset pour la HD (résolution différente de l'aperçu)
+              const cv = canvasRef.current;
+              if (cv && cv.width > 0 && imgHD.naturalWidth > 0 && imgHD.naturalHeight > 0) {
+                const fz = Math.min(cv.width / imgHD.naturalWidth, cv.height / imgHD.naturalHeight) * 0.92;
+                setZoom(fz);
+                setOffsetCanvas({ x: (cv.width - imgHD.naturalWidth * fz) / 2, y: (cv.height - imgHD.naturalHeight * fz) / 2 });
+              }
               setFondPlan(imgHD);
               setFondPlanEstApercu(false);
             }).catch(() => { setFondPlanEstApercu(false); });
+          } else if (urlApercu && !urlHD) {
+            // Aperçu disponible mais HD pas encore prête → polling pour la HD
+            setMiniatureEnCours(true);
+            demarrerPollMiniature(fp.id);
           }
         } catch {
           setSucces("Fond de plan CAO — aperçu non disponible, dessinez les zones sur la grille.");
@@ -1735,8 +1765,9 @@ ${lignesLegende.map((z) => `
           setChargementImage(false);
         }
       } else {
-        setSucces("Fond de plan CAO (DXF/DWG) — dessinez les zones directement sur la grille.");
-        setTimeout(() => setSucces(null), 5000);
+        // Aucun rendu encore — le fichier est peut-être en cours de génération en arrière-plan
+        setMiniatureEnCours(true);
+        demarrerPollMiniature(fp.id);
       }
     } else if (url) {
       try {
