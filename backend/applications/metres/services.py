@@ -566,20 +566,23 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     nom_base = os.path.splitext(os.path.basename(fond_plan.fichier.name))[0]
 
     # 1. Aperçu rapide (1200px) — disponible rapidement pour le canvas
+    apercu_ok = False
     try:
         apercu_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=1200, hauteur_px=850)
-    except Exception as exc:
-        logger.warning("Aperçu CAO échoué pour %s : %s", fond_plan.fichier.name, exc)
+        apercu_ok = True
+    except Exception:
+        logger.error("Aperçu CAO échoué pour %s — placeholder affiché.", fond_plan.fichier.name, exc_info=True)
         apercu_bytes = _generer_placeholder_dwg_png()
 
     fond_plan.apercu.save(f"{nom_base}_apercu.png", ContentFile(apercu_bytes), save=True)
-    logger.info("Aperçu CAO généré pour %s", fond_plan.fichier.name)
+    if apercu_ok:
+        logger.info("Aperçu CAO généré pour %s", fond_plan.fichier.name)
 
     # 2. Miniature haute résolution (7016px ≈ A1 à 150 DPI) — pour le zoom
     try:
         hd_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=7016, hauteur_px=4961)
-    except Exception as exc:
-        logger.warning("Miniature HD CAO échouée pour %s : %s — copie de l'aperçu.", fond_plan.fichier.name, exc)
+    except Exception:
+        logger.error("Miniature HD CAO échouée pour %s — repli sur l'aperçu.", fond_plan.fichier.name, exc_info=True)
         hd_bytes = apercu_bytes
 
     fond_plan.miniature.save(f"{nom_base}_miniature.png", ContentFile(hd_bytes), save=True)
