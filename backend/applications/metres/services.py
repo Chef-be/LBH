@@ -410,6 +410,22 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     img_lignes = Image.open(tampon).convert("RGBA")
     img_w, img_h = img_lignes.size
 
+    # Neutralise les pixels blancs opaques : un texte ou trait blanc (RGB≈255)
+    # sur fond transparent est invisible une fois composité sur fond blanc.
+    # On les bascule en noir en préservant leur alpha.
+    import numpy as np
+    arr = np.array(img_lignes)
+    masque_blanc_opaque = (
+        (arr[:, :, 0] >= 230) &
+        (arr[:, :, 1] >= 230) &
+        (arr[:, :, 2] >= 230) &
+        (arr[:, :, 3] > 30)
+    )
+    arr[masque_blanc_opaque, 0] = 0
+    arr[masque_blanc_opaque, 1] = 0
+    arr[masque_blanc_opaque, 2] = 0
+    img_lignes = Image.fromarray(arr, "RGBA")
+
     # --- Phase 2 : remplissages HATCH via PIL (clipping natif par polygone) ---
     if ext:
         total_w = dx + 2 * marge
