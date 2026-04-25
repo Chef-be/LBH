@@ -72,7 +72,7 @@ export default function PageChargesSociete() {
   const qc = useQueryClient();
   const [onglet, setOnglet] = useState<Onglet>("charges");
   const [nouvelleCharge, setNouvelleCharge] = useState({ libelle: "", montant_mensuel: "0" });
-  const [sourceSmic, setSourceSmic] = useState<string | null>(null);
+  const [sourceSmic, setSourceSmic] = useState<{ source: string; mode: string } | null>(null);
 
   const { data: parametres = [] } = useQuery<ParametreSociete[]>({
     queryKey: ["societe-parametres"],
@@ -146,8 +146,8 @@ export default function PageChargesSociete() {
   });
 
   const suggererSmic = async (zone: string) => {
-    const r = await api.get<{ smic_horaire_brut: string; source: string }>(`/api/societe/references/smic/?zone=${encodeURIComponent(zone)}`);
-    setSourceSmic(r.source);
+    const r = await api.get<{ smic_horaire_brut: string; source: string; mode: string }>(`/api/societe/references/smic/?zone=${encodeURIComponent(zone)}`);
+    setSourceSmic({ source: r.source, mode: r.mode });
     setFormParam((p) => ({ ...p, smic_horaire_brut: r.smic_horaire_brut }));
   };
 
@@ -264,7 +264,12 @@ export default function PageChargesSociete() {
               <Save size={14} /> Enregistrer
             </button>
           </div>
-          {sourceSmic ? <p className="mt-2 text-xs" style={{ color: "var(--texte-3)" }}>Source SMIC : {sourceSmic}</p> : null}
+          {sourceSmic ? (
+            <p className="mt-2 text-xs" style={{ color: "var(--texte-3)" }}>
+              Source SMIC : <a href={sourceSmic.source} target="_blank" rel="noreferrer" className="underline">Service-Public.fr</a>
+              {sourceSmic.mode === "repli_service_public" ? " (valeur de repli alignée sur Service-Public)" : ""}
+            </p>
+          ) : null}
 
           <div className="mt-6 rounded-xl p-4" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
             <div className="flex items-center justify-between gap-4">

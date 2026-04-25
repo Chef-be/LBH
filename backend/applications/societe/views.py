@@ -4,8 +4,10 @@ Vues API — Module Pilotage Société
 
 import re
 from decimal import Decimal
+from html import unescape
 from datetime import date, timedelta
 
+import requests
 from django.http import HttpResponse
 from django.db.models import Sum, Count, Q
 from django.shortcuts import get_object_or_404
@@ -241,23 +243,62 @@ class ChargeFixeStructureViewSet(viewsets.ModelViewSet):
     queryset = ChargeFixeStructure.objects.all()
 
 
+SOURCE_SMIC_SERVICE_PUBLIC = "https://www.service-public.gouv.fr/particuliers/vosdroits/F2300"
+
+
+def _decimal_depuis_prix_service_public(valeur: str) -> Decimal:
+    normalisee = (
+        unescape(valeur)
+        .replace("\xa0", "")
+        .replace(" ", "")
+        .replace("€", "")
+        .replace(",", ".")
+        .strip()
+    )
+    return Decimal(normalisee)
+
+
+def _extraire_smic_service_public(html: str, est_mayotte: bool) -> Decimal:
+    repere = "Montant du Smic à Mayotte" if est_mayotte else "Tableau - Montants du Smic"
+    debut = html.find(repere)
+    if debut < 0:
+        raise ValueError("Tableau SMIC introuvable sur Service-Public")
+
+    section = html[debut:debut + 4000]
+    ligne = re.search(r"Smic horaire.*?sp-prix[^>]*>([^<]+)</span>", section, flags=re.S)
+    if not ligne:
+        raise ValueError("Montant horaire SMIC introuvable sur Service-Public")
+    return _decimal_depuis_prix_service_public(ligne.group(1))
+
+
+def _recuperer_smic_service_public(est_mayotte: bool) -> tuple[Decimal, str]:
+    response = requests.get(
+        SOURCE_SMIC_SERVICE_PUBLIC,
+        timeout=10,
+        headers={"User-Agent": "LBH-Economiste/1.0 (+https://www.lbh-economiste.com)"},
+    )
+    response.raise_for_status()
+    return _extraire_smic_service_public(response.text, est_mayotte), "service_public"
+
+
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_reference_smic(request):
     zone = (request.query_params.get("zone") or "").lower()
     est_mayotte = "mayotte" in zone or zone in {"976", "yt"}
-    valeur = Decimal("9.33") if est_mayotte else Decimal("12.02")
-    source = (
-        "https://www.mayotte.gouv.fr/Actualites/Communiques-de-presse/Communique-de-presse-2026/Revalorisation-du-SMIC-au-1er-janvier-2026"
-        if est_mayotte
-        else "https://www.info.gouv.fr/actualite/le-smic-revalorise-au-1er-janvier-2026"
-    )
+    try:
+        valeur, mode = _recuperer_smic_service_public(est_mayotte)
+    except Exception:
+        valeur = Decimal("9.33") if est_mayotte else Decimal("12.02")
+        mode = "repli_service_public"
+
     return Response(
         {
             "zone": "Mayotte" if est_mayotte else "France hors Mayotte",
             "smic_horaire_brut": str(valeur),
             "date_effet": "2026-01-01",
-            "source": source,
+            "source": SOURCE_SMIC_SERVICE_PUBLIC,
+            "mode": mode,
         }
     )
 
