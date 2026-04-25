@@ -354,10 +354,25 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # Configure les répertoires de polices système pour ezdxf (substitution Arial, Times…)
+    ezdxf.options.support_dirs = [
+        "/usr/share/fonts/truetype/liberation",
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/type1/urw-base35",
+        "/usr/share/fonts",
+    ]
+
     try:
         doc = ezdxf.readfile(chemin_dxf)
     except Exception:
         doc, _ = ezdxf.recover.readfile(chemin_dxf)
+
+    # Substitue les polices manquantes par Liberation Sans (≈ Arial)
+    from ezdxf.fonts import fonts as ezdxf_fonts
+    for style in doc.styles:
+        font_name = getattr(style.dxf, "font", "") or ""
+        if font_name and not ezdxf_fonts.find_font_file_name(font_name):
+            style.dxf.font = "LiberationSans-Regular.ttf"
 
     msp = doc.modelspace()
     BG = "#ffffff"

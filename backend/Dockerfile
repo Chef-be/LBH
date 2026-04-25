@@ -44,6 +44,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libproj-dev \
     # Outils réseau
     curl \
+    # Polices TrueType pour le rendu DXF (substitution Arial, Times, etc.)
+    fonts-liberation \
+    fonts-dejavu-extra \
+    fonts-urw-base35 \
+    fontconfig \
+    && fc-cache -fv \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
