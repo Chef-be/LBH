@@ -41,6 +41,35 @@ class ProfilHoraire(models.Model):
         return f"{self.libelle} — {self.taux_horaire_ht} €/h"
 
 
+class ProfilHoraireUtilisateur(models.Model):
+    """Profil horaire par défaut affecté à un salarié."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.OneToOneField(
+        "comptes.Utilisateur",
+        on_delete=models.CASCADE,
+        related_name="profil_horaire_societe",
+        verbose_name="Salarié",
+    )
+    profil_horaire = models.ForeignKey(
+        ProfilHoraire,
+        on_delete=models.CASCADE,
+        related_name="affectations_utilisateurs",
+        verbose_name="Profil horaire",
+    )
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_profil_horaire_utilisateur"
+        verbose_name = "Affectation profil horaire salarié"
+        verbose_name_plural = "Affectations profils horaires salariés"
+        ordering = ["utilisateur__nom", "utilisateur__prenom"]
+
+    def __str__(self):
+        return f"{self.utilisateur.nom_complet} — {self.profil_horaire.libelle}"
+
+
 # ─────────────────────────────────────────────
 # Devis d'honoraires
 # ─────────────────────────────────────────────
@@ -58,6 +87,11 @@ class DevisHonoraires(models.Model):
         ("refuse", "Refusé"),
         ("expire", "Expiré"),
         ("annule", "Annulé"),
+    ]
+
+    MODES_VALIDATION = [
+        ("manuel", "Validation manuelle"),
+        ("client", "Validation client"),
     ]
 
     TAUX_TVA = [
@@ -78,6 +112,14 @@ class DevisHonoraires(models.Model):
     )
     intitule = models.CharField(max_length=300, verbose_name="Intitulé de la mission")
     statut = models.CharField(max_length=20, choices=STATUTS, default="brouillon")
+    famille_client = models.CharField(max_length=40, blank=True, default="", verbose_name="Famille client")
+    sous_type_client = models.CharField(max_length=60, blank=True, default="", verbose_name="Sous-type client")
+    contexte_contractuel = models.CharField(max_length=60, blank=True, default="", verbose_name="Contexte contractuel")
+    nature_ouvrage = models.CharField(max_length=20, blank=True, default="", verbose_name="Nature d'ouvrage")
+    nature_marche = models.CharField(max_length=20, blank=True, default="", verbose_name="Nature de marché")
+    role_lbh = models.CharField(max_length=60, blank=True, default="", verbose_name="Rôle LBH")
+    contexte_projet_saisie = models.JSONField(default=dict, blank=True, verbose_name="Contexte projet préparé")
+    missions_selectionnees = models.JSONField(default=list, blank=True, verbose_name="Missions et livrables vendus")
 
     # Client destinataire
     client_nom = models.CharField(max_length=200, verbose_name="Nom du client")
@@ -91,6 +133,15 @@ class DevisHonoraires(models.Model):
     date_validite = models.DateField(verbose_name="Date de validité")
     date_acceptation = models.DateField(null=True, blank=True, verbose_name="Date d'acceptation")
     date_refus = models.DateField(null=True, blank=True, verbose_name="Date de refus")
+    date_envoi_client = models.DateTimeField(null=True, blank=True, verbose_name="Date d'envoi client")
+    date_validation_client = models.DateTimeField(null=True, blank=True, verbose_name="Date de validation client")
+    date_expiration_validation = models.DateTimeField(null=True, blank=True, verbose_name="Expiration validation client")
+    jeton_validation_client = models.CharField(
+        max_length=64, unique=True, null=True, blank=True, verbose_name="Jeton validation client",
+    )
+    mode_validation = models.CharField(
+        max_length=10, choices=MODES_VALIDATION, blank=True, default="", verbose_name="Mode de validation",
+    )
 
     # Conditions financières
     taux_tva = models.DecimalField(
@@ -139,6 +190,12 @@ class DevisHonoraires(models.Model):
         self.montant_tva = tva.quantize(Decimal("0.01"))
         self.montant_ttc = (ht + tva).quantize(Decimal("0.01"))
         self.save(update_fields=["montant_ht", "montant_tva", "montant_ttc"])
+
+    @property
+    def validation_client_active(self):
+        if not self.jeton_validation_client or not self.date_expiration_validation:
+            return False
+        return self.date_expiration_validation >= timezone.now() and self.statut == "envoye"
 
 
 class LigneDevis(models.Model):
@@ -411,3 +468,81 @@ class Paiement(models.Model):
         self.facture.montant_paye = total_paye
         self.facture.save(update_fields=["montant_paye"])
         self.facture.mettre_a_jour_statut()
+
+
+class TempsPasse(models.Model):
+    """Saisie de temps passé pour le pilotage de rentabilité."""
+
+    STATUTS = [
+        ("brouillon", "Brouillon"),
+        ("valide", "Validé"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    projet = models.ForeignKey(
+        "projets.Projet",
+        on_delete=models.CASCADE,
+        related_name="temps_passes",
+        verbose_name="Projet",
+    )
+    utilisateur = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.PROTECT,
+        related_name="temps_passes",
+        verbose_name="Salarié",
+    )
+    profil_horaire = models.ForeignKey(
+        ProfilHoraire,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="temps_passes",
+        verbose_name="Profil horaire",
+    )
+    date_saisie = models.DateField(default=timezone.now, verbose_name="Date")
+    nature = models.CharField(
+        max_length=20,
+        choices=[
+            ("projet", "Projet"),
+            ("mission", "Mission"),
+            ("livrable", "Livrable"),
+        ],
+        default="mission",
+        verbose_name="Nature",
+    )
+    statut = models.CharField(
+        max_length=20,
+        choices=STATUTS,
+        default="brouillon",
+        verbose_name="Statut",
+    )
+    code_cible = models.CharField(max_length=120, blank=True, default="", verbose_name="Code cible")
+    libelle_cible = models.CharField(max_length=255, blank=True, default="", verbose_name="Libellé cible")
+    nb_heures = models.DecimalField(max_digits=8, decimal_places=2, verbose_name="Nombre d'heures")
+    taux_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Taux horaire")
+    cout_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Coût total")
+    commentaires = models.TextField(blank=True, verbose_name="Commentaires")
+    cree_par = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="temps_passes_crees",
+    )
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_temps_passe"
+        verbose_name = "Temps passé"
+        verbose_name_plural = "Temps passés"
+        ordering = ["-date_saisie", "-date_creation"]
+
+    def __str__(self):
+        return f"{self.projet.reference} — {self.utilisateur.nom_complet} — {self.nb_heures} h"
+
+    def save(self, *args, **kwargs):
+        if self.profil_horaire_id and (not self.taux_horaire or self.taux_horaire == Decimal("0")):
+            self.taux_horaire = self.profil_horaire.taux_horaire_ht
+        self.cout_total = (self.nb_heures * self.taux_horaire).quantize(Decimal("0.01"))
+        super().save(*args, **kwargs)

@@ -3,7 +3,7 @@ Sérialiseurs — Module Pilotage Société
 """
 
 from rest_framework import serializers
-from .models import ProfilHoraire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement
+from .models import ProfilHoraire, ProfilHoraireUtilisateur, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
 
 
 # ─────────────────────────────────────────────
@@ -17,6 +17,26 @@ class ProfilHoraireSerializer(serializers.ModelSerializer):
             "id", "code", "libelle", "description",
             "taux_horaire_ht", "couleur", "actif", "ordre",
             "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class ProfilHoraireUtilisateurSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    utilisateur_fonction = serializers.CharField(source="utilisateur.fonction", read_only=True)
+    profil_horaire_libelle = serializers.CharField(source="profil_horaire.libelle", read_only=True)
+
+    class Meta:
+        model = ProfilHoraireUtilisateur
+        fields = [
+            "id",
+            "utilisateur",
+            "utilisateur_nom",
+            "utilisateur_fonction",
+            "profil_horaire",
+            "profil_horaire_libelle",
+            "date_creation",
+            "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]
 
@@ -74,12 +94,15 @@ class DevisHonorairesListeSerializer(serializers.ModelSerializer):
     projet_reference = serializers.CharField(source="projet.reference", read_only=True)
     projet_intitule = serializers.CharField(source="projet.intitule", read_only=True)
     statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+    validation_client_active = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = DevisHonoraires
         fields = [
             "id", "reference", "intitule", "statut", "statut_libelle",
+            "famille_client", "sous_type_client", "nature_ouvrage",
             "client_nom", "date_emission", "date_validite",
+            "date_envoi_client", "date_validation_client", "validation_client_active",
             "montant_ht", "montant_ttc",
             "projet", "projet_reference", "projet_intitule",
         ]
@@ -92,15 +115,21 @@ class DevisHonorairesDetailSerializer(serializers.ModelSerializer):
     projet_intitule = serializers.CharField(source="projet.intitule", read_only=True)
     statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
     nb_factures = serializers.SerializerMethodField()
+    validation_client_active = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = DevisHonoraires
         fields = [
             "id", "reference", "intitule", "statut", "statut_libelle",
             "projet", "projet_reference", "projet_intitule",
+            "famille_client", "sous_type_client", "contexte_contractuel",
+            "nature_ouvrage", "nature_marche", "role_lbh",
+            "contexte_projet_saisie", "missions_selectionnees",
             "client_nom", "client_contact", "client_email",
             "client_telephone", "client_adresse",
             "date_emission", "date_validite", "date_acceptation", "date_refus",
+            "date_envoi_client", "date_validation_client", "date_expiration_validation",
+            "mode_validation", "validation_client_active",
             "taux_tva", "acompte_pct", "delai_paiement_jours",
             "montant_ht", "montant_tva", "montant_ttc",
             "objet", "conditions_particulieres", "notes_internes",
@@ -110,6 +139,8 @@ class DevisHonorairesDetailSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id", "montant_ht", "montant_tva", "montant_ttc",
             "date_creation", "date_modification",
+            "date_envoi_client", "date_validation_client", "date_expiration_validation",
+            "mode_validation", "validation_client_active",
         ]
 
     def get_nb_factures(self, obj):
@@ -161,6 +192,42 @@ class PaiementSerializer(serializers.ModelSerializer):
             "date_creation",
         ]
         read_only_fields = ["id", "enregistre_par", "date_creation"]
+
+
+class TempsPasseSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    projet_reference = serializers.CharField(source="projet.reference", read_only=True)
+    projet_intitule = serializers.CharField(source="projet.intitule", read_only=True)
+    profil_horaire_libelle = serializers.CharField(source="profil_horaire.libelle", read_only=True)
+    nature_libelle = serializers.CharField(source="get_nature_display", read_only=True)
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+
+    class Meta:
+        model = TempsPasse
+        fields = [
+            "id",
+            "projet",
+            "projet_reference",
+            "projet_intitule",
+            "utilisateur",
+            "utilisateur_nom",
+            "profil_horaire",
+            "profil_horaire_libelle",
+            "date_saisie",
+            "nature",
+            "nature_libelle",
+            "statut",
+            "statut_libelle",
+            "code_cible",
+            "libelle_cible",
+            "nb_heures",
+            "taux_horaire",
+            "cout_total",
+            "commentaires",
+            "date_creation",
+            "date_modification",
+        ]
+        read_only_fields = ["id", "cout_total", "date_creation", "date_modification"]
 
 
 # ─────────────────────────────────────────────

@@ -11,12 +11,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, MissionClient, LivrableType, ModeleDocument
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, MissionClient, LivrableType, ModeleDocument, AffectationProjet
 from .serialiseurs import (
     ProjetListeSerialiseur,
     ProjetDetailSerialiseur,
     LotSerialiseur,
     IntervenantSerialiseur,
+    AffectationProjetSerialiseur,
     PreanalyseSourcesProjetSerialiseur,
 )
 from .services import (
@@ -39,6 +40,16 @@ def _assurer_intervenant_responsable(projet: Projet) -> None:
         projet=projet,
         utilisateur=projet.responsable,
         defaults={"role": "responsable"},
+    )
+
+
+def _assurer_intervenant_affecte(projet: Projet, utilisateur, role: str = "economiste") -> None:
+    if not utilisateur:
+        return
+    Intervenant.objects.get_or_create(
+        projet=projet,
+        utilisateur=utilisateur,
+        defaults={"role": role},
     )
 
 
@@ -165,6 +176,100 @@ class VueIntervenantsProjet(generics.ListCreateAPIView):
 
     def perform_create(self, serialiseur):
         serialiseur.save(projet_id=self.kwargs["projet_id"])
+
+
+class VueAffectationsProjet(generics.ListCreateAPIView):
+    serializer_class = AffectationProjetSerialiseur
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return AffectationProjet.objects.filter(
+            projet_id=self.kwargs["projet_id"]
+        ).select_related("utilisateur")
+
+    def perform_create(self, serialiseur):
+        projet = generics.get_object_or_404(Projet, pk=self.kwargs["projet_id"])
+        affectation = serialiseur.save(
+            projet=projet,
+            cree_par=self.request.user,
+        )
+        _assurer_intervenant_affecte(projet, affectation.utilisateur)
+
+
+class VueAffectationProjetDetail(generics.DestroyAPIView):
+    serializer_class = AffectationProjetSerialiseur
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return AffectationProjet.objects.filter(
+            projet_id=self.kwargs["projet_id"]
+        )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_equipe_assignable_projet(requete, projet_id):
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    organisation = projet.organisation or requete.user.organisation
+    if not organisation:
+        return Response({"utilisateurs": []})
+
+    from applications.comptes.models import Utilisateur
+
+    utilisateurs = Utilisateur.objects.filter(
+        organisation=organisation,
+        est_actif=True,
+    ).select_related("profil").order_by("nom", "prenom")
+
+    return Response({
+        "utilisateurs": [
+            {
+                "id": str(utilisateur.id),
+                "nom_complet": utilisateur.nom_complet,
+                "fonction": utilisateur.fonction,
+                "courriel": utilisateur.courriel,
+                "profil_libelle": utilisateur.profil.libelle if utilisateur.profil else "",
+            }
+            for utilisateur in utilisateurs
+        ]
+    })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_mes_affectations_projets(requete):
+    affectations = (
+        AffectationProjet.objects.filter(utilisateur=requete.user)
+        .select_related("projet", "projet__organisation", "projet__responsable", "cree_par")
+        .order_by("-date_modification", "-date_creation")
+    )
+
+    return Response({
+        "affectations": [
+            {
+                "id": str(affectation.id),
+                "nature": affectation.nature,
+                "nature_libelle": affectation.get_nature_display(),
+                "code_cible": affectation.code_cible,
+                "libelle_cible": affectation.libelle_cible,
+                "role": affectation.role,
+                "role_libelle": affectation.get_role_display(),
+                "commentaires": affectation.commentaires,
+                "date_creation": affectation.date_creation,
+                "date_modification": affectation.date_modification,
+                "projet": {
+                    "id": str(affectation.projet.id),
+                    "reference": affectation.projet.reference,
+                    "intitule": affectation.projet.intitule,
+                    "statut": affectation.projet.statut,
+                    "phase_actuelle": affectation.projet.phase_actuelle,
+                    "responsable_nom": affectation.projet.responsable.nom_complet if affectation.projet.responsable_id else "",
+                    "organisation_nom": affectation.projet.organisation.nom if affectation.projet.organisation_id else "",
+                },
+            }
+            for affectation in affectations
+        ]
+    })
 
 
 @api_view(["GET"])

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from applications.documents.models import DossierDocumentProjet, Document, TypeDocument
 from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
-from applications.projets.models import Projet, PreanalyseSourcesProjet
+from applications.projets.models import Projet, PreanalyseSourcesProjet, AffectationProjet
 from applications.pieces_ecrites.models import ModeleDocument, PieceEcrite
 from applications.appels_offres.models import AppelOffres
 
@@ -108,6 +108,90 @@ class ApiProjetsTests(TestCase):
                 code="cctp-lot",
             ).exists()
         )
+
+    def test_affectation_ciblee_cree_un_intervenant_et_est_listable(self):
+        collaborateur = Utilisateur.objects.create_user(
+            courriel="collab-projets@example.com",
+            password="motdepasse123",
+            prenom="Collab",
+            nom="Projet",
+            organisation=self.organisation,
+        )
+
+        reponse = self.client.post(
+            f"/api/projets/{self.projet.id}/affectations/",
+            {
+                "utilisateur": str(collaborateur.id),
+                "nature": "livrable",
+                "code_cible": "livrable-cctp",
+                "libelle_cible": "CCTP lot Gros Oeuvre",
+                "role": "redaction",
+                "commentaires": "Rédaction du lot principal",
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        self.assertTrue(
+            AffectationProjet.objects.filter(
+                projet=self.projet,
+                utilisateur=collaborateur,
+                code_cible="livrable-cctp",
+            ).exists()
+        )
+        self.assertTrue(
+            self.projet.intervenants.filter(utilisateur=collaborateur).exists()
+        )
+
+        liste = self.client.get(f"/api/projets/{self.projet.id}/affectations/")
+        self.assertEqual(liste.status_code, status.HTTP_200_OK, liste.data)
+        resultats = liste.data["results"] if isinstance(liste.data, dict) and "results" in liste.data else liste.data
+        self.assertEqual(resultats[0]["utilisateur_nom"], "Collab Projet")
+
+    def test_vue_mes_affectations_retourne_les_affectations_de_l_utilisateur_connecte(self):
+        collaborateur = Utilisateur.objects.create_user(
+            courriel="affecte-projets@example.com",
+            password="motdepasse123",
+            prenom="Alice",
+            nom="Affectee",
+            organisation=self.organisation,
+        )
+        AffectationProjet.objects.create(
+            projet=self.projet,
+            utilisateur=collaborateur,
+            nature="mission",
+            code_cible="mission-cctp",
+            libelle_cible="Rédaction CCTP",
+            role="redaction",
+            cree_par=self.admin,
+        )
+        autre = Utilisateur.objects.create_user(
+            courriel="autre-projets@example.com",
+            password="motdepasse123",
+            prenom="Autre",
+            nom="Utilisateur",
+            organisation=self.organisation,
+        )
+        AffectationProjet.objects.create(
+            projet=self.projet,
+            utilisateur=autre,
+            nature="livrable",
+            code_cible="livrable-dpgf",
+            libelle_cible="DPGF",
+            role="contribution",
+            cree_par=self.admin,
+        )
+
+        self.client.force_authenticate(collaborateur)
+        reponse = self.client.get("/api/projets/mes-affectations/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(len(reponse.data["affectations"]), 1)
+        affectation = reponse.data["affectations"][0]
+        self.assertEqual(affectation["code_cible"], "mission-cctp")
+        self.assertEqual(affectation["nature"], "mission")
+        self.assertEqual(affectation["projet"]["reference"], self.projet.reference)
+        self.assertEqual(affectation["projet"]["responsable_nom"], self.admin.nom_complet)
 
     def test_parcours_projet_retourne_les_referentiels_front(self):
         reponse = self.client.get(

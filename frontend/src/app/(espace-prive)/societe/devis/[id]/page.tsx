@@ -4,9 +4,20 @@ import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/crochets/useApi";
+import { api, ErreurApi } from "@/crochets/useApi";
 import { DevisHonoraires } from "@/types/societe";
-import { ArrowLeft, FileText, CheckCircle, XCircle, Send, ReceiptText, Pencil } from "lucide-react";
+import {
+  ArrowLeft,
+  FileText,
+  CheckCircle,
+  XCircle,
+  Send,
+  ReceiptText,
+  Pencil,
+  Download,
+  Briefcase,
+  MailCheck,
+} from "lucide-react";
 
 function formaterMontant(val: string | number): string {
   const n = typeof val === "string" ? parseFloat(val) : val;
@@ -17,6 +28,17 @@ function formaterMontant(val: string | number): string {
 function formaterDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+function telechargerBlob(blob: Blob, nomFichier: string) {
+  const url = window.URL.createObjectURL(blob);
+  const lien = document.createElement("a");
+  lien.href = url;
+  lien.download = nomFichier;
+  document.body.appendChild(lien);
+  lien.click();
+  lien.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 const STATUTS_CONFIG: Record<string, { couleur: string; label: string }> = {
@@ -43,13 +65,33 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
     mutationFn: (statut: string) =>
       api.post(`/api/societe/devis/${id}/changer_statut/`, { statut }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["devis", id] }),
-    onError: () => setErreur("Impossible de changer le statut."),
+    onError: (error) => setErreur(error instanceof ErreurApi ? error.detail : "Impossible de changer le statut."),
   });
 
   const genererFacture = useMutation({
     mutationFn: () => api.post<{ id: string }>(`/api/societe/devis/${id}/generer_facture/`, {}),
     onSuccess: (facture) => router.push(`/societe/factures/${facture.id}`),
-    onError: () => setErreur("Impossible de générer la facture."),
+    onError: (error) => setErreur(error instanceof ErreurApi ? error.detail : "Impossible de générer la facture."),
+  });
+
+  const telechargerPdf = useMutation({
+    mutationFn: () => api.telecharger(`/api/societe/devis/${id}/export-pdf/`),
+    onSuccess: (reponse) => {
+      telechargerBlob(reponse.blob, reponse.nomFichier || `${devis.reference}.pdf`);
+    },
+    onError: (error) => setErreur(error instanceof ErreurApi ? error.detail : "Impossible de générer le PDF."),
+  });
+
+  const envoyerClient = useMutation({
+    mutationFn: () => api.post(`/api/societe/devis/${id}/envoyer-client/`, { expiration_jours: 14 }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["devis", id] }),
+    onError: (error) => setErreur(error instanceof ErreurApi ? error.detail : "Impossible d'envoyer le devis au client."),
+  });
+
+  const creerProjet = useMutation({
+    mutationFn: () => api.post<{ projet: { id: string } }>(`/api/societe/devis/${id}/creer-projet/`, {}),
+    onSuccess: (reponse) => router.push(`/projets/${reponse.projet.id}`),
+    onError: (error) => setErreur(error instanceof ErreurApi ? error.detail : "Impossible de créer le projet."),
   });
 
   if (isLoading) {
@@ -86,16 +128,25 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
 
         {/* Actions selon statut */}
         <div className="flex flex-wrap gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => telechargerPdf.mutate()}
+            disabled={telechargerPdf.isPending}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}
+          >
+            <Download size={13} /> {telechargerPdf.isPending ? "PDF…" : "PDF"}
+          </button>
           {devis.statut === "brouillon" && (
             <>
               <button
                 type="button"
-                onClick={() => changerStatut.mutate("envoye")}
-                disabled={changerStatut.isPending}
+                onClick={() => envoyerClient.mutate()}
+                disabled={envoyerClient.isPending}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
                 style={{ background: "#f59e0b" }}
               >
-                <Send size={13} /> Marquer envoyé
+                <Send size={13} /> {envoyerClient.isPending ? "Envoi…" : "Envoyer au client"}
               </button>
               <Link
                 href={`/societe/devis/${id}/modifier`}
@@ -129,15 +180,28 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
             </>
           )}
           {devis.statut === "accepte" && (
-            <button
-              type="button"
-              onClick={() => genererFacture.mutate()}
-              disabled={genererFacture.isPending}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{ background: "var(--c-base)" }}
-            >
-              <ReceiptText size={13} /> {genererFacture.isPending ? "Génération…" : "Générer une facture"}
-            </button>
+            <>
+              {!devis.projet && (
+                <button
+                  type="button"
+                  onClick={() => creerProjet.mutate()}
+                  disabled={creerProjet.isPending}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                  style={{ background: "#0f766e" }}
+                >
+                  <Briefcase size={13} /> {creerProjet.isPending ? "Création…" : "Créer l'affaire"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => genererFacture.mutate()}
+                disabled={genererFacture.isPending}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                style={{ background: "var(--c-base)" }}
+              >
+                <ReceiptText size={13} /> {genererFacture.isPending ? "Génération…" : "Générer une facture"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -165,6 +229,18 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
           <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>Conditions</h3>
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between">
+              <dt style={{ color: "var(--texte-3)" }}>Type de client</dt>
+              <dd style={{ color: "var(--texte)" }}>{devis.famille_client || "—"}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt style={{ color: "var(--texte-3)" }}>Sous-type</dt>
+              <dd style={{ color: "var(--texte)" }}>{devis.sous_type_client || "—"}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt style={{ color: "var(--texte-3)" }}>Ouvrage</dt>
+              <dd style={{ color: "var(--texte)" }}>{devis.nature_ouvrage || "—"}</dd>
+            </div>
+            <div className="flex justify-between">
               <dt style={{ color: "var(--texte-3)" }}>Émis le</dt>
               <dd style={{ color: "var(--texte)" }}>{formaterDate(devis.date_emission)}</dd>
             </div>
@@ -180,6 +256,18 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
               <dt style={{ color: "var(--texte-3)" }}>Délai paiement</dt>
               <dd style={{ color: "var(--texte)" }}>{devis.delai_paiement_jours} jours</dd>
             </div>
+            <div className="flex justify-between">
+              <dt style={{ color: "var(--texte-3)" }}>Validation client</dt>
+              <dd style={{ color: "var(--texte)" }}>
+                {devis.mode_validation === "client"
+                  ? "Client"
+                  : devis.mode_validation === "manuel"
+                    ? "Manuelle"
+                    : devis.validation_client_active
+                      ? "En attente"
+                      : "—"}
+              </dd>
+            </div>
             {devis.projet_reference && (
               <div className="flex justify-between">
                 <dt style={{ color: "var(--texte-3)" }}>Projet</dt>
@@ -193,6 +281,56 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
           </dl>
         </div>
       </div>
+
+      {devis.missions_selectionnees.length > 0 && (
+        <div className="rounded-xl p-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+          <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>
+            Missions vendues
+          </h3>
+          <div className="space-y-3">
+            {devis.missions_selectionnees.map((mission) => (
+              <div key={mission.missionCode} className="rounded-lg px-4 py-3" style={{ background: "var(--fond-entree)" }}>
+                <p className="font-medium text-sm" style={{ color: "var(--texte)" }}>
+                  {mission.missionLabel || mission.missionCode}
+                </p>
+                {mission.livrablesLabels && mission.livrablesLabels.length > 0 && (
+                  <p className="text-xs mt-1" style={{ color: "var(--texte-3)" }}>
+                    {mission.livrablesLabels.join(", ")}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(devis.date_envoi_client || devis.date_validation_client || devis.date_expiration_validation) && (
+        <div className="rounded-xl p-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+          <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>
+            Suivi de validation
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p style={{ color: "var(--texte-3)" }}>Envoi client</p>
+              <p style={{ color: "var(--texte)" }}>{formaterDate(devis.date_envoi_client)}</p>
+            </div>
+            <div>
+              <p style={{ color: "var(--texte-3)" }}>Validation</p>
+              <p style={{ color: "var(--texte)" }}>{formaterDate(devis.date_validation_client)}</p>
+            </div>
+            <div>
+              <p style={{ color: "var(--texte-3)" }}>Expiration</p>
+              <p style={{ color: "var(--texte)" }}>{formaterDate(devis.date_expiration_validation)}</p>
+            </div>
+          </div>
+          {devis.validation_client_active && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: "color-mix(in srgb, #f59e0b 10%, var(--fond-carte))", color: "#b45309" }}>
+              <MailCheck size={12} />
+              Lien de validation actif
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Objet */}
       {devis.objet && (

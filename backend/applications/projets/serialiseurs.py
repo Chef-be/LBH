@@ -4,7 +4,7 @@ Sérialiseurs pour l'application Projets — Plateforme LBH.
 
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, AffectationProjet
 from .services import (
     construire_processus_recommande,
     construire_suggestion_phase_projet,
@@ -49,6 +49,34 @@ class IntervenantSerialiseur(serializers.ModelSerializer):
         }
 
 
+class AffectationProjetSerialiseur(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    utilisateur_fonction = serializers.CharField(source="utilisateur.fonction", read_only=True)
+    role_libelle = serializers.CharField(source="get_role_display", read_only=True)
+    nature_libelle = serializers.CharField(source="get_nature_display", read_only=True)
+
+    class Meta:
+        model = AffectationProjet
+        fields = [
+            "id",
+            "utilisateur",
+            "utilisateur_nom",
+            "utilisateur_fonction",
+            "nature",
+            "nature_libelle",
+            "code_cible",
+            "libelle_cible",
+            "role",
+            "role_libelle",
+            "commentaires",
+            "date_creation",
+            "date_modification",
+        ]
+        extra_kwargs = {
+            "projet": {"required": False, "allow_null": True},
+        }
+
+
 class ProjetListeSerialiseur(serializers.ModelSerializer):
     """Sérialiseur allégé pour les listes de projets."""
 
@@ -87,6 +115,7 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
 
     lots = LotSerialiseur(many=True, read_only=True)
     intervenants = IntervenantSerialiseur(many=True, read_only=True)
+    affectations = AffectationProjetSerialiseur(many=True, read_only=True)
     organisation_nom = serializers.CharField(source="organisation.nom", read_only=True)
     responsable_nom = serializers.CharField(source="responsable.nom_complet", read_only=True)
     maitre_ouvrage_nom = serializers.CharField(
@@ -244,7 +273,7 @@ class ProjetDetailSerialiseur(serializers.ModelSerializer):
             "contexte_projet_saisie",
             "mode_variation_prix_saisie",
             "publier_sur_site",
-            "lots", "intervenants",
+            "lots", "intervenants", "affectations",
             "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]

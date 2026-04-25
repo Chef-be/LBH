@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
-import { ArrowLeft, Euro, FolderOpen, Users, Pencil, Trash2, X, Info, ChevronRight } from "lucide-react";
+import { ArrowLeft, Euro, FolderOpen, Users, Pencil, Trash2, X, Info, ChevronRight, Plus, Target } from "lucide-react";
 import { NavigationProjet } from "@/composants/projets/NavigationProjet";
 import { DashboardProjet } from "@/composants/projets/DashboardProjet";
 import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
@@ -30,6 +30,28 @@ interface Intervenant {
   utilisateur_nom: string;
   role: string;
   role_libelle: string;
+}
+
+interface AffectationProjet {
+  id: string;
+  utilisateur: string;
+  utilisateur_nom: string;
+  utilisateur_fonction: string;
+  nature: string;
+  nature_libelle: string;
+  code_cible: string;
+  libelle_cible: string;
+  role: string;
+  role_libelle: string;
+  commentaires: string;
+}
+
+interface UtilisateurAssignable {
+  id: string;
+  nom_complet: string;
+  fonction: string;
+  courriel: string;
+  profil_libelle: string;
 }
 
 interface PhaseSuggeree {
@@ -109,8 +131,10 @@ interface ProjetDetail {
   statuts_livrables: Record<string, string>;
   lots: Lot[];
   intervenants: Intervenant[];
+  affectations: AffectationProjet[];
   date_creation: string;
   date_modification: string;
+  responsable: string;
   mode_variation_prix?: {
     type_evolution: string;
     cadre_juridique: string;
@@ -165,18 +189,104 @@ function formaterValeurContexte(valeur: string | string[] | boolean) {
   return valeur || "—";
 }
 
+function normaliserTexteModules(...valeurs: Array<string | undefined | null>) {
+  return valeurs
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function extraireVisibiliteModules(affectations: AffectationProjet[]) {
+  const visibilite = {
+    afficherEconomie: false,
+    afficherMetres: false,
+    afficherPiecesEcrites: false,
+    afficherAppelsOffres: false,
+    afficherExecution: false,
+    afficherRentabilite: false,
+  };
+
+  for (const affectation of affectations) {
+    const texte = normaliserTexteModules(
+      affectation.role,
+      affectation.role_libelle,
+      affectation.nature,
+      affectation.code_cible,
+      affectation.libelle_cible,
+      affectation.commentaires
+    );
+
+    if (affectation.nature === "projet" || affectation.role === "pilotage") {
+      return {
+        afficherEconomie: true,
+        afficherMetres: true,
+        afficherPiecesEcrites: true,
+        afficherAppelsOffres: true,
+        afficherExecution: true,
+        afficherRentabilite: true,
+      };
+    }
+
+    if (["redaction", "verification", "contribution"].includes(affectation.role)) {
+      visibilite.afficherPiecesEcrites = true;
+    }
+    if (["etude_prix", "verification", "contribution"].includes(affectation.role)) {
+      visibilite.afficherEconomie = true;
+    }
+    if (["planning", "opc"].includes(affectation.role)) {
+      visibilite.afficherExecution = true;
+    }
+
+    if (/(cctp|dpgf|dqe|bpu|ccap|rc|piece|livrable|notice|memoire)/.test(texte)) {
+      visibilite.afficherPiecesEcrites = true;
+      visibilite.afficherEconomie = true;
+    }
+    if (/(metre|metres|quantite|quantitatif)/.test(texte)) {
+      visibilite.afficherMetres = true;
+      visibilite.afficherEconomie = true;
+    }
+    if (/(prix|sous detail|sous-detail|debourse|debours|kpv|rentabilite|marge)/.test(texte)) {
+      visibilite.afficherEconomie = true;
+      visibilite.afficherRentabilite = true;
+      visibilite.afficherMetres = true;
+    }
+    if (/(offre|appel offres|appel d offres|analyse offres|act)/.test(texte)) {
+      visibilite.afficherAppelsOffres = true;
+      visibilite.afficherEconomie = true;
+      visibilite.afficherPiecesEcrites = true;
+    }
+    if (/(planning|opc|det|visa|aor|execution|chantier|suivi travaux)/.test(texte)) {
+      visibilite.afficherExecution = true;
+    }
+  }
+
+  return visibilite;
+}
+
 // ---------------------------------------------------------------------------
 // Composant
 // ---------------------------------------------------------------------------
 
 export function DetailProjet({ id }: { id: string }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const utilisateur = useSessionStore((etat) => etat.utilisateur);
   const notifications = useNotifications();
   const estSuperAdmin = Boolean(utilisateur?.est_super_admin);
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [modaleSuppressionOuverte, setModaleSuppressionOuverte] = useState(false);
   const [erreurSuppression, setErreurSuppression] = useState<string | null>(null);
+  const [affectationForm, setAffectationForm] = useState({
+    utilisateur: "",
+    nature: "mission",
+    code_cible: "",
+    libelle_cible: "",
+    role: "contribution",
+    commentaires: "",
+  });
+  const [affectationEnCours, setAffectationEnCours] = useState(false);
   const { data: projet, isLoading, isError } = useQuery<ProjetDetail>({
     queryKey: ["projet", id],
     queryFn: () => api.get<ProjetDetail>(`/api/projets/${id}/`),
@@ -184,6 +294,11 @@ export function DetailProjet({ id }: { id: string }) {
   const { data: synthese } = useQuery<SyntheseProjet>({
     queryKey: ["projet-synthese", id],
     queryFn: () => api.get<SyntheseProjet>(`/api/projets/${id}/synthese/`),
+    enabled: Boolean(projet),
+  });
+  const { data: equipeAssignable } = useQuery<{ utilisateurs: UtilisateurAssignable[] }>({
+    queryKey: ["projet-equipe-assignable", id],
+    queryFn: () => api.get<{ utilisateurs: UtilisateurAssignable[] }>(`/api/projets/${id}/equipe-assignable/`),
     enabled: Boolean(projet),
   });
 
@@ -206,6 +321,43 @@ export function DetailProjet({ id }: { id: string }) {
     }
   };
 
+  const ajouterAffectation = async () => {
+    if (!affectationForm.utilisateur || !affectationForm.libelle_cible.trim()) {
+      notifications.erreur("Utilisateur et libellé d'affectation obligatoires.");
+      return;
+    }
+    setAffectationEnCours(true);
+    try {
+      await api.post(`/api/projets/${id}/affectations/`, affectationForm);
+      notifications.succes("Affectation enregistrée.");
+      setAffectationForm({
+        utilisateur: "",
+        nature: "mission",
+        code_cible: "",
+        libelle_cible: "",
+        role: "contribution",
+        commentaires: "",
+      });
+      queryClient.invalidateQueries({ queryKey: ["projet", id] });
+      queryClient.invalidateQueries({ queryKey: ["projets"] });
+    } catch (erreur) {
+      notifications.erreur(erreur instanceof ErreurApi ? erreur.detail : "Impossible d'ajouter l'affectation.");
+    } finally {
+      setAffectationEnCours(false);
+    }
+  };
+
+  const supprimerAffectation = async (affectationId: string) => {
+    try {
+      await api.supprimer(`/api/projets/${id}/affectations/${affectationId}/`);
+      notifications.succes("Affectation supprimée.");
+      queryClient.invalidateQueries({ queryKey: ["projet", id] });
+      queryClient.invalidateQueries({ queryKey: ["projets"] });
+    } catch (erreur) {
+      notifications.erreur(erreur instanceof ErreurApi ? erreur.detail : "Impossible de supprimer l'affectation.");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-400 text-sm">
@@ -224,6 +376,17 @@ export function DetailProjet({ id }: { id: string }) {
   }
 
   const contexte = projet.contexte_projet;
+  const estGestionProjet =
+    estSuperAdmin ||
+    utilisateur?.id === projet.responsable ||
+    projet.intervenants.some(
+      (intervenant) =>
+        intervenant.role === "responsable" &&
+        intervenant.utilisateur_nom === utilisateur?.nom_complet
+    );
+  const affectationsUtilisateur = projet.affectations.filter(
+    (affectation) => affectation.utilisateur === utilisateur?.id
+  );
   const familleClient = contexte?.famille_client.code || "";
   const objectifMission = projet.objectif_mission || "";
   const natureOuvrage = contexte?.nature_ouvrage || "";
@@ -255,6 +418,11 @@ export function DetailProjet({ id }: { id: string }) {
     ["estimation_par_lot", "estimation_infrastructure"].some((code) => codesMission.has(code));
   const afficherVoirie = natureOuvrage === "infrastructure" || natureOuvrage === "mixte";
   const afficherBatiment = natureOuvrage === "batiment" || natureOuvrage === "mixte" || (!natureOuvrage && (estMaitriseOeuvre || estMaitriseOuvrage));
+  const modulesAffectes = extraireVisibiliteModules(affectationsUtilisateur);
+  const estIntervenantProjet = projet.intervenants.some(
+    (intervenant) => intervenant.utilisateur_nom === utilisateur?.nom_complet
+  );
+  const navigationFiltree = !estGestionProjet && affectationsUtilisateur.length > 0;
   const equipeProjet = projet.intervenants.length > 0
     ? projet.intervenants
     : (projet.responsable_nom
@@ -300,9 +468,11 @@ export function DetailProjet({ id }: { id: string }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Link href={`/projets/${id}/modifier`} className="btn-primaire text-xs">
-            <Pencil size={12} /> Modifier
-          </Link>
+          {estGestionProjet && (
+            <Link href={`/projets/${id}/modifier`} className="btn-primaire text-xs">
+              <Pencil size={12} /> Modifier
+            </Link>
+          )}
           {estSuperAdmin && (
             <button
               type="button"
@@ -321,11 +491,13 @@ export function DetailProjet({ id }: { id: string }) {
       <NavigationProjet
         idProjet={id}
         contexte={{
-          afficherMetres: contexteMetres,
-          afficherPiecesEcrites: contextePiecesEcrites,
-          afficherAppelsOffres: contexteAppelsOffres,
-          afficherExecution: contexteExecution,
-          afficherRentabilite: contexteRentabilite,
+          afficherEconomie: !navigationFiltree ? true : modulesAffectes.afficherEconomie,
+          afficherMetres: !navigationFiltree ? contexteMetres : contexteMetres && modulesAffectes.afficherMetres,
+          afficherPiecesEcrites: !navigationFiltree ? contextePiecesEcrites : contextePiecesEcrites && modulesAffectes.afficherPiecesEcrites,
+          afficherAppelsOffres: !navigationFiltree ? contexteAppelsOffres : contexteAppelsOffres && modulesAffectes.afficherAppelsOffres,
+          afficherPlanning: !navigationFiltree ? true : modulesAffectes.afficherExecution,
+          afficherExecution: !navigationFiltree ? contexteExecution : contexteExecution && modulesAffectes.afficherExecution,
+          afficherRentabilite: !navigationFiltree ? contexteRentabilite : contexteRentabilite && modulesAffectes.afficherRentabilite,
           afficherVoirie: afficherVoirie,
           afficherBatiment: afficherBatiment,
         }}
@@ -340,6 +512,35 @@ export function DetailProjet({ id }: { id: string }) {
         <div className="lg:col-span-2 space-y-6">
           {/* Contexte compact */}
           <ContexteCompact projet={projet} />
+
+          {estIntervenantProjet && affectationsUtilisateur.length > 0 && (
+            <div className="carte">
+              <div className="mb-4 flex items-center gap-2">
+                <Target size={16} />
+                <h2>Mes affectations sur ce dossier</h2>
+              </div>
+              <div className="space-y-2">
+                {affectationsUtilisateur.map((affectation) => (
+                  <div
+                    key={affectation.id}
+                    className="rounded-xl border px-3 py-3 text-sm"
+                    style={{ borderColor: "var(--bordure)", background: "var(--fond-entree)" }}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="badge-neutre">{affectation.nature_libelle}</span>
+                      <span className="badge-info">{affectation.role_libelle}</span>
+                    </div>
+                    <p className="mt-2 font-medium">{affectation.libelle_cible || affectation.code_cible}</p>
+                    {affectation.commentaires ? (
+                      <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>
+                        {affectation.commentaires}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Lots */}
           {projet.lots.length > 0 && (
@@ -409,6 +610,121 @@ export function DetailProjet({ id }: { id: string }) {
                 ))}
               </ul>
             )}
+          </div>
+
+          <div className="carte">
+            <div className="mb-4 flex items-center gap-2">
+              <Target size={16} />
+              <h2>Affectations ciblées ({projet.affectations.length})</h2>
+            </div>
+
+            <div className="space-y-3">
+              {projet.affectations.length === 0 ? (
+                <p className="text-sm" style={{ color: "var(--texte-3)" }}>Aucune affectation ciblée.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {projet.affectations.map((affectation) => (
+                    <li key={affectation.id} className="rounded-xl border px-3 py-3 text-sm" style={{ borderColor: "var(--bordure)", background: "var(--fond-entree)" }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{affectation.utilisateur_nom}</p>
+                          <p className="text-xs" style={{ color: "var(--texte-3)" }}>
+                            {affectation.nature_libelle} · {affectation.role_libelle}
+                          </p>
+                          <p className="mt-1 text-sm">{affectation.libelle_cible || affectation.code_cible}</p>
+                          {affectation.commentaires ? (
+                            <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>{affectation.commentaires}</p>
+                          ) : null}
+                        </div>
+                        {estGestionProjet ? (
+                          <button
+                            type="button"
+                            onClick={() => supprimerAffectation(affectation.id)}
+                            className="rounded-lg p-2 text-red-600 transition hover:bg-red-50"
+                            title="Supprimer l'affectation"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {estGestionProjet ? (
+              <div className="mt-4 space-y-3 rounded-xl border p-4" style={{ borderColor: "var(--bordure)", background: "var(--fond-entree)" }}>
+                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--texte-3)" }}>
+                  Nouvelle affectation
+                </p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <select
+                    className="champ-saisie"
+                    value={affectationForm.utilisateur}
+                    onChange={(e) => setAffectationForm((courant) => ({ ...courant, utilisateur: e.target.value }))}
+                  >
+                    <option value="">Sélectionner un salarié</option>
+                    {(equipeAssignable?.utilisateurs ?? []).map((membre) => (
+                      <option key={membre.id} value={membre.id}>
+                        {membre.nom_complet}{membre.fonction ? ` · ${membre.fonction}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="champ-saisie"
+                    value={affectationForm.nature}
+                    onChange={(e) => setAffectationForm((courant) => ({ ...courant, nature: e.target.value }))}
+                  >
+                    <option value="mission">Mission</option>
+                    <option value="livrable">Livrable</option>
+                    <option value="projet">Projet complet</option>
+                  </select>
+                  <input
+                    className="champ-saisie"
+                    value={affectationForm.code_cible}
+                    onChange={(e) => setAffectationForm((courant) => ({ ...courant, code_cible: e.target.value }))}
+                    placeholder="Code mission / livrable"
+                  />
+                  <select
+                    className="champ-saisie"
+                    value={affectationForm.role}
+                    onChange={(e) => setAffectationForm((courant) => ({ ...courant, role: e.target.value }))}
+                  >
+                    <option value="contribution">Contribution</option>
+                    <option value="redaction">Rédaction</option>
+                    <option value="etude_prix">Étude de prix</option>
+                    <option value="verification">Vérification</option>
+                    <option value="planning">Planning</option>
+                    <option value="opc">OPC</option>
+                    <option value="pilotage">Pilotage</option>
+                  </select>
+                </div>
+                <input
+                  className="champ-saisie"
+                  value={affectationForm.libelle_cible}
+                  onChange={(e) => setAffectationForm((courant) => ({ ...courant, libelle_cible: e.target.value }))}
+                  placeholder="Libellé à affecter"
+                />
+                <textarea
+                  className="champ-saisie min-h-24"
+                  value={affectationForm.commentaires}
+                  onChange={(e) => setAffectationForm((courant) => ({ ...courant, commentaires: e.target.value }))}
+                  placeholder="Consigne ou précision"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={ajouterAffectation}
+                    disabled={affectationEnCours}
+                    className="btn-primaire text-xs"
+                  >
+                    <Plus size={12} />
+                    {affectationEnCours ? "Affectation…" : "Affecter"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {/* Métadonnées */}

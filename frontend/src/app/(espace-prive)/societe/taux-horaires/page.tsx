@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
-import { ProfilHoraire } from "@/types/societe";
+import { ProfilHoraire, ProfilHoraireUtilisateur } from "@/types/societe";
 import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
 
 function formaterTaux(val: string): string {
@@ -38,6 +38,20 @@ export default function PageTauxHoraires() {
       return Array.isArray(r) ? r : (r.results ?? []);
     },
   });
+  const { data: utilisateurs = [] } = useQuery<Array<{ id: string; prenom: string; nom: string; fonction: string }>>({
+    queryKey: ["societe-utilisateurs-taux"],
+    queryFn: async () => {
+      const r = await api.get<{ results?: Array<{ id: string; prenom: string; nom: string; fonction: string }> } | Array<{ id: string; prenom: string; nom: string; fonction: string }>>("/api/auth/utilisateurs/");
+      return Array.isArray(r) ? r : (r.results ?? []);
+    },
+  });
+  const { data: affectationsUtilisateurs = [] } = useQuery<ProfilHoraireUtilisateur[]>({
+    queryKey: ["profils-horaires-utilisateurs"],
+    queryFn: async () => {
+      const r = await api.get<{ results?: ProfilHoraireUtilisateur[] } | ProfilHoraireUtilisateur[]>("/api/societe/profils-horaires-utilisateurs/");
+      return Array.isArray(r) ? r : (r.results ?? []);
+    },
+  });
 
   const sauvegarder = useMutation({
     mutationFn: (data: FormProfil) =>
@@ -55,6 +69,13 @@ export default function PageTauxHoraires() {
   const supprimer = useMutation({
     mutationFn: (id: string) => api.supprimer(`/api/societe/profils-horaires/${id}/`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profils-horaires"] }),
+  });
+  const sauvegarderAffectation = useMutation({
+    mutationFn: ({ id, utilisateur, profil_horaire }: { id?: string; utilisateur: string; profil_horaire: string }) =>
+      id
+        ? api.put(`/api/societe/profils-horaires-utilisateurs/${id}/`, { utilisateur, profil_horaire })
+        : api.post("/api/societe/profils-horaires-utilisateurs/", { utilisateur, profil_horaire }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profils-horaires-utilisateurs"] }),
   });
 
   const ouvrirEdition = (p: ProfilHoraire) => {
@@ -188,6 +209,55 @@ export default function PageTauxHoraires() {
           </button>
         </div>
       )}
+
+      <div className="space-y-3">
+        <div>
+          <h3 style={{ color: "var(--texte)" }}>Profils horaires par salarié</h3>
+          <p className="text-sm mt-1" style={{ color: "var(--texte-3)" }}>
+            Ce profil sera repris automatiquement dans les suggestions et brouillons de temps passés.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {utilisateurs.map((utilisateur) => {
+            const nomComplet = [utilisateur.prenom, utilisateur.nom].filter(Boolean).join(" ");
+            const affectation = affectationsUtilisateurs.find((item) => item.utilisateur === utilisateur.id);
+            return (
+              <div
+                key={utilisateur.id}
+                className="grid grid-cols-1 gap-3 rounded-xl p-4 md:grid-cols-[1.5fr_1fr]"
+                style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+              >
+                <div>
+                  <p className="font-medium" style={{ color: "var(--texte)" }}>{nomComplet}</p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>
+                    {utilisateur.fonction || "Fonction non renseignée"}
+                  </p>
+                </div>
+                <select
+                  className="w-full rounded-lg px-3 py-2 text-sm"
+                  value={affectation?.profil_horaire ?? ""}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    sauvegarderAffectation.mutate({
+                      id: affectation?.id,
+                      utilisateur: utilisateur.id,
+                      profil_horaire: e.target.value,
+                    });
+                  }}
+                  style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)", color: "var(--texte)" }}
+                >
+                  <option value="">Aucun profil par défaut</option>
+                  {profils.map((profil) => (
+                    <option key={profil.id} value={profil.id}>
+                      {profil.libelle} · {formaterTaux(profil.taux_horaire_ht)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

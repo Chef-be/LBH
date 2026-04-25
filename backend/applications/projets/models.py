@@ -235,6 +235,60 @@ class Intervenant(models.Model):
         return f"{self.utilisateur.nom_complet} ({self.get_role_display()}) — {self.projet.reference}"
 
 
+class AffectationProjet(models.Model):
+    """Affectation ciblée d'un salarié sur une mission, un livrable ou le projet complet."""
+
+    NATURES = [
+        ("projet", "Projet complet"),
+        ("mission", "Mission"),
+        ("livrable", "Livrable"),
+    ]
+
+    ROLES = [
+        ("pilotage", "Pilotage"),
+        ("contribution", "Contribution"),
+        ("redaction", "Rédaction"),
+        ("etude_prix", "Étude de prix"),
+        ("verification", "Vérification"),
+        ("planning", "Planning"),
+        ("opc", "OPC"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    projet = models.ForeignKey(Projet, on_delete=models.CASCADE, related_name="affectations")
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.PROTECT, related_name="affectations_projet")
+    nature = models.CharField(max_length=20, choices=NATURES, default="mission")
+    code_cible = models.CharField(max_length=120, blank=True, default="", verbose_name="Code mission/livrable")
+    libelle_cible = models.CharField(max_length=255, blank=True, default="", verbose_name="Libellé ciblé")
+    role = models.CharField(max_length=30, choices=ROLES, default="contribution")
+    commentaires = models.TextField(blank=True, default="")
+    cree_par = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affectations_projet_creees",
+    )
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "projets_affectation"
+        verbose_name = "Affectation projet"
+        verbose_name_plural = "Affectations projet"
+        ordering = ["nature", "libelle_cible", "date_creation"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["projet", "utilisateur", "nature", "code_cible"],
+                name="projets_affectation_unique_cible",
+            )
+        ]
+
+    def __str__(self):
+        cible = self.libelle_cible or self.code_cible or self.get_nature_display()
+        return f"{self.utilisateur.nom_complet} — {cible}"
+
+
 class MissionClient(models.Model):
     """Mission prédéfinie par type de client — configurable en administration."""
 

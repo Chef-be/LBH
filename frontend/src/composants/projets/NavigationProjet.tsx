@@ -21,9 +21,11 @@ interface OngletProjet {
 interface NavigationProjetProps {
   idProjet: string;
   contexte?: {
+    afficherEconomie?: boolean;
     afficherMetres?: boolean;
     afficherPiecesEcrites?: boolean;
     afficherAppelsOffres?: boolean;
+    afficherPlanning?: boolean;
     afficherExecution?: boolean;
     afficherRentabilite?: boolean;
     afficherVoirie?: boolean;
@@ -38,9 +40,11 @@ export function NavigationProjet({ idProjet, contexte = {} }: NavigationProjetPr
   const pathname = usePathname();
 
   const {
+    afficherEconomie = true,
     afficherMetres = true,
     afficherPiecesEcrites = true,
     afficherAppelsOffres = true,
+    afficherPlanning = true,
     afficherExecution = true,
     afficherRentabilite = false,
     afficherVoirie = false,
@@ -57,12 +61,12 @@ export function NavigationProjet({ idProjet, contexte = {} }: NavigationProjetPr
       icone: LayoutDashboard,
       href: `/projets/${idProjet}`,
     },
-    {
+    ...(afficherEconomie ? [{
       id: "economie",
       libelle: "Économie",
       icone: BarChart2,
       href: `/projets/${idProjet}/economie`,
-    },
+    }] : []),
     ...(afficherRentabilite ? [{
       id: "rentabilite",
       libelle: "Rentabilité",
@@ -83,12 +87,12 @@ export function NavigationProjet({ idProjet, contexte = {} }: NavigationProjetPr
       href: `/projets/${idProjet}/pieces-ecrites`,
       badge: nbPiecesEcrites,
     }] : []),
-    {
+    ...(afficherPlanning ? [{
       id: "planning",
       libelle: "Planning",
       icone: CalendarRange,
       href: `/projets/${idProjet}/planning`,
-    },
+    }] : []),
     {
       id: "documents",
       libelle: "Documents",

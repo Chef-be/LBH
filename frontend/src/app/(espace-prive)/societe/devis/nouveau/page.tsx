@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/crochets/useApi";
-import { ProfilHoraire } from "@/types/societe";
-import { Plus, Trash2, ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw, Save, Sparkles, Trash2 } from "lucide-react";
+
+import { api, ErreurApi } from "@/crochets/useApi";
+import type {
+  AssistantDevisResponse,
+  MissionSelectionneeDevis,
+  ParcoursProjetSociete,
+  ProfilHoraire,
+} from "@/types/societe";
 
 interface LigneForm {
   ordre: number;
@@ -36,29 +42,49 @@ interface DevisForm {
   delai_paiement_jours: string;
   conditions_particulieres: string;
   projet: string;
+  famille_client: string;
+  sous_type_client: string;
+  contexte_contractuel: string;
+  nature_ouvrage: "batiment" | "infrastructure" | "mixte";
+  nature_marche: "public" | "prive" | "mixte";
+  role_lbh: string;
 }
 
 const LIGNE_VIDE: LigneForm = {
-  ordre: 0, type_ligne: "horaire", phase_code: "", intitule: "",
-  description: "", profil: "", nb_heures: "8", taux_horaire: "0",
-  montant_unitaire_ht: "0", quantite: "1", unite: "forfait",
+  ordre: 0,
+  type_ligne: "forfait",
+  phase_code: "",
+  intitule: "",
+  description: "",
+  profil: "",
+  nb_heures: "8",
+  taux_horaire: "0",
+  montant_unitaire_ht: "0",
+  quantite: "1",
+  unite: "forfait",
 };
 
-function today(): string {
+function dateDuJour(): string {
   return new Date().toISOString().split("T")[0];
 }
 
-function plusTrenteJours(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 30);
-  return d.toISOString().split("T")[0];
+function dateDansTrenteJours(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + 30);
+  return date.toISOString().split("T")[0];
 }
 
-function calculerMontantLigne(l: LigneForm): number {
-  if (l.type_ligne === "horaire") {
-    return (parseFloat(l.nb_heures) || 0) * (parseFloat(l.taux_horaire) || 0);
+function calculerMontantLigne(ligne: LigneForm): number {
+  if (ligne.type_ligne === "horaire") {
+    return (parseFloat(ligne.nb_heures) || 0) * (parseFloat(ligne.taux_horaire) || 0);
   }
-  return (parseFloat(l.quantite) || 0) * (parseFloat(l.montant_unitaire_ht) || 0);
+  return (parseFloat(ligne.quantite) || 0) * (parseFloat(ligne.montant_unitaire_ht) || 0);
+}
+
+function libelleNatureOuvrage(valeur: string): string {
+  if (valeur === "infrastructure") return "Infrastructure / VRD";
+  if (valeur === "mixte") return "Mixte";
+  return "Bâtiment";
 }
 
 export default function PageNouveauDevis() {
@@ -67,66 +93,305 @@ export default function PageNouveauDevis() {
   const projetId = searchParams.get("projet");
 
   const [form, setForm] = useState<DevisForm>({
-    intitule: "", client_nom: "", client_contact: "", client_email: "",
-    client_telephone: "", client_adresse: "", objet: "",
-    date_emission: today(), date_validite: plusTrenteJours(),
-    taux_tva: "0.20", acompte_pct: "30", delai_paiement_jours: "30",
-    conditions_particulieres: "", projet: projetId ?? "",
+    intitule: "",
+    client_nom: "",
+    client_contact: "",
+    client_email: "",
+    client_telephone: "",
+    client_adresse: "",
+    objet: "",
+    date_emission: dateDuJour(),
+    date_validite: dateDansTrenteJours(),
+    taux_tva: "0.20",
+    acompte_pct: "30",
+    delai_paiement_jours: "30",
+    conditions_particulieres: "",
+    projet: projetId ?? "",
+    famille_client: "",
+    sous_type_client: "",
+    contexte_contractuel: "",
+    nature_ouvrage: "batiment",
+    nature_marche: "public",
+    role_lbh: "",
   });
+  const [missionsSelectionnees, setMissionsSelectionnees] = useState<MissionSelectionneeDevis[]>([]);
   const [lignes, setLignes] = useState<LigneForm[]>([{ ...LIGNE_VIDE }]);
-  const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  const [enCours, setEnCours] = useState(false);
+  const [assistantInitialise, setAssistantInitialise] = useState(false);
+
+  const requeteParcours = useMemo(() => {
+    const params = new URLSearchParams();
+    if (form.famille_client) params.set("famille_client", form.famille_client);
+    if (form.sous_type_client) params.set("sous_type_client", form.sous_type_client);
+    if (form.contexte_contractuel) params.set("contexte_contractuel", form.contexte_contractuel);
+    params.set("nature_ouvrage", form.nature_ouvrage);
+    params.set("nature_marche", form.nature_marche);
+    return params.toString();
+  }, [
+    form.contexte_contractuel,
+    form.famille_client,
+    form.nature_marche,
+    form.nature_ouvrage,
+    form.sous_type_client,
+  ]);
+
+  const { data: parcours } = useQuery<ParcoursProjetSociete>({
+    queryKey: ["societe-devis-parcours", requeteParcours],
+    queryFn: () => api.get<ParcoursProjetSociete>(`/api/projets/parcours/?${requeteParcours}`),
+  });
+
+  const assistantQuery = useQuery<AssistantDevisResponse>({
+    queryKey: [
+      "societe-devis-assistant",
+      form.famille_client,
+      form.sous_type_client,
+      form.contexte_contractuel,
+      form.nature_ouvrage,
+      form.nature_marche,
+      form.role_lbh,
+    ],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (form.famille_client) params.set("famille_client", form.famille_client);
+      if (form.sous_type_client) params.set("sous_type_client", form.sous_type_client);
+      if (form.contexte_contractuel) params.set("contexte_contractuel", form.contexte_contractuel);
+      params.set("nature_ouvrage", form.nature_ouvrage);
+      params.set("nature_marche", form.nature_marche);
+      if (form.role_lbh) params.set("role_lbh", form.role_lbh);
+      return api.get<AssistantDevisResponse>(`/api/societe/devis/assistant/?${params.toString()}`);
+    },
+    enabled: Boolean(form.famille_client && form.contexte_contractuel),
+    staleTime: 60_000,
+  });
 
   const { data: profils = [] } = useQuery<ProfilHoraire[]>({
     queryKey: ["profils-horaires-actifs"],
     queryFn: async () => {
-      const r = await api.get<{ results?: ProfilHoraire[] } | ProfilHoraire[]>("/api/societe/profils-horaires/?actif=true");
-      return Array.isArray(r) ? r : (r.results ?? []);
+      const reponse = await api.get<{ results?: ProfilHoraire[] } | ProfilHoraire[]>(
+        "/api/societe/profils-horaires/?actif=true",
+      );
+      return Array.isArray(reponse) ? reponse : (reponse.results ?? []);
     },
   });
 
-  // Pré-remplir le taux depuis le profil sélectionné
-  const mettreAJourLigne = (idx: number, champ: keyof LigneForm, val: string) => {
-    setLignes((prev) => {
-      const nouvelles = [...prev];
-      nouvelles[idx] = { ...nouvelles[idx], [champ]: val };
+  useEffect(() => {
+    setMissionsSelectionnees([]);
+    setAssistantInitialise(false);
+  }, [
+    form.famille_client,
+    form.sous_type_client,
+    form.contexte_contractuel,
+    form.nature_ouvrage,
+    form.nature_marche,
+    form.role_lbh,
+  ]);
+
+  useEffect(() => {
+    if (!assistantQuery.data || assistantInitialise) return;
+    const missionsParDefaut = assistantQuery.data.missions
+      .filter((mission) => mission.est_obligatoire)
+      .map((mission) => ({
+        missionCode: mission.code,
+        missionLabel: mission.libelle,
+        livrablesCodes: mission.livrables.map((livrable) => livrable.code),
+        livrablesLabels: mission.livrables.map((livrable) => livrable.libelle),
+      }));
+    setMissionsSelectionnees(missionsParDefaut);
+    setAssistantInitialise(true);
+  }, [assistantInitialise, assistantQuery.data]);
+
+  useEffect(() => {
+    if (!parcours) return;
+
+    const sousTypes = new Set(parcours.referentiels.sous_types_client.map((item) => item.id));
+    if (form.sous_type_client && !sousTypes.has(form.sous_type_client)) {
+      setForm((courant) => ({ ...courant, sous_type_client: "" }));
+    }
+
+    const contextes = new Set(parcours.referentiels.contextes_contractuels.map((item) => item.id));
+    if (form.contexte_contractuel && !contextes.has(form.contexte_contractuel)) {
+      setForm((courant) => ({ ...courant, contexte_contractuel: "" }));
+    }
+  }, [form.contexte_contractuel, form.sous_type_client, parcours]);
+
+  const totalHT = lignes.reduce((somme, ligne) => somme + calculerMontantLigne(ligne), 0);
+  const totalTVA = totalHT * (parseFloat(form.taux_tva) || 0);
+  const totalTTC = totalHT + totalTVA;
+
+  const mettreAJourFormulaire = <K extends keyof DevisForm>(champ: K, valeur: DevisForm[K]) => {
+    setForm((courant) => ({ ...courant, [champ]: valeur }));
+  };
+
+  const mettreAJourLigne = (index: number, champ: keyof LigneForm, valeur: string) => {
+    setLignes((courantes) => {
+      const suivantes = [...courantes];
+      suivantes[index] = { ...suivantes[index], [champ]: valeur };
       if (champ === "profil") {
-        const profil = profils.find((p) => p.id === val);
-        if (profil) nouvelles[idx].taux_horaire = profil.taux_horaire_ht;
+        const profil = profils.find((item) => item.id === valeur);
+        if (profil) {
+          suivantes[index].taux_horaire = profil.taux_horaire_ht;
+        }
       }
-      return nouvelles;
+      return suivantes;
     });
   };
 
-  const ajouterLigne = () => setLignes((prev) => [...prev, { ...LIGNE_VIDE, ordre: prev.length }]);
-  const supprimerLigne = (idx: number) => setLignes((prev) => prev.filter((_, i) => i !== idx));
+  const ajouterLigne = () => {
+    setLignes((courantes) => [...courantes, { ...LIGNE_VIDE, ordre: courantes.length }]);
+  };
 
-  const totalHT = lignes.reduce((s, l) => s + calculerMontantLigne(l), 0);
-  const tva = totalHT * parseFloat(form.taux_tva);
-  const totalTTC = totalHT + tva;
+  const supprimerLigne = (index: number) => {
+    setLignes((courantes) => courantes.filter((_, idx) => idx !== index));
+  };
+
+  const missionSelectionnee = (code: string) =>
+    missionsSelectionnees.find((mission) => mission.missionCode === code);
+
+  const basculerMission = (code: string, libelle: string, livrablesParDefaut: { code: string; libelle: string }[]) => {
+    setMissionsSelectionnees((courantes) => {
+      const existante = courantes.find((mission) => mission.missionCode === code);
+      if (existante) {
+        return courantes.filter((mission) => mission.missionCode !== code);
+      }
+      return [
+        ...courantes,
+        {
+          missionCode: code,
+          missionLabel: libelle,
+          livrablesCodes: livrablesParDefaut.map((item) => item.code),
+          livrablesLabels: livrablesParDefaut.map((item) => item.libelle),
+        },
+      ];
+    });
+  };
+
+  const basculerLivrable = (missionCode: string, livrableCode: string, livrableLabel: string) => {
+    setMissionsSelectionnees((courantes) =>
+      courantes.map((mission) => {
+        if (mission.missionCode !== missionCode) return mission;
+        const dejaActif = mission.livrablesCodes.includes(livrableCode);
+        return {
+          ...mission,
+          livrablesCodes: dejaActif
+            ? mission.livrablesCodes.filter((code) => code !== livrableCode)
+            : [...mission.livrablesCodes, livrableCode],
+          livrablesLabels: dejaActif
+            ? (mission.livrablesLabels ?? []).filter((label) => label !== livrableLabel)
+            : [...(mission.livrablesLabels ?? []), livrableLabel],
+        };
+      }),
+    );
+  };
+
+  const appliquerPrestationsSelectionnees = () => {
+    const assistant = assistantQuery.data;
+    if (!assistant) return;
+
+    const selection = missionsSelectionnees
+      .map((mission) => {
+        const source = assistant.missions.find((item) => item.code === mission.missionCode);
+        if (!source) return null;
+        const livrables = source.livrables.filter((item) => mission.livrablesCodes.includes(item.code));
+        return {
+          missionCode: source.code,
+          missionLabel: source.libelle,
+          livrablesCodes: livrables.map((item) => item.code),
+          livrablesLabels: livrables.map((item) => item.libelle),
+        };
+      })
+      .filter(Boolean) as MissionSelectionneeDevis[];
+
+    const lignesImportees = selection.map((mission, index) => {
+      const suggestion = assistant.suggestions_prestations.find((item) => item.mission_code === mission.missionCode);
+      return {
+        ordre: index,
+        type_ligne: suggestion?.type_ligne === "horaire" ? "horaire" : "forfait",
+        phase_code: suggestion?.phase_code ?? "",
+        intitule: suggestion?.intitule ?? mission.missionLabel ?? mission.missionCode,
+        description: suggestion?.description ?? "",
+        profil: "",
+        nb_heures: "8",
+        taux_horaire: "0",
+        montant_unitaire_ht: "0",
+        quantite: suggestion?.quantite ?? "1",
+        unite: suggestion?.unite ?? "forfait",
+      } satisfies LigneForm;
+    });
+
+    setMissionsSelectionnees(selection);
+    setLignes(lignesImportees.length > 0 ? lignesImportees : [{ ...LIGNE_VIDE }]);
+    if (!form.intitule.trim()) {
+      mettreAJourFormulaire(
+        "intitule",
+        selection.length === 1 ? selection[0].missionLabel || "" : "Mission d'honoraires",
+      );
+    }
+  };
 
   const soumettre = async () => {
-    if (!form.intitule || !form.client_nom) {
+    if (!form.intitule.trim() || !form.client_nom.trim()) {
       setErreur("L'intitulé et le nom du client sont obligatoires.");
       return;
     }
+    if (!form.famille_client || !form.contexte_contractuel) {
+      setErreur("Le cadrage client et contractuel doit être renseigné.");
+      return;
+    }
+    if (missionsSelectionnees.length === 0) {
+      setErreur("Sélectionnez au moins une mission vendue.");
+      return;
+    }
+
     setEnCours(true);
     setErreur(null);
+
     try {
+      const assistant = assistantQuery.data;
+      const contexteProjetSaisi = assistant?.contexte_projet_saisi
+        ? {
+            ...assistant.contexte_projet_saisi,
+            famille_client: form.famille_client,
+            sous_type_client: form.sous_type_client,
+            contexte_contractuel: form.contexte_contractuel,
+            nature_ouvrage: form.nature_ouvrage,
+            nature_marche: form.nature_marche,
+            role_lbh: form.role_lbh,
+            mission_principale: missionsSelectionnees[0]?.missionCode || assistant.contexte_projet_saisi.mission_principale || "",
+            missions_associees: missionsSelectionnees.map((mission) => mission.missionCode),
+            livrables_selectionnes: missionsSelectionnees.flatMap((mission) => mission.livrablesCodes),
+          }
+        : {
+            famille_client: form.famille_client,
+            sous_type_client: form.sous_type_client,
+            contexte_contractuel: form.contexte_contractuel,
+            mission_principale: missionsSelectionnees[0]?.missionCode || "",
+            missions_associees: missionsSelectionnees.map((mission) => mission.missionCode),
+            livrables_selectionnes: missionsSelectionnees.flatMap((mission) => mission.livrablesCodes),
+            phase_intervention: "",
+            nature_ouvrage: form.nature_ouvrage,
+            nature_marche: form.nature_marche,
+            role_lbh: form.role_lbh,
+            methode_estimation: "",
+            donnees_entree: {},
+          };
+
       const devis = await api.post<{ id: string }>("/api/societe/devis/", {
         ...form,
         projet: form.projet || null,
         taux_tva: parseFloat(form.taux_tva),
         acompte_pct: parseFloat(form.acompte_pct),
-        delai_paiement_jours: parseInt(form.delai_paiement_jours),
+        delai_paiement_jours: parseInt(form.delai_paiement_jours, 10),
+        missions_selectionnees: missionsSelectionnees,
+        contexte_projet_saisie: contexteProjetSaisi,
       });
-      // Ajouter les lignes
-      for (const [i, ligne] of lignes.entries()) {
-        const corps = {
-          ordre: i,
+
+      for (const [index, ligne] of lignes.entries()) {
+        await api.post(`/api/societe/devis/${devis.id}/lignes/`, {
+          ordre: index,
           type_ligne: ligne.type_ligne,
           phase_code: ligne.phase_code,
-          intitule: ligne.intitule || `Ligne ${i + 1}`,
+          intitule: ligne.intitule || `Ligne ${index + 1}`,
           description: ligne.description,
           profil: ligne.profil || null,
           nb_heures: ligne.type_ligne === "horaire" ? parseFloat(ligne.nb_heures) : null,
@@ -134,31 +399,34 @@ export default function PageNouveauDevis() {
           montant_unitaire_ht: ligne.type_ligne !== "horaire" ? parseFloat(ligne.montant_unitaire_ht) : null,
           quantite: parseFloat(ligne.quantite),
           unite: ligne.unite,
-        };
-        await api.post(`/api/societe/devis/${devis.id}/lignes/`, corps);
+        });
       }
+
       router.push(`/societe/devis/${devis.id}`);
-    } catch {
-      setErreur("Erreur lors de la création du devis. Vérifiez les champs et réessayez.");
+    } catch (error) {
+      setErreur(
+        error instanceof ErreurApi
+          ? error.detail
+          : "Erreur lors de la création du devis.",
+      );
     } finally {
       setEnCours(false);
     }
   };
 
-  const champStyle = {
+  const stylesChamp = {
     background: "var(--fond-entree)",
     border: "1px solid var(--bordure)",
     color: "var(--texte)",
   };
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      {/* En-tête */}
+    <div className="max-w-5xl space-y-8">
       <div className="flex items-center gap-4">
         <button
           type="button"
           onClick={() => router.back()}
-          className="p-2 rounded-lg transition hover:opacity-70"
+          className="rounded-lg p-2 transition hover:opacity-70"
           style={{ background: "var(--fond-entree)", color: "var(--texte-2)" }}
         >
           <ArrowLeft size={16} />
@@ -166,57 +434,314 @@ export default function PageNouveauDevis() {
         <div>
           <h2 style={{ color: "var(--texte)" }}>Nouveau devis d&apos;honoraires</h2>
           <p className="text-sm" style={{ color: "var(--texte-3)" }}>
-            Remplissez les informations du devis et les lignes de prestations
+            Prépare le devis à partir du type de client, du type d&apos;ouvrage et des missions vendues.
           </p>
         </div>
       </div>
 
-      {erreur && (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: "color-mix(in srgb, #ef4444 10%, var(--fond-carte))", color: "#ef4444", border: "1px solid color-mix(in srgb, #ef4444 20%, var(--fond-carte))" }}>
+      {erreur ? (
+        <div
+          className="rounded-xl px-4 py-3 text-sm"
+          style={{
+            background: "color-mix(in srgb, #ef4444 10%, var(--fond-carte))",
+            border: "1px solid color-mix(in srgb, #ef4444 20%, var(--fond-carte))",
+            color: "#ef4444",
+          }}
+        >
           {erreur}
         </div>
-      )}
+      ) : null}
 
-      {/* Informations générales */}
+      <section
+        className="rounded-xl p-6 space-y-5"
+        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+      >
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} style={{ color: "var(--c-base)" }} />
+          <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Qualification commerciale</h3>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Type de client
+            </label>
+            <select
+              value={form.famille_client}
+              onChange={(e) => {
+                mettreAJourFormulaire("famille_client", e.target.value);
+                mettreAJourFormulaire("sous_type_client", "");
+                mettreAJourFormulaire("contexte_contractuel", "");
+              }}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.familles_client.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Sous-type de client
+            </label>
+            <select
+              value={form.sous_type_client}
+              onChange={(e) => mettreAJourFormulaire("sous_type_client", e.target.value)}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.sous_types_client.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Contexte contractuel
+            </label>
+            <select
+              value={form.contexte_contractuel}
+              onChange={(e) => mettreAJourFormulaire("contexte_contractuel", e.target.value)}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="">Sélectionner</option>
+              {parcours?.referentiels.contextes_contractuels.map((option) => (
+                <option key={option.id} value={option.id}>{option.libelle}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Nature de l&apos;ouvrage
+            </label>
+            <select
+              value={form.nature_ouvrage}
+              onChange={(e) => mettreAJourFormulaire("nature_ouvrage", e.target.value as DevisForm["nature_ouvrage"])}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="batiment">Bâtiment</option>
+              <option value="infrastructure">Infrastructure / VRD</option>
+              <option value="mixte">Mixte</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Nature du marché
+            </label>
+            <select
+              value={form.nature_marche}
+              onChange={(e) => mettreAJourFormulaire("nature_marche", e.target.value as DevisForm["nature_marche"])}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            >
+              <option value="public">Marché public</option>
+              <option value="prive">Marché privé</option>
+              <option value="mixte">Mixte</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Rôle LBH
+            </label>
+            <input
+              type="text"
+              value={form.role_lbh}
+              onChange={(e) => mettreAJourFormulaire("role_lbh", e.target.value)}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+              placeholder="Économiste principal, associé, sous-traitant…"
+            />
+          </div>
+        </div>
+
+        {assistantQuery.isFetching ? (
+          <div className="text-xs" style={{ color: "var(--texte-3)" }}>
+            Mise à jour des prestations suggérées…
+          </div>
+        ) : null}
+      </section>
+
+      <section
+        className="rounded-xl p-6 space-y-4"
+        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Missions et livrables vendus</h3>
+            <p className="text-sm" style={{ color: "var(--texte-3)" }}>
+              Sélectionne les missions à intégrer dans le devis avant d&apos;alimenter les lignes.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => assistantQuery.refetch()}
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium"
+            style={{ background: "var(--fond-entree)", color: "var(--texte-2)", border: "1px solid var(--bordure)" }}
+          >
+            <RefreshCw size={12} />
+            Actualiser
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {(assistantQuery.data?.missions ?? []).map((mission) => {
+            const selection = missionSelectionnee(mission.code);
+            const active = Boolean(selection);
+            return (
+              <div
+                key={mission.code}
+                className="rounded-xl p-4"
+                style={{
+                  background: active ? "var(--c-leger)" : "var(--fond-entree)",
+                  border: `1px solid ${active ? "var(--c-clair)" : "var(--bordure)"}`,
+                }}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium" style={{ color: "var(--texte)" }}>{mission.libelle}</p>
+                      {mission.est_obligatoire ? (
+                        <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "color-mix(in srgb, #f59e0b 18%, var(--fond-carte))", color: "#b45309" }}>
+                          Recommandée
+                        </span>
+                      ) : null}
+                    </div>
+                    {mission.description ? (
+                      <p className="mt-1 text-sm" style={{ color: "var(--texte-3)" }}>{mission.description}</p>
+                    ) : null}
+                    <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>
+                      {libelleNatureOuvrage(mission.nature_ouvrage)}{mission.phases_concernees.length ? ` · ${mission.phases_concernees.join(", ").toUpperCase()}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => basculerMission(
+                      mission.code,
+                      mission.libelle,
+                      mission.livrables.map((livrable) => ({ code: livrable.code, libelle: livrable.libelle })),
+                    )}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold"
+                    style={{
+                      background: active ? "var(--c-base)" : "var(--fond-carte)",
+                      color: active ? "#fff" : "var(--texte-2)",
+                      border: `1px solid ${active ? "var(--c-base)" : "var(--bordure)"}`,
+                    }}
+                  >
+                    {active ? "Retirée" : "Ajouter"}
+                  </button>
+                </div>
+
+                {mission.livrables.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {mission.livrables.map((livrable) => {
+                      const selected = selection?.livrablesCodes.includes(livrable.code) ?? false;
+                      return (
+                        <button
+                          key={livrable.code}
+                          type="button"
+                          onClick={() => {
+                            if (!active) {
+                              basculerMission(
+                                mission.code,
+                                mission.libelle,
+                                mission.livrables.map((item) => ({ code: item.code, libelle: item.libelle })),
+                              );
+                              return;
+                            }
+                            basculerLivrable(mission.code, livrable.code, livrable.libelle);
+                          }}
+                          className="rounded-lg px-3 py-1.5 text-xs font-medium"
+                          style={{
+                            background: selected ? "var(--c-base)" : "var(--fond-carte)",
+                            color: selected ? "#fff" : "var(--texte-2)",
+                            border: `1px solid ${selected ? "var(--c-base)" : "var(--bordure)"}`,
+                          }}
+                        >
+                          {livrable.libelle}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-4 rounded-xl px-4 py-3" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+          <div className="text-sm" style={{ color: "var(--texte-2)" }}>
+            {missionsSelectionnees.length} mission{missionsSelectionnees.length > 1 ? "s" : ""} sélectionnée{missionsSelectionnees.length > 1 ? "s" : ""}
+          </div>
+          <button
+            type="button"
+            onClick={appliquerPrestationsSelectionnees}
+            disabled={missionsSelectionnees.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            style={{ background: "var(--c-base)" }}
+          >
+            <Sparkles size={14} />
+            Alimenter le devis
+          </button>
+        </div>
+      </section>
+
       <section className="rounded-xl p-6 space-y-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
         <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Informations générales</h3>
         <div className="grid grid-cols-1 gap-4">
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Intitulé de la mission *</label>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Intitulé de la mission
+            </label>
             <input
               type="text"
               value={form.intitule}
-              onChange={(e) => setForm({ ...form, intitule: e.target.value })}
-              placeholder="Ex : Mission économiste — Construction école primaire"
+              onChange={(e) => mettreAJourFormulaire("intitule", e.target.value)}
               className="w-full rounded-lg px-3 py-2.5 text-sm"
-              style={champStyle}
+              style={stylesChamp}
             />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Objet / contexte</label>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Objet / contexte
+            </label>
             <textarea
               value={form.objet}
-              onChange={(e) => setForm({ ...form, objet: e.target.value })}
+              onChange={(e) => mettreAJourFormulaire("objet", e.target.value)}
               rows={2}
-              placeholder="Contexte de la mission, présentation succincte…"
-              className="w-full rounded-lg px-3 py-2.5 text-sm resize-none"
-              style={champStyle}
+              className="w-full resize-none rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Date d&apos;émission</label>
-            <input type="date" value={form.date_emission} onChange={(e) => setForm({ ...form, date_emission: e.target.value })} className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Date d&apos;émission
+            </label>
+            <input type="date" value={form.date_emission} onChange={(e) => mettreAJourFormulaire("date_emission", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Valable jusqu&apos;au</label>
-            <input type="date" value={form.date_validite} onChange={(e) => setForm({ ...form, date_validite: e.target.value })} className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Valable jusqu&apos;au
+            </label>
+            <input type="date" value={form.date_validite} onChange={(e) => mettreAJourFormulaire("date_validite", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>TVA</label>
-            <select value={form.taux_tva} onChange={(e) => setForm({ ...form, taux_tva: e.target.value })} className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle}>
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              TVA
+            </label>
+            <select value={form.taux_tva} onChange={(e) => mettreAJourFormulaire("taux_tva", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp}>
               <option value="0.20">20 %</option>
               <option value="0.10">10 %</option>
               <option value="0.055">5,5 %</option>
@@ -224,226 +749,149 @@ export default function PageNouveauDevis() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Acompte (%)</label>
-            <input type="number" value={form.acompte_pct} onChange={(e) => setForm({ ...form, acompte_pct: e.target.value })} min="0" max="100" className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>
+              Acompte (%)
+            </label>
+            <input type="number" value={form.acompte_pct} onChange={(e) => mettreAJourFormulaire("acompte_pct", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
         </div>
       </section>
 
-      {/* Client */}
       <section className="rounded-xl p-6 space-y-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
         <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Client destinataire</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Nom du client *</label>
-            <input type="text" value={form.client_nom} onChange={(e) => setForm({ ...form, client_nom: e.target.value })} placeholder="Mairie de…, SCI…" className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Nom du client</label>
+            <input type="text" value={form.client_nom} onChange={(e) => mettreAJourFormulaire("client_nom", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Interlocuteur</label>
-            <input type="text" value={form.client_contact} onChange={(e) => setForm({ ...form, client_contact: e.target.value })} placeholder="M. Dupont" className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Interlocuteur</label>
+            <input type="text" value={form.client_contact} onChange={(e) => mettreAJourFormulaire("client_contact", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Email</label>
-            <input type="email" value={form.client_email} onChange={(e) => setForm({ ...form, client_email: e.target.value })} className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Email</label>
+            <input type="email" value={form.client_email} onChange={(e) => mettreAJourFormulaire("client_email", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
           <div>
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Téléphone</label>
-            <input type="tel" value={form.client_telephone} onChange={(e) => setForm({ ...form, client_telephone: e.target.value })} className="w-full rounded-lg px-3 py-2.5 text-sm" style={champStyle} />
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Téléphone</label>
+            <input type="tel" value={form.client_telephone} onChange={(e) => mettreAJourFormulaire("client_telephone", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
-          <div className="col-span-2">
-            <label className="text-xs font-medium mb-1 block" style={{ color: "var(--texte-3)" }}>Adresse</label>
-            <textarea value={form.client_adresse} onChange={(e) => setForm({ ...form, client_adresse: e.target.value })} rows={2} className="w-full rounded-lg px-3 py-2.5 text-sm resize-none" style={champStyle} />
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Adresse</label>
+            <textarea value={form.client_adresse} onChange={(e) => mettreAJourFormulaire("client_adresse", e.target.value)} rows={2} className="w-full resize-none rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
           </div>
         </div>
       </section>
 
-      {/* Lignes de prestations */}
       <section className="rounded-xl p-6 space-y-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold" style={{ color: "var(--texte)" }}>Prestations</h3>
           <button
             type="button"
             onClick={ajouterLigne}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium"
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium"
             style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
           >
-            <Plus size={12} /> Ajouter une ligne
+            <Plus size={12} />
+            Ajouter une ligne
           </button>
         </div>
 
         <div className="space-y-3">
-          {lignes.map((ligne, idx) => (
-            <div
-              key={idx}
-              className="rounded-xl p-4 space-y-3"
-              style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}
-            >
+          {lignes.map((ligne, index) => (
+            <div key={`${ligne.intitule}-${index}`} className="space-y-3 rounded-xl p-4" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
               <div className="grid grid-cols-12 gap-3 items-start">
-                {/* Type */}
-                <div className="col-span-2">
-                  <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>Type</label>
-                  <select
-                    value={ligne.type_ligne}
-                    onChange={(e) => mettreAJourLigne(idx, "type_ligne", e.target.value)}
-                    className="w-full rounded-lg px-2 py-2 text-xs"
-                    style={champStyle}
-                  >
+                <div className="col-span-12 md:col-span-2">
+                  <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Type</label>
+                  <select value={ligne.type_ligne} onChange={(e) => mettreAJourLigne(index, "type_ligne", e.target.value)} className="w-full rounded-lg px-2 py-2 text-xs" style={stylesChamp}>
                     <option value="horaire">Horaire</option>
                     <option value="forfait">Forfait</option>
                     <option value="frais">Frais</option>
                   </select>
                 </div>
-
-                {/* Intitulé */}
-                <div className="col-span-5">
-                  <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>Désignation</label>
-                  <input
-                    type="text"
-                    value={ligne.intitule}
-                    onChange={(e) => mettreAJourLigne(idx, "intitule", e.target.value)}
-                    placeholder="Phase ESQ — Esquisse"
-                    className="w-full rounded-lg px-2 py-2 text-sm"
-                    style={champStyle}
-                  />
+                <div className="col-span-12 md:col-span-7">
+                  <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Désignation</label>
+                  <input type="text" value={ligne.intitule} onChange={(e) => mettreAJourLigne(index, "intitule", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
                 </div>
-
-                {/* Profil (si horaire) */}
-                {ligne.type_ligne === "horaire" && (
-                  <>
-                    <div className="col-span-2">
-                      <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>Profil</label>
-                      <select
-                        value={ligne.profil}
-                        onChange={(e) => mettreAJourLigne(idx, "profil", e.target.value)}
-                        className="w-full rounded-lg px-2 py-2 text-xs"
-                        style={champStyle}
-                      >
-                        <option value="">— Profil —</option>
-                        {profils.map((p) => (
-                          <option key={p.id} value={p.id}>{p.libelle}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-span-1">
-                      <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>Heures</label>
-                      <input
-                        type="number"
-                        value={ligne.nb_heures}
-                        onChange={(e) => mettreAJourLigne(idx, "nb_heures", e.target.value)}
-                        min="0"
-                        className="w-full rounded-lg px-2 py-2 text-sm font-mono"
-                        style={champStyle}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>€/h HT</label>
-                      <input
-                        type="number"
-                        value={ligne.taux_horaire}
-                        onChange={(e) => mettreAJourLigne(idx, "taux_horaire", e.target.value)}
-                        min="0"
-                        className="w-full rounded-lg px-2 py-2 text-sm font-mono"
-                        style={champStyle}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Forfait / frais */}
-                {ligne.type_ligne !== "horaire" && (
-                  <>
-                    <div className="col-span-2">
-                      <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>Qté</label>
-                      <input
-                        type="number"
-                        value={ligne.quantite}
-                        onChange={(e) => mettreAJourLigne(idx, "quantite", e.target.value)}
-                        min="0"
-                        className="w-full rounded-lg px-2 py-2 text-sm"
-                        style={champStyle}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="text-xs mb-1 block" style={{ color: "var(--texte-3)" }}>PU HT (€)</label>
-                      <input
-                        type="number"
-                        value={ligne.montant_unitaire_ht}
-                        onChange={(e) => mettreAJourLigne(idx, "montant_unitaire_ht", e.target.value)}
-                        min="0"
-                        className="w-full rounded-lg px-2 py-2 text-sm font-mono"
-                        style={champStyle}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Montant ligne */}
-                <div className="col-span-1 flex flex-col items-end justify-end pb-1">
-                  <p className="text-xs mb-1" style={{ color: "var(--texte-3)" }}>HT</p>
-                  <p className="text-sm font-bold font-mono" style={{ color: "var(--texte)" }}>
-                    {calculerMontantLigne(ligne).toLocaleString("fr-FR", { minimumFractionDigits: 0 })} €
-                  </p>
+                <div className="col-span-10 md:col-span-2">
+                  <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Phase</label>
+                  <input type="text" value={ligne.phase_code} onChange={(e) => mettreAJourLigne(index, "phase_code", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
                 </div>
-
-                {/* Supprimer */}
-                {lignes.length > 1 && (
-                  <div className="col-span-1 flex items-end pb-1">
-                    <button
-                      type="button"
-                      onClick={() => supprimerLigne(idx)}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center"
-                      style={{ background: "color-mix(in srgb, #ef4444 10%, var(--fond-carte))", color: "#ef4444" }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                )}
+                <div className="col-span-2 md:col-span-1 flex items-end justify-end">
+                  <button type="button" onClick={() => supprimerLigne(index)} className="rounded-lg p-2" style={{ color: "#ef4444" }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
+
+              <textarea value={ligne.description} onChange={(e) => mettreAJourLigne(index, "description", e.target.value)} rows={2} className="w-full resize-none rounded-lg px-2 py-2 text-sm" style={stylesChamp} placeholder="Description détaillée de la prestation" />
+
+              {ligne.type_ligne === "horaire" ? (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Profil</label>
+                    <select value={ligne.profil} onChange={(e) => mettreAJourLigne(index, "profil", e.target.value)} className="w-full rounded-lg px-2 py-2 text-xs" style={stylesChamp}>
+                      <option value="">Sélectionner</option>
+                      {profils.map((profil) => (
+                        <option key={profil.id} value={profil.id}>{profil.libelle}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Heures</label>
+                    <input type="number" value={ligne.nb_heures} onChange={(e) => mettreAJourLigne(index, "nb_heures", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Taux horaire HT</label>
+                    <input type="number" value={ligne.taux_horaire} onChange={(e) => mettreAJourLigne(index, "taux_horaire", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Quantité</label>
+                    <input type="number" value={ligne.quantite} onChange={(e) => mettreAJourLigne(index, "quantite", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Unité</label>
+                    <input type="text" value={ligne.unite} onChange={(e) => mettreAJourLigne(index, "unite", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Montant unitaire HT</label>
+                    <input type="number" value={ligne.montant_unitaire_ht} onChange={(e) => mettreAJourLigne(index, "montant_unitaire_ht", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        {/* Totaux */}
-        <div className="flex flex-col items-end gap-1 pt-4" style={{ borderTop: "1px solid var(--bordure)" }}>
-          <div className="flex justify-between gap-8 text-sm w-56">
+        <div className="space-y-2 rounded-xl px-4 py-4" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+          <div className="flex justify-between text-sm">
             <span style={{ color: "var(--texte-3)" }}>Total HT</span>
-            <span className="font-mono font-semibold" style={{ color: "var(--texte)" }}>
-              {totalHT.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
-            </span>
+            <span className="font-mono" style={{ color: "var(--texte)" }}>{totalHT.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</span>
           </div>
-          <div className="flex justify-between gap-8 text-sm w-56">
-            <span style={{ color: "var(--texte-3)" }}>TVA ({(parseFloat(form.taux_tva) * 100).toFixed(0)} %)</span>
-            <span className="font-mono" style={{ color: "var(--texte-2)" }}>
-              {tva.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
-            </span>
+          <div className="flex justify-between text-sm">
+            <span style={{ color: "var(--texte-3)" }}>TVA</span>
+            <span className="font-mono" style={{ color: "var(--texte-2)" }}>{totalTVA.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</span>
           </div>
-          <div className="flex justify-between gap-8 text-base w-56 pt-2" style={{ borderTop: "1px solid var(--bordure)" }}>
-            <span className="font-semibold" style={{ color: "var(--texte)" }}>Total TTC</span>
-            <span className="font-mono font-bold text-lg" style={{ color: "var(--c-base)" }}>
-              {totalTTC.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
-            </span>
+          <div className="flex justify-between border-t pt-2 text-base font-bold" style={{ borderColor: "var(--bordure)" }}>
+            <span style={{ color: "var(--texte)" }}>Total TTC</span>
+            <span className="font-mono" style={{ color: "var(--c-base)" }}>{totalTTC.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</span>
           </div>
         </div>
       </section>
 
-      {/* Actions */}
-      <div className="flex items-center gap-3 pb-6">
+      <div className="flex justify-end">
         <button
           type="button"
           onClick={soumettre}
           disabled={enCours}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
           style={{ background: "var(--c-base)" }}
         >
-          <Save size={15} /> {enCours ? "Enregistrement…" : "Créer le devis"}
-        </button>
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="px-5 py-3 rounded-xl text-sm font-medium border"
-          style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}
-        >
-          Annuler
+          <Save size={14} />
+          {enCours ? "Création…" : "Créer le devis"}
         </button>
       </div>
     </div>

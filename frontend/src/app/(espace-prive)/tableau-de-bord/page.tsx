@@ -50,6 +50,28 @@ interface ReponsePaginee {
   results?: ProjetResume[];
 }
 
+interface AffectationProjetTableauDeBord {
+  id: string;
+  nature: string;
+  nature_libelle: string;
+  code_cible: string;
+  libelle_cible: string;
+  role: string;
+  role_libelle: string;
+  commentaires: string;
+  date_creation: string;
+  date_modification: string;
+  projet: {
+    id: string;
+    reference: string;
+    intitule: string;
+    statut: string;
+    phase_actuelle: string | null;
+    responsable_nom: string;
+    organisation_nom: string;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Constantes affichage
 // ---------------------------------------------------------------------------
@@ -114,6 +136,13 @@ async function chargerProjetsRecents(): Promise<ProjetResume[]> {
   );
   const liste = (donnees as ReponsePaginee).results ?? (donnees as ProjetResume[]);
   return liste.slice(0, 5);
+}
+
+async function chargerMesAffectations(): Promise<AffectationProjetTableauDeBord[]> {
+  const donnees = await api.get<{ affectations: AffectationProjetTableauDeBord[] }>(
+    "/api/projets/mes-affectations/"
+  );
+  return donnees.affectations ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +288,14 @@ export default function PageTableauDeBord() {
       queryKey: ["projets-recents-tableau-bord"],
       queryFn: chargerProjetsRecents,
     });
+  const {
+    data: affectations = [],
+    isLoading: chargementAffectations,
+    isError: erreurAffectations,
+  } = useQuery({
+    queryKey: ["mes-affectations-projets"],
+    queryFn: chargerMesAffectations,
+  });
 
   const prenom = utilisateur?.prenom || utilisateur?.nom_complet || "Bienvenue";
 
@@ -366,7 +403,89 @@ export default function PageTableauDeBord() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* BLOC 4 — Projets récents enrichis                                   */}
+      {/* BLOC 4 — Mes affectations                                            */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="carte">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-slate-800">Mes affectations</h2>
+          <Link href="/projets" className="text-sm text-primaire-600 hover:underline">
+            Voir mes projets →
+          </Link>
+        </div>
+
+        {chargementAffectations ? (
+          <div className="space-y-3 animate-pulse">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-20 bg-slate-100 rounded-lg" />
+            ))}
+          </div>
+        ) : erreurAffectations ? (
+          <p className="text-sm text-slate-400 py-6 text-center">
+            Impossible de charger les affectations.
+          </p>
+        ) : affectations.length === 0 ? (
+          <p className="text-sm text-slate-400 py-6 text-center">
+            Aucune affectation ciblée pour le moment.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            {affectations.slice(0, 6).map((affectation) => (
+              <Link
+                key={affectation.id}
+                href={`/projets/${affectation.projet.id}`}
+                className="rounded-xl border border-slate-200 p-4 hover:border-primaire-300 hover:shadow-sm transition-all"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs text-primaire-700">
+                      {affectation.projet.reference}
+                    </p>
+                    <h3 className="mt-1 font-semibold text-slate-900 truncate">
+                      {affectation.projet.intitule}
+                    </h3>
+                  </div>
+                  <span className={clsx(STYLES_STATUT[affectation.projet.statut] || "badge-neutre")}>
+                    {LIBELLES_STATUT[affectation.projet.statut] || affectation.projet.statut}
+                  </span>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                    {affectation.nature_libelle}
+                  </span>
+                  <span className="inline-flex items-center rounded-full bg-primaire-50 px-2.5 py-1 text-xs font-medium text-primaire-700">
+                    {affectation.role_libelle}
+                  </span>
+                  {affectation.projet.phase_actuelle ? (
+                    <span
+                      className={clsx(
+                        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium",
+                        STYLES_PHASE[affectation.projet.phase_actuelle] ?? "bg-slate-100 text-slate-600"
+                      )}
+                    >
+                      {LIBELLES_PHASE[affectation.projet.phase_actuelle] ??
+                        affectation.projet.phase_actuelle.toUpperCase()}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 space-y-1 text-sm text-slate-600">
+                  <p className="font-medium text-slate-800">{affectation.libelle_cible}</p>
+                  {affectation.commentaires ? (
+                    <p className="line-clamp-2">{affectation.commentaires}</p>
+                  ) : null}
+                  <p className="text-xs text-slate-400">
+                    Responsable dossier : {affectation.projet.responsable_nom || "—"}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* BLOC 5 — Projets récents enrichis                                   */}
       {/* ------------------------------------------------------------------ */}
       <div className="carte">
         <div className="flex items-center justify-between mb-4">
@@ -470,7 +589,7 @@ export default function PageTableauDeBord() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* BLOC 5 — Activité récente                                           */}
+      {/* BLOC 6 — Activité récente                                           */}
       {/* ------------------------------------------------------------------ */}
       <div className="carte">
         <h2 className="text-base font-semibold text-slate-800 mb-4">Activité récente</h2>

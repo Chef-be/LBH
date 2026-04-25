@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
-import { TableauDeBord, DevisHonoraires, Facture } from "@/types/societe";
+import { TableauDeBord, DevisHonoraires, Facture, RentabiliteDossier, RentabiliteSalarie, TempsPasse } from "@/types/societe";
 import { Euro, FileText, Receipt, AlertTriangle, TrendingUp, Clock, Plus, ChevronRight } from "lucide-react";
 
 function formaterMontant(val: string | number | null | undefined): string {
@@ -18,6 +18,13 @@ function formaterMontant(val: string | number | null | undefined): string {
 function formaterDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formaterHeures(val: string | number | null | undefined): string {
+  if (val == null) return "—";
+  const n = typeof val === "string" ? parseFloat(val) : val;
+  if (isNaN(n)) return "—";
+  return n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " h";
 }
 
 const COULEURS_STATUT_DEVIS: Record<string, string> = {
@@ -244,6 +251,126 @@ export default function PageTableauDeBordSociete() {
           )}
         </section>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section
+          className="rounded-xl p-5"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Rentabilité par salarié
+            </h2>
+            <Link href="/societe/temps" className="text-xs underline" style={{ color: "var(--texte-3)" }}>
+              Saisir les temps
+            </Link>
+          </div>
+          {(!tdb?.rentabilite_par_salarie || tdb.rentabilite_par_salarie.length === 0) ? (
+            <p className="text-sm py-6 text-center" style={{ color: "var(--texte-3)" }}>
+              Aucune donnée de temps.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {tdb.rentabilite_par_salarie.map((ligne: RentabiliteSalarie) => (
+                <div key={ligne.utilisateur_id} className="rounded-lg p-3" style={{ background: "var(--fond-entree)" }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{ligne.nom_complet}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>
+                        {formaterHeures(ligne.total_heures)} · coût {formaterMontant(ligne.total_cout)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs" style={{ color: "var(--texte-3)" }}>Marge estimée</p>
+                      <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>
+                        {formaterMontant(ligne.marge_estimee)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section
+          className="rounded-xl p-5"
+          style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Rentabilité par dossier
+            </h2>
+            <Link href="/societe/temps" className="text-xs underline" style={{ color: "var(--texte-3)" }}>
+              Voir les temps
+            </Link>
+          </div>
+          {(!tdb?.rentabilite_par_dossier || tdb.rentabilite_par_dossier.length === 0) ? (
+            <p className="text-sm py-6 text-center" style={{ color: "var(--texte-3)" }}>
+              Aucune donnée dossier.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {tdb.rentabilite_par_dossier.map((ligne: RentabiliteDossier) => (
+                <div key={ligne.projet_id} className="rounded-lg p-3" style={{ background: "var(--fond-entree)" }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{ligne.reference} — {ligne.intitule}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>
+                        {formaterHeures(ligne.total_heures)} · coût {formaterMontant(ligne.total_cout)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs" style={{ color: "var(--texte-3)" }}>Honoraires</p>
+                      <p className="text-sm font-semibold">{formaterMontant(ligne.honoraires_associes)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section
+        className="rounded-xl p-5"
+        style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+            Temps passés récents
+          </h2>
+          <Link href="/societe/temps" className="text-xs underline" style={{ color: "var(--texte-3)" }}>
+            Gérer les temps
+          </Link>
+        </div>
+        {(!tdb?.temps_passes_recents || tdb.temps_passes_recents.length === 0) ? (
+          <p className="text-sm py-6 text-center" style={{ color: "var(--texte-3)" }}>
+            Aucune saisie récente.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {tdb.temps_passes_recents.map((ligne: TempsPasse) => (
+              <li key={ligne.id} className="rounded-lg p-3" style={{ background: "var(--fond-entree)" }}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {ligne.utilisateur_nom} · {ligne.projet_reference}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>
+                      {ligne.libelle_cible || ligne.nature_libelle} · {formaterDate(ligne.date_saisie)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-semibold">{formaterHeures(ligne.nb_heures)}</p>
+                    <p className="text-xs" style={{ color: "var(--texte-3)" }}>{formaterMontant(ligne.cout_total)}</p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

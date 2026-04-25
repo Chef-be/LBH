@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { LayoutDashboard, FileText, Receipt, Clock } from "lucide-react";
+import { LayoutDashboard, FileText, Receipt, Clock, TimerReset } from "lucide-react";
 
 const ONGLETS = [
   { libelle: "Tableau de bord", href: "/societe", icone: LayoutDashboard, exact: true },
   { libelle: "Devis", href: "/societe/devis", icone: FileText },
   { libelle: "Factures", href: "/societe/factures", icone: Receipt },
   { libelle: "Taux horaires", href: "/societe/taux-horaires", icone: Clock },
+  { libelle: "Temps passés", href: "/societe/temps", icone: TimerReset },
 ];
 
 export default function LayoutSociete({ children }: { children: React.ReactNode }) {

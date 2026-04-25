@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 14mm 18mm 14mm;
+      @bottom-right {
+        content: "Page " counter(page) " / " counter(pages);
+        font-size: 9px;
+        color: #64748b;
+      }
+    }
+
+    body {
+      font-family: DejaVu Sans, Arial, sans-serif;
+      color: #0f172a;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .header {
+      display: table;
+      width: 100%;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 12px;
+    }
+
+    .header-left,
+    .header-right {
+      display: table-cell;
+      vertical-align: top;
+    }
+
+    .header-right {
+      text-align: right;
+      width: 42%;
+    }
+
+    .logo {
+      max-height: 70px;
+      max-width: 180px;
+      margin-bottom: 10px;
+    }
+
+    .bureau {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0 0 4px 0;
+    }
+
+    .muted {
+      color: #475569;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 8px 0;
+    }
+
+    h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin: 20px 0 10px 0;
+      color: #0f172a;
+      border-bottom: 1px solid #cbd5e1;
+      padding-bottom: 6px;
+    }
+
+    .grid {
+      display: table;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .grid > div {
+      display: table-cell;
+      width: 50%;
+      vertical-align: top;
+      padding-right: 12px;
+    }
+
+    .box {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #f8fafc;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid #e2e8f0;
+      padding: 8px 6px;
+      vertical-align: top;
+    }
+
+    .table th {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      text-align: left;
+      color: #475569;
+      background: #f8fafc;
+    }
+
+    .text-right {
+      text-align: right;
+    }
+
+    .totaux {
+      width: 280px;
+      margin-left: auto;
+      margin-top: 12px;
+      border-collapse: collapse;
+    }
+
+    .totaux td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .totaux .final td {
+      font-size: 13px;
+      font-weight: 700;
+      border-top: 2px solid #0f172a;
+      border-bottom: none;
+    }
+
+    .livrables {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      font-size: 10px;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="Logo" class="logo">
+      {% endif %}
+      <p class="bureau">{{ configuration.nom_bureau|default:"LBH Economiste" }}</p>
+      {% if configuration.adresse %}
+        <div class="muted">{{ configuration.adresse|linebreaksbr }}</div>
+      {% endif %}
+      {% if configuration.courriel_contact or configuration.telephone_contact %}
+        <div class="muted">
+          {% if configuration.courriel_contact %}{{ configuration.courriel_contact }}{% endif %}
+          {% if configuration.courriel_contact and configuration.telephone_contact %} · {% endif %}
+          {% if configuration.telephone_contact %}{{ configuration.telephone_contact }}{% endif %}
+        </div>
+      {% endif %}
+    </div>
+    <div class="header-right">
+      <h1>Devis d'honoraires</h1>
+      <div><strong>Référence :</strong> {{ devis.reference }}</div>
+      <div><strong>Date :</strong> {{ devis.date_emission|date:"d/m/Y" }}</div>
+      <div><strong>Validité :</strong> {{ devis.date_validite|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="box">
+        <strong>Client</strong><br>
+        {{ devis.client_nom }}<br>
+        {% if devis.client_contact %}{{ devis.client_contact }}<br>{% endif %}
+        {% if devis.client_adresse %}{{ devis.client_adresse|linebreaksbr }}{% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="box">
+        <strong>Mission</strong><br>
+        {{ devis.intitule }}<br>
+        {% if devis.objet %}<span class="muted">{{ devis.objet }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if missions %}
+    <h2>Prestations et livrables</h2>
+    {% for mission in missions %}
+      <div style="margin-bottom: 10px;">
+        <strong>{{ mission.missionLabel|default:mission.missionCode }}</strong>
+        {% if mission.livrablesLabels %}
+          <ul class="livrables">
+            {% for livrable in mission.livrablesLabels %}
+              <li>{{ livrable }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  <h2>Détail des honoraires</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th style="width: 8%">#</th>
+        <th style="width: 46%">Désignation</th>
+        <th style="width: 12%" class="text-right">Qté</th>
+        <th style="width: 12%">Unité</th>
+        <th style="width: 11%" class="text-right">PU HT</th>
+        <th style="width: 11%" class="text-right">Total HT</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ligne in lignes %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>
+            <strong>{{ ligne.intitule }}</strong>
+            {% if ligne.description %}
+              <div class="muted">{{ ligne.description|linebreaksbr }}</div>
+            {% endif %}
+          </td>
+          <td class="text-right">
+            {% if ligne.type_ligne == "horaire" %}
+              {{ ligne.nb_heures|default:"0" }}
+            {% else %}
+              {{ ligne.quantite|default:"1" }}
+            {% endif %}
+          </td>
+          <td>{% if ligne.type_ligne == "horaire" %}h{% else %}{{ ligne.unite }}{% endif %}</td>
+          <td class="text-right">
+            {% if ligne.type_ligne == "horaire" %}
+              {{ ligne.taux_horaire|floatformat:2 }} €
+            {% else %}
+              {{ ligne.montant_unitaire_ht|floatformat:2 }} €
+            {% endif %}
+          </td>
+          <td class="text-right">{{ ligne.montant_ht|floatformat:2 }} €</td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="6" class="muted">Aucune ligne d'honoraires.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <table class="totaux">
+    <tr>
+      <td>Total HT</td>
+      <td class="text-right">{{ devis.montant_ht|floatformat:2 }} €</td>
+    </tr>
+    <tr>
+      <td>TVA</td>
+      <td class="text-right">{{ devis.montant_tva|floatformat:2 }} €</td>
+    </tr>
+    <tr class="final">
+      <td>Total TTC</td>
+      <td class="text-right">{{ devis.montant_ttc|floatformat:2 }} €</td>
+    </tr>
+  </table>
+
+  {% if devis.conditions_particulieres %}
+    <h2>Conditions</h2>
+    <div>{{ devis.conditions_particulieres|linebreaksbr }}</div>
+  {% endif %}
+
+  {% if validation_url %}
+    <h2>Validation</h2>
+    <div>Validation en ligne : {{ validation_url }}</div>
+  {% endif %}
+
+  <div class="footer-note">
+    Devis valable jusqu'au {{ devis.date_validite|date:"d/m/Y" }}.
+  </div>
+</body>
+</html>
