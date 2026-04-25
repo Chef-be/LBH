@@ -284,7 +284,7 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         doc, _ = ezdxf.recover.readfile(chemin_dxf)
 
     msp = doc.modelspace()
-    BG = "#1a1a1a"
+    BG = "#ffffff"
     ext = _extents_valides(doc)
 
     if ext:
