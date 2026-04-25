@@ -368,10 +368,17 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         doc, _ = ezdxf.recover.readfile(chemin_dxf)
 
     # Substitue les polices manquantes par Liberation Sans (≈ Arial)
-    from ezdxf.fonts import fonts as ezdxf_fonts
+    import os
+    polices_disponibles = {
+        f.lower() for rep in [
+            "/usr/share/fonts/truetype/liberation",
+            "/usr/share/fonts/truetype/dejavu",
+        ]
+        for f in (os.listdir(rep) if os.path.isdir(rep) else [])
+    }
     for style in doc.styles:
-        font_name = getattr(style.dxf, "font", "") or ""
-        if font_name and not ezdxf_fonts.find_font_file_name(font_name):
+        font_name = (getattr(style.dxf, "font", "") or "").strip()
+        if font_name and font_name.lower() not in polices_disponibles:
             style.dxf.font = "LiberationSans-Regular.ttf"
 
     msp = doc.modelspace()
