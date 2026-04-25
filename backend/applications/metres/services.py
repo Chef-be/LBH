@@ -590,6 +590,150 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     return True
 
 
+def extraire_geometrie_dxf(fond_plan) -> dict:
+    """
+    Extrait les points d'accroche (endpoints, vertices) du DXF en coordonnées normalisées [0,1].
+    x=0 bord gauche, y=0 bord haut de l'image rendue.
+    Retourne {"points": [[x, y], ...]} pour l'accroche objet du canvas.
+    """
+    import math
+    import os
+    import tempfile
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    if not (fond_plan.fichier and fond_plan.fichier.name):
+        return {"points": []}
+    nom = fond_plan.fichier.name.lower()
+    if not nom.endswith(".dxf"):
+        return {"points": []}
+
+    try:
+        import ezdxf
+        import ezdxf.recover
+    except ImportError:
+        return {"points": []}
+
+    with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
+        tmp.write(fond_plan.fichier.read())
+        chemin = tmp.name
+
+    try:
+        try:
+            doc = ezdxf.readfile(chemin)
+        except Exception:
+            doc, _ = ezdxf.recover.readfile(chemin)
+
+        ext = _extents_valides(doc)
+        if not ext:
+            return {"points": []}
+
+        xmin, ymin, xmax, ymax = ext
+        dx = xmax - xmin
+        dy = ymax - ymin
+        marge = max(dx, dy) * 0.03
+        x0 = xmin - marge
+        y0 = ymin - marge
+        total_w = dx + 2 * marge
+        total_h = dy + 2 * marge
+
+        def normaliser(x: float, y: float):
+            nx = (x - x0) / total_w
+            ny = 1.0 - (y - y0) / total_h  # Y flipped : 0 = haut image
+            if -0.01 <= nx <= 1.01 and -0.01 <= ny <= 1.01:
+                return [round(max(0.0, min(1.0, nx)), 6), round(max(0.0, min(1.0, ny)), 6)]
+            return None
+
+        points: list = []
+        MAX_POINTS = 6000
+
+        def extraire_entite(entity, ox: float = 0.0, oy: float = 0.0, sx: float = 1.0, sy: float = 1.0, rot: float = 0.0):
+            if len(points) >= MAX_POINTS:
+                return
+            t = entity.dxftype()
+            try:
+                if t == "LINE":
+                    for attr in ("start", "end"):
+                        v = getattr(entity.dxf, attr)
+                        cx, cy = v.x * sx, v.y * sy
+                        if rot:
+                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
+                        p = normaliser(cx + ox, cy + oy)
+                        if p:
+                            points.append(p)
+                elif t == "LWPOLYLINE":
+                    for v in entity.get_points():
+                        cx, cy = v[0] * sx, v[1] * sy
+                        if rot:
+                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
+                        p = normaliser(cx + ox, cy + oy)
+                        if p:
+                            points.append(p)
+                elif t == "POLYLINE":
+                    for vertex in entity.vertices:
+                        loc = vertex.dxf.location
+                        cx, cy = loc.x * sx, loc.y * sy
+                        if rot:
+                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
+                        p = normaliser(cx + ox, cy + oy)
+                        if p:
+                            points.append(p)
+                elif t == "ARC":
+                    c = entity.dxf.center
+                    r = entity.dxf.radius
+                    for deg in (entity.dxf.start_angle, entity.dxf.end_angle):
+                        a = math.radians(deg)
+                        cx, cy = (c.x + r * math.cos(a)) * sx, (c.y + r * math.sin(a)) * sy
+                        if rot:
+                            cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
+                        p = normaliser(cx + ox, cy + oy)
+                        if p:
+                            points.append(p)
+                elif t == "CIRCLE":
+                    cx, cy = entity.dxf.center.x * sx, entity.dxf.center.y * sy
+                    if rot:
+                        cx, cy = cx * math.cos(rot) - cy * math.sin(rot), cx * math.sin(rot) + cy * math.cos(rot)
+                    p = normaliser(cx + ox, cy + oy)
+                    if p:
+                        points.append(p)
+                elif t == "INSERT":
+                    ins = entity.dxf.insert
+                    isx = entity.dxf.xscale if entity.dxf.hasattr("xscale") else 1.0
+                    isy = entity.dxf.yscale if entity.dxf.hasattr("yscale") else 1.0
+                    irot = math.radians(entity.dxf.rotation) if entity.dxf.hasattr("rotation") else 0.0
+                    block_name = entity.dxf.name
+                    if block_name in doc.blocks:
+                        for blk_ent in doc.blocks[block_name]:
+                            extraire_entite(blk_ent, ins.x + ox, ins.y + oy, isx * sx, isy * sy, irot + rot)
+            except Exception:
+                pass
+
+        for entity in doc.modelspace():
+            extraire_entite(entity)
+            if len(points) >= MAX_POINTS:
+                break
+
+        # Dédupliquer par grille (tolérance 0.15% du plan)
+        TOLERANCE = 0.0015
+        grille: dict = {}
+        points_uniques: list = []
+        for p in points:
+            clef = (int(p[0] / TOLERANCE), int(p[1] / TOLERANCE))
+            if clef not in grille:
+                grille[clef] = True
+                points_uniques.append(p)
+
+        logger.info("Géométrie DXF extraite : %d points d'accroche pour %s", len(points_uniques), fond_plan.fichier.name)
+        return {"points": points_uniques}
+
+    except Exception:
+        logger.error("Extraction géométrie DXF échouée pour %s", fond_plan.fichier.name, exc_info=True)
+        return {"points": []}
+    finally:
+        os.unlink(chemin)
+
+
 def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
     """Crée une LigneMetre à partir d'une ZoneMesure calculée."""
     from .models import LigneMetre

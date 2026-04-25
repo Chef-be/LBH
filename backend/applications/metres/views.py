@@ -175,6 +175,18 @@ class VueDetailFondPlan(generics.RetrieveUpdateDestroyAPIView):
         return FondPlan.objects.filter(metre_id=self.kwargs["metre_id"])
 
 
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_geometrie_fond_plan(request, metre_id, pk):
+    """
+    Retourne les points d'accroche du DXF en coordonnées normalisées [0,1].
+    Utilisé par le canvas pour le snapping (accroche objet).
+    """
+    from .services import extraire_geometrie_dxf
+    fond = generics.get_object_or_404(FondPlan, pk=pk, metre_id=metre_id)
+    return Response(extraire_geometrie_dxf(fond))
+
+
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_calibrer_fond_plan(request, metre_id, pk):

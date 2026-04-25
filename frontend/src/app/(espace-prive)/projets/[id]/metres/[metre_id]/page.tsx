@@ -814,6 +814,12 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [opaciteSecondaire, setOpaciteSecondaire] = useState(0.4);
   const [panneauSuppressionFond, setPanneauSuppressionFond] = useState(false);
 
+  // Accroche objet (snap) — points DXF en coordonnées image normalisées [0,1]
+  const [pointsAccroche, setPointsAccroche] = useState<Array<[number, number]>>([]);
+  const [pointSnap, setPointSnap] = useState<PointCanvas | null>(null);
+  const [accrocheActive, setAccrocheActive] = useState(true);
+  const RAYON_SNAP_PX = 14; // pixels écran
+
   // Adapte le canvas à la taille du conteneur
   useEffect(() => {
     const conteneur = conteneurRef.current;
@@ -1352,8 +1358,30 @@ ${lignesLegende.map((z) => `
       }
     }
 
+    // Indicateur d'accroche objet (cercle jaune + croix)
+    if (pointSnap && outil !== "selection" && outil !== "calibrer") {
+      const r = 8 / zoom;
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#f59e0b";
+      ctx.fillStyle = "rgba(251,191,36,0.15)";
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.beginPath();
+      ctx.arc(pointSnap.x, pointSnap.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Croix intérieure
+      ctx.beginPath();
+      ctx.moveTo(pointSnap.x - r * 0.6, pointSnap.y);
+      ctx.lineTo(pointSnap.x + r * 0.6, pointSnap.y);
+      ctx.moveTo(pointSnap.x, pointSnap.y - r * 0.6);
+      ctx.lineTo(pointSnap.x, pointSnap.y + r * 0.6);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.restore();
-  }, [fondPlan, fondPlanSecondaire, opaciteSecondaire, zones, zoneSelectionnee, pointsEnCours, mousePos, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
+  }, [fondPlan, fondPlanSecondaire, opaciteSecondaire, zones, zoneSelectionnee, pointsEnCours, mousePos, pointSnap, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
 
   useEffect(() => { dessiner(); }, [dessiner]);
 
@@ -1522,7 +1550,7 @@ ${lignesLegende.map((z) => `
       });
       return;
     }
-    const pt = coordCanvas(e);
+    const pt = pointSnap ?? coordCanvas(e);
     setPointsEnCours((prev) => [...prev, pt]);
   };
 
@@ -1601,7 +1629,26 @@ ${lignesLegende.map((z) => `
 
   const gererMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pt = coordCanvas(e);
-    setMousePos(pt);
+
+    // Accroche objet : cherche le point DXF le plus proche dans le rayon de snap
+    let snap: PointCanvas | null = null;
+    if (accrocheActive && pointsAccroche.length > 0 && fondPlan && outil !== "selection" && outil !== "calibrer") {
+      const imgW = fondPlan.naturalWidth;
+      const imgH = fondPlan.naturalHeight;
+      const rayonImg = RAYON_SNAP_PX / zoom; // rayon en pixels image
+      let distMin = Infinity;
+      for (const [nx, ny] of pointsAccroche) {
+        const px = nx * imgW;
+        const py = ny * imgH;
+        const d = Math.hypot(px - pt.x, py - pt.y);
+        if (d < rayonImg && d < distMin) {
+          distMin = d;
+          snap = { x: px, y: py };
+        }
+      }
+    }
+    setPointSnap(snap);
+    setMousePos(snap ?? pt);
 
     const isPanning = isDragging.current || isMidDragging.current;
     if (isPanning) {
@@ -1781,6 +1828,16 @@ ${lignesLegende.map((z) => `
         setChargementImage(false);
       }
     }
+    // Charger la géométrie DXF pour l'accroche objet (silencieux si absent ou non-DXF)
+    const estDxf = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(fp.url_fichier ?? "");
+    if (estDxf) {
+      api.get<{ points: Array<[number, number]> }>(`/api/metres/${metreId}/fonds-plan/${fp.id}/geometrie/`)
+        .then((geo) => { setPointsAccroche(geo.points ?? []); })
+        .catch(() => { setPointsAccroche([]); });
+    } else {
+      setPointsAccroche([]);
+    }
+
     // Charger les zones pour ce fond de plan
     const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
     try {
@@ -2361,6 +2418,28 @@ ${lignesLegende.map((z) => `
               </div>
             );
           })}
+          {/* Bouton accroche objet (visible uniquement si points DXF disponibles) */}
+          {pointsAccroche.length > 0 && (
+            <button
+              type="button"
+              title={accrocheActive ? "Accroche objet activée — cliquez pour désactiver" : "Accroche objet désactivée — cliquez pour activer"}
+              onClick={() => setAccrocheActive((v) => !v)}
+              className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${
+                accrocheActive
+                  ? "border-amber-300 bg-amber-50 text-amber-600"
+                  : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <circle cx="12" cy="12" r="8" strokeDasharray="3 2" />
+                <line x1="12" y1="2" x2="12" y2="5" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+                <line x1="2" y1="12" x2="5" y2="12" />
+                <line x1="19" y1="12" x2="22" y2="12" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Canvas */}

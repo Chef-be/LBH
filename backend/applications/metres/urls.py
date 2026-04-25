@@ -16,6 +16,7 @@ urlpatterns = [
     path("<uuid:metre_id>/fonds-plan/", views.VueListeFondsPlans.as_view(), name="fonds-plan-liste"),
     path("<uuid:metre_id>/fonds-plan/<uuid:pk>/", views.VueDetailFondPlan.as_view(), name="fond-plan-detail"),
     path("<uuid:metre_id>/fonds-plan/<uuid:pk>/calibrer/", views.vue_calibrer_fond_plan, name="fond-plan-calibrer"),
+    path("<uuid:metre_id>/fonds-plan/<uuid:pk>/geometrie/", views.vue_geometrie_fond_plan, name="fond-plan-geometrie"),
 
     # Zones de mesure
     path("<uuid:metre_id>/fonds-plan/<uuid:fond_plan_id>/zones/", views.VueListeZonesMesure.as_view(), name="zones-mesure-liste"),
