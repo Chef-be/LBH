@@ -144,7 +144,7 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
         if obj.apercu:
             try:
                 url = obj.apercu.url
-                ts = int(obj.date_modification.timestamp()) if obj.date_modification else 0
+                ts = int(obj.date_creation.timestamp()) if obj.date_creation else 0
                 sep = "&" if "?" in url else "?"
                 return f"{url}{sep}v={ts}"
             except Exception:
@@ -155,7 +155,7 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
         if obj.miniature:
             try:
                 url = obj.miniature.url
-                ts = int(obj.date_modification.timestamp()) if obj.date_modification else 0
+                ts = int(obj.date_creation.timestamp()) if obj.date_creation else 0
                 sep = "&" if "?" in url else "?"
                 return f"{url}{sep}v={ts}"
             except Exception:
