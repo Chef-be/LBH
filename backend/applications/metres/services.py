@@ -363,6 +363,9 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     BG = "#ffffff"
     ext = _extents_valides(doc)
 
+    # DPI de rendu : 200 pour l'aperçu, 300 pour la HD → meilleure qualité textes et lignes fines
+    dpi_rendu = 200 if largeur_px <= 2000 else 300
+
     if ext:
         xmin, ymin, xmax, ymax = ext
         dx = xmax - xmin
@@ -370,19 +373,19 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         marge = max(dx, dy) * 0.03
         ratio = (dx + 2 * marge) / (dy + 2 * marge)
         if ratio >= largeur_px / hauteur_px:
-            w = largeur_px / 100
+            w = largeur_px / dpi_rendu
             h = max(w / ratio, 2)
         else:
-            h = hauteur_px / 100
+            h = hauteur_px / dpi_rendu
             w = max(h * ratio, 2)
     else:
-        w, h = largeur_px / 100, hauteur_px / 100
+        w, h = largeur_px / dpi_rendu, hauteur_px / dpi_rendu
         marge = None
 
     # --- Phase 1 : rendu ezdxf + matplotlib (SHOW_OUTLINE uniquement) ---
     # fond transparent : matplotlib exporte le PNG avec alpha=0 sur le fond,
     # ce qui préserve tous les textes et lignes de toute couleur.
-    fig, ax = plt.subplots(figsize=(w, h), dpi=100)
+    fig, ax = plt.subplots(figsize=(w, h), dpi=dpi_rendu)
     fig.patch.set_alpha(0)
     ax.set_facecolor((0, 0, 0, 0))
     ax.axis("off")
@@ -404,7 +407,7 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
         ax.set_ylim(ymin - marge, ymax + marge)
 
     tampon = io.BytesIO()
-    fig.savefig(tampon, format="png", dpi=100, transparent=True, bbox_inches=None)
+    fig.savefig(tampon, format="png", dpi=dpi_rendu, transparent=True, bbox_inches=None)
     plt.close(fig)
     tampon.seek(0)
     img_lignes = Image.open(tampon).convert("RGBA")
