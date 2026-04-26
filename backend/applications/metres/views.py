@@ -177,6 +177,15 @@ class VueDetailFondPlan(generics.RetrieveUpdateDestroyAPIView):
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
+def vue_echelle_auto_fond_plan(request, metre_id, pk):
+    """Détecte automatiquement l'échelle d'un fond de plan (DXF → $INSUNITS, PDF → taille papier)."""
+    from .services import detecter_echelle_auto
+    fond = generics.get_object_or_404(FondPlan, pk=pk, metre_id=metre_id)
+    return Response(detecter_echelle_auto(fond))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
 def vue_geometrie_fond_plan(request, metre_id, pk):
     """
     Retourne les points d'accroche du DXF en coordonnées normalisées [0,1].

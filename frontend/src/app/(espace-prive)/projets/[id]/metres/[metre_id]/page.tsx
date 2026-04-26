@@ -818,6 +818,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [pointsAccroche, setPointsAccroche] = useState<Array<[number, number]>>([]);
   const [pointSnap, setPointSnap] = useState<PointCanvas | null>(null);
   const [accrocheActive, setAccrocheActive] = useState(true);
+  const [echelleAutoInfo, setEchelleAutoInfo] = useState<{ confiance: string; methode: string; details: string } | null>(null);
   const RAYON_SNAP_PX = 14; // pixels écran
 
   // Adapte le canvas à la taille du conteneur
@@ -1520,6 +1521,7 @@ ${lignesLegende.map((z) => `
           if (metres > 0 && pixels > 0) {
             const nouvelleEchelle = pixels / metres;
             setEchellePixelParMetre(nouvelleEchelle);
+            setEchelleAutoInfo(null); // Calibration manuelle — effacer le bandeau auto
             // Persiste l'échelle en base de données
             if (fondPlanId) {
               void api.post(`/api/metres/${metreId}/fonds-plan/${fondPlanId}/calibrer/`, {
@@ -1773,7 +1775,20 @@ ${lignesLegende.map((z) => `
     if (timerSauvegarde.current) { clearTimeout(timerSauvegarde.current); timerSauvegarde.current = null; }
     pendingZonesRef.current = null;
     setFondPlanId(fp.id);
-    if (fp.echelle && fp.echelle > 0) setEchellePixelParMetre(fp.echelle);
+    setEchelleAutoInfo(null);
+    // Appliquer l'échelle sauvegardée, ou réinitialiser à 50 si non calibré
+    setEchellePixelParMetre(fp.echelle && fp.echelle > 0 ? fp.echelle : 50);
+    // Si pas d'échelle calibrée, tenter la détection automatique
+    if (!(fp.echelle && fp.echelle > 0)) {
+      api.get<{ echelle: number | null; confiance: string; methode: string; details: string }>(
+        `/api/metres/${metreId}/fonds-plan/${fp.id}/echelle-auto/`
+      ).then((res) => {
+        if (res.echelle && res.echelle > 0) {
+          setEchellePixelParMetre(res.echelle);
+          setEchelleAutoInfo({ confiance: res.confiance, methode: res.methode, details: res.details });
+        }
+      }).catch(() => { /* détection auto silencieuse */ });
+    }
     const url = fp.url_fichier ?? "";
     const estVectoriel = fp.format_fichier === "dxf" || /\.(dxf|dwg)$/i.test(url);
     if (estVectoriel) {
@@ -2448,6 +2463,32 @@ ${lignesLegende.map((z) => `
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
               </svg>
               <span>Génération du rendu du plan CAO en cours — l&apos;aperçu s&apos;affichera automatiquement…</span>
+            </div>
+          )}
+          {/* Bandeau échelle détectée automatiquement */}
+          {echelleAutoInfo && (
+            <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 bg-blue-50 px-4 py-2 text-sm text-blue-800 border-b border-blue-200">
+              <div className="flex items-center gap-2">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-blue-500" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>
+                  Échelle détectée automatiquement — {echelleAutoInfo.details}
+                  {echelleAutoInfo.confiance === "faible" && " (confiance faible — calibration recommandée)"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEchelleAutoInfo(null)}
+                className="shrink-0 rounded p-0.5 hover:bg-blue-100"
+                title="Fermer"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
             </div>
           )}
           {/* Overlay chargement image fond de plan */}

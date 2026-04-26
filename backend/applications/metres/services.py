@@ -590,6 +590,153 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     return True
 
 
+# Correspondance $INSUNITS DXF → mètres par unité
+_INSUNITS_METRES = {
+    0: 0.001,     # sans unité → suppose mm (architecture)
+    1: 0.0254,    # pouces
+    2: 0.3048,    # pieds
+    3: 1609.344,  # miles
+    4: 0.001,     # mm
+    5: 0.01,      # cm
+    6: 1.0,       # m
+    7: 1000.0,    # km
+    8: 1e-6,      # microns
+    13: 0.1,      # décimètres
+}
+_INSUNITS_NOMS = {
+    0: "mm (par défaut)", 1: "pouces", 2: "pieds",
+    4: "mm", 5: "cm", 6: "m", 7: "km", 13: "dm",
+}
+
+
+def detecter_echelle_auto(fond_plan) -> dict:
+    """
+    Détecte automatiquement l'échelle (px/m) d'un fond de plan DXF.
+    Pour DXF : utilise $INSUNITS + extents + dimensions de l'image aperçu.
+    Retourne un dict avec `echelle`, `confiance` ("haute"/"moyenne"/"faible"), `methode`, `details`.
+    """
+    import os
+    import tempfile
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    if not (fond_plan.fichier and fond_plan.fichier.name):
+        return {"echelle": None, "confiance": "aucune", "methode": None, "details": "Aucun fichier"}
+
+    nom = fond_plan.fichier.name.lower()
+    fmt = fond_plan.format_fichier or ""
+
+    # --- DXF : détection fiable via $INSUNITS et extents ---
+    if fmt == "dxf" or nom.endswith(".dxf"):
+        try:
+            import ezdxf, ezdxf.recover
+
+            with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
+                tmp.write(fond_plan.fichier.read())
+                chemin = tmp.name
+
+            try:
+                try:
+                    doc = ezdxf.readfile(chemin)
+                except Exception:
+                    doc, _ = ezdxf.recover.readfile(chemin)
+
+                ext = _extents_valides(doc)
+                if not ext:
+                    return {"echelle": None, "confiance": "faible", "methode": "dxf", "details": "Extents DXF indisponibles"}
+
+                xmin, ymin, xmax, ymax = ext
+                dx = xmax - xmin
+                dy = ymax - ymin
+                marge = max(dx, dy) * 0.03
+                total_w = dx + 2 * marge
+                total_h = dy + 2 * marge
+
+                # Dimensions de l'aperçu rendu (dpi=200, max 1200×850)
+                LARG_APE, HAUT_APE, DPI_APE = 1200, 850, 200
+                ratio = total_w / total_h
+                if ratio >= LARG_APE / HAUT_APE:
+                    img_w_px = LARG_APE
+                else:
+                    img_w_px = HAUT_APE * ratio
+
+                px_par_unite_dxf = img_w_px / total_w
+
+                insunits = int(doc.header.get("$INSUNITS", 0))
+                metres_par_unite = _INSUNITS_METRES.get(insunits, 0.001)
+                echelle = px_par_unite_dxf / metres_par_unite
+
+                # Confiance : haute si unité explicite (mm/cm/m), moyenne si supposée
+                confiance = "haute" if insunits in (4, 5, 6, 1, 2) else "moyenne"
+                unite_nom = _INSUNITS_NOMS.get(insunits, f"unité {insunits}")
+
+                details = (
+                    f"Unité DXF : {unite_nom} — "
+                    f"Étendue : {dx:.1f}×{dy:.1f} unités — "
+                    f"Image aperçu : {img_w_px:.0f}px — "
+                    f"Échelle calculée : {echelle:.1f} px/m"
+                )
+                logger.info("Échelle auto DXF détectée : %.1f px/m (%s) pour %s", echelle, confiance, fond_plan.fichier.name)
+                return {"echelle": round(echelle, 2), "confiance": confiance, "methode": "dxf_insunits", "details": details}
+            finally:
+                os.unlink(chemin)
+
+        except Exception:
+            logger.error("Détection échelle DXF échouée pour %s", fond_plan.fichier.name, exc_info=True)
+            return {"echelle": None, "confiance": "faible", "methode": "dxf", "details": "Erreur lors de la détection"}
+
+    # --- PDF : taille de page vs format standard ---
+    if fmt == "pdf" or nom.endswith(".pdf"):
+        try:
+            import fitz
+
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(fond_plan.fichier.read())
+                chemin = tmp.name
+            try:
+                doc = fitz.open(chemin)
+                page = doc[0]
+                rect = page.rect
+                w_pt, h_pt = rect.width, rect.height  # en points (1pt = 1/72 pouce)
+                doc.close()
+            finally:
+                os.unlink(chemin)
+
+            # Cherche une annotation de type "scale" ou "échelle" dans les métadonnées
+            # (heuristique simple — pas d'OCR)
+            # On peut donner la taille réelle du PDF en mm pour aider l'utilisateur
+            w_mm = w_pt * 25.4 / 72
+            h_mm = h_pt * 25.4 / 72
+
+            # Formats papier standards (tolérance 5%)
+            formats = {
+                "A0": (841, 1189), "A1": (594, 841), "A2": (420, 594),
+                "A3": (297, 420), "A4": (210, 297),
+            }
+            format_detecte = None
+            for nom_fmt, (fw, fh) in formats.items():
+                if (abs(w_mm - fw) < fw * 0.05 and abs(h_mm - fh) < fh * 0.05) or \
+                   (abs(w_mm - fh) < fh * 0.05 and abs(h_mm - fw) < fw * 0.05):
+                    format_detecte = nom_fmt
+                    break
+
+            details = f"PDF {w_mm:.0f}×{h_mm:.0f} mm"
+            if format_detecte:
+                details += f" ({format_detecte})"
+            details += " — calibrez manuellement avec la règle pour définir l'échelle"
+
+            return {
+                "echelle": None, "confiance": "faible", "methode": "pdf_taille",
+                "details": details, "format_papier": format_detecte,
+                "largeur_mm": round(w_mm), "hauteur_mm": round(h_mm),
+            }
+        except Exception:
+            pass
+
+    return {"echelle": None, "confiance": "faible", "methode": None, "details": "Format non supporté pour la détection automatique"}
+
+
 def _dedupliquer_points(points: list, tolerance: float = 0.0015) -> list:
     """Déduplique une liste de points [x,y] normalisés par grille."""
     grille: dict = {}
