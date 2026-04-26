@@ -877,13 +877,26 @@ def _extraire_points_dxf(chemin: str) -> list:
                         ajouter_milieu(px, py, wx, wy)
 
             elif t == "SPLINE":
-                pts_spl = list(entity.control_points)
-                for i, v in enumerate(pts_spl):
-                    wx, wy = appliquer_transform(v[0], v[1], ox, oy, sx, sy, cos_r, sin_r)
-                    ajouter(wx, wy)
-                    if i > 0:
-                        px, py = appliquer_transform(pts_spl[i - 1][0], pts_spl[i - 1][1], ox, oy, sx, sy, cos_r, sin_r)
-                        ajouter_milieu(px, py, wx, wy)
+                # Flattening réel (points sur la courbe) — bien plus précis que les points de contrôle
+                try:
+                    pts_flat = list(entity.flattening(0.01))
+                    n = len(pts_flat)
+                    for i, v in enumerate(pts_flat):
+                        wx, wy = appliquer_transform(float(v[0]), float(v[1]), ox, oy, sx, sy, cos_r, sin_r)
+                        typ = "e" if (i == 0 or i == n - 1) else "m"
+                        ajouter(wx, wy, typ)
+                        if i > 0:
+                            prev = pts_flat[i - 1]
+                            px, py = appliquer_transform(float(prev[0]), float(prev[1]), ox, oy, sx, sy, cos_r, sin_r)
+                            ajouter_milieu(px, py, wx, wy)
+                except Exception:
+                    for i, v in enumerate(entity.control_points):
+                        wx, wy = appliquer_transform(v[0], v[1], ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx, wy, "e")
+                        if i > 0:
+                            prev = list(entity.control_points)[i - 1]
+                            px, py = appliquer_transform(prev[0], prev[1], ox, oy, sx, sy, cos_r, sin_r)
+                            ajouter_milieu(px, py, wx, wy)
 
             elif t == "ARC":
                 c, r = entity.dxf.center, entity.dxf.radius
@@ -961,6 +974,54 @@ def _extraire_points_dxf(chemin: str) -> list:
                     for blk_ent in doc.blocks[block_name]:
                         traiter(blk_ent, ix, iy, isx * sx, isy * sy, new_cos, new_sin, profondeur + 1)
 
+            elif t == "HATCH":
+                for path in entity.paths:
+                    try:
+                        if hasattr(path, "edges"):
+                            for edge in path.edges:
+                                et = getattr(edge, "EDGE_TYPE", "")
+                                if et in ("LineEdge", "LINE"):
+                                    ax2, ay2 = appliquer_transform(edge.start.x, edge.start.y, ox, oy, sx, sy, cos_r, sin_r)
+                                    bx2, by2 = appliquer_transform(edge.end.x, edge.end.y, ox, oy, sx, sy, cos_r, sin_r)
+                                    ajouter(ax2, ay2, "e"); ajouter(bx2, by2, "e")
+                                    ajouter_milieu(ax2, ay2, bx2, by2)
+                                elif et in ("ArcEdge", "ARC"):
+                                    cx2 = getattr(edge, "center", None)
+                                    if cx2:
+                                        wx2, wy2 = appliquer_transform(cx2.x, cx2.y, ox, oy, sx, sy, cos_r, sin_r)
+                                        ajouter(wx2, wy2, "c")
+                        elif hasattr(path, "vertices"):
+                            pts_h = list(path.vertices)
+                            for i, v in enumerate(pts_h):
+                                wx2, wy2 = appliquer_transform(v[0], v[1], ox, oy, sx, sy, cos_r, sin_r)
+                                ajouter(wx2, wy2, "e")
+                                if i > 0:
+                                    prev = pts_h[i - 1]
+                                    px2, py2 = appliquer_transform(prev[0], prev[1], ox, oy, sx, sy, cos_r, sin_r)
+                                    ajouter_milieu(px2, py2, wx2, wy2)
+                    except Exception:
+                        pass
+
+            elif t in ("3DFACE", "SOLID"):
+                for attr in ("vtx0", "vtx1", "vtx2", "vtx3"):
+                    if entity.dxf.hasattr(attr):
+                        v = getattr(entity.dxf, attr)
+                        wx2, wy2 = appliquer_transform(v.x, v.y, ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx2, wy2, "e")
+
+            elif t == "WIPEOUT":
+                try:
+                    pts_w = list(entity.boundary_path)
+                    for i, v in enumerate(pts_w):
+                        wx2, wy2 = appliquer_transform(v[0], v[1], ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx2, wy2, "e")
+                        if i > 0:
+                            prev = pts_w[i - 1]
+                            px2, py2 = appliquer_transform(prev[0], prev[1], ox, oy, sx, sy, cos_r, sin_r)
+                            ajouter_milieu(px2, py2, wx2, wy2)
+                except Exception:
+                    pass
+
             elif t == "DIMENSION":
                 for attr in ("defpoint", "defpoint2", "defpoint3", "text_midpoint"):
                     if entity.dxf.hasattr(attr):
@@ -1005,11 +1066,25 @@ def _extraire_points_pdf(chemin: str) -> list:
         if p:
             points.append([p[0], p[1], typ])
 
+    def bezier_pts(p1, p2, p3, p4, n=4):
+        """Subdivise une cubique de Bézier en n points intermédiaires."""
+        res = []
+        for i in range(1, n):
+            t = i / n
+            mt = 1 - t
+            x = mt**3*p1.x + 3*mt**2*t*p2.x + 3*mt*t**2*p3.x + t**3*p4.x
+            y = mt**3*p1.y + 3*mt**2*t*p2.y + 3*mt*t**2*p3.y + t**3*p4.y
+            res.append((x, y))
+        return res
+
     for path in page.get_drawings():
         for item in path.get("items", []):
             try:
                 op = item[0]
-                if op == "l":  # segment
+                if op == "m":  # moveto — extrémité de sous-chemin
+                    p1 = item[1]
+                    ap(norm(p1.x, p1.y), "e")
+                elif op == "l":  # segment
                     p1, p2 = item[1], item[2]
                     ap(norm(p1.x, p1.y), "e")
                     ap(norm(p2.x, p2.y), "e")
@@ -1023,17 +1098,28 @@ def _extraire_points_pdf(chemin: str) -> list:
                         ax, ay = corners[i]
                         bx, by = corners[(i + 1) % 4]
                         ap(milieu(ax, ay, bx, by), "m")
-                elif op == "c":  # courbe de Bézier
+                elif op == "c":  # cubique de Bézier
                     p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
                     ap(norm(p1.x, p1.y), "e")
                     ap(norm(p4.x, p4.y), "e")
-                    ap(milieu(p1.x, p1.y, p4.x, p4.y), "m")
-                elif op == "qu":  # quadrant arc
+                    # Points intermédiaires sur la courbe
+                    for bx, by in bezier_pts(p1, p2, p3, p4, 4):
+                        ap(norm(bx, by), "m")
+                elif op == "qu":  # arc quadrant
                     p1, p2 = item[1], item[2]
                     ap(norm(p1.x, p1.y), "q")
                     ap(norm(p2.x, p2.y), "q")
+                    ap(milieu(p1.x, p1.y, p2.x, p2.y), "m")
             except Exception:
                 pass
+
+        # Centroïde des chemins fermés (utile pour les symboles)
+        try:
+            r = path.get("rect")
+            if r and path.get("closePath"):
+                ap(norm((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2), "c")
+        except Exception:
+            pass
 
     doc.close()
     return points
@@ -1041,8 +1127,10 @@ def _extraire_points_pdf(chemin: str) -> list:
 
 def _extraire_points_image(chemin: str) -> list:
     """
-    Détecte les coins saillants d'une image raster (JPG, PNG, TIFF) via OpenCV.
-    Retourne une liste de [x, y] en coordonnées normalisées [0,1].
+    Extrait les points d'accroche d'une image raster via deux méthodes complémentaires :
+    1. Canny + findContours + approxPolyDP → coins exacts des contours (méthode principale)
+    2. Shi-Tomasi goodFeaturesToTrack → coins non capturés par les contours
+    Retourne une liste de [x, y, type] en coordonnées normalisées [0,1].
     """
     import cv2
     import numpy as np
@@ -1055,37 +1143,69 @@ def _extraire_points_image(chemin: str) -> list:
     if w <= 0 or h <= 0:
         return []
 
-    # Réduction pour les très grandes images (garde la précision suffisante)
+    # Réduction pour les très grandes images
     MAX_DIM = 2000
     facteur = min(MAX_DIM / max(w, h), 1.0)
     if facteur < 1.0:
         img = cv2.resize(img, (int(w * facteur), int(h * facteur)), interpolation=cv2.INTER_AREA)
-        rh, rw = img.shape
-    else:
-        rw, rh = w, h
+    rh, rw = img.shape
 
-    # Pré-traitement : contraste adaptatif + flou léger
-    img = cv2.equalizeHist(img)
+    # Pré-traitement : CLAHE (contraste adaptatif par tuiles) + flou léger
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    img = clahe.apply(img)
     blurred = cv2.GaussianBlur(img, (3, 3), 0)
 
-    # Détection de coins via Shi-Tomasi (goodFeaturesToTrack)
-    coins = cv2.goodFeaturesToTrack(
-        blurred,
-        maxCorners=3000,
-        qualityLevel=0.005,
-        minDistance=max(5, int(min(rw, rh) * 0.003)),
-        blockSize=5,
-    )
+    points: list = []
 
-    if coins is None:
-        return []
-
-    points = []
-    for c in coins:
-        px, py = float(c[0][0]), float(c[0][1])
+    def ajouter_pt(px, py, typ="e"):
         nx, ny = px / rw, py / rh
         if 0 <= nx <= 1 and 0 <= ny <= 1:
-            points.append([round(nx, 6), round(ny, 6), "e"])
+            points.append([round(nx, 6), round(ny, 6), typ])
+
+    # --- Méthode 1 : Canny + contours + approximation polygonale ---
+    # Seuils Canny calculés depuis la médiane (robuste quelle que soit la plage de niveaux de gris)
+    median = float(np.median(blurred))
+    lo = max(0, int(median * 0.5))
+    hi = min(255, int(median * 1.5))
+    edges = cv2.Canny(blurred, lo, hi)
+
+    # Légère dilatation pour fermer les gaps dans les traits fins
+    edges = cv2.dilate(edges, np.ones((2, 2), np.uint8), iterations=1)
+
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    min_arc = max(8, int(min(rw, rh) * 0.005))  # ignore les micro-contours
+
+    for cnt in contours:
+        arc_len = cv2.arcLength(cnt, True)
+        if arc_len < min_arc:
+            continue
+        # Tolérance d'approximation progressive : 0.5 % de la longueur, min 1.5 px
+        epsilon = max(1.5, arc_len * 0.005)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        pts = approx.reshape(-1, 2)
+        n = len(pts)
+        for i, (px, py) in enumerate(pts):
+            typ = "e" if n <= 8 else "m"  # sommet réel si peu de points, sinon milieu
+            ajouter_pt(float(px), float(py), typ)
+            if i > 0:
+                prev = pts[i - 1]
+                ajouter_pt((float(px) + float(prev[0])) / 2, (float(py) + float(prev[1])) / 2, "m")
+        # Fermer la polyligne si nécessaire
+        if n > 1 and cv2.contourArea(cnt) > 0:
+            ajouter_pt((float(pts[-1][0]) + float(pts[0][0])) / 2,
+                       (float(pts[-1][1]) + float(pts[0][1])) / 2, "m")
+
+    # --- Méthode 2 : Shi-Tomasi pour coins fins non détectés par Canny ---
+    shi = cv2.goodFeaturesToTrack(
+        blurred,
+        maxCorners=2000,
+        qualityLevel=0.01,
+        minDistance=max(6, int(min(rw, rh) * 0.004)),
+        blockSize=5,
+    )
+    if shi is not None:
+        for c in shi:
+            ajouter_pt(float(c[0][0]), float(c[0][1]), "e")
 
     return points
 
