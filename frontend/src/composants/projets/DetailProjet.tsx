@@ -956,40 +956,6 @@ function ModalContexte({ projet }: { projet: ProjetDetail }) {
         {/* Processus recommandé */}
         <section>
           <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Processus recommandé</h3>
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Link
-              href={`/projets/${projet.id}/economie/nouvelle`}
-              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
-              style={{ background: "var(--c-base)", color: "#fff" }}
-            >
-              Lancer une étude
-            </Link>
-            <Link
-              href={`/projets/${projet.id}/documents`}
-              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
-              style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
-            >
-              Ajouter un document
-            </Link>
-            {contextePiecesEcrites && (
-              <Link
-                href={`/projets/${projet.id}/pieces-ecrites/nouvelle`}
-                className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
-                style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
-              >
-                Créer une pièce
-              </Link>
-            )}
-            {contexteAppelsOffres && (
-              <Link
-                href={`/projets/${projet.id}/appels-offres/nouveau`}
-                className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium"
-                style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}
-              >
-                Créer un AO
-              </Link>
-            )}
-          </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {pr.methodes_estimation.length > 0 && (
               <div className="rounded-xl p-4" style={{ background: "var(--fond-entree)" }}>

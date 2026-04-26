@@ -10,8 +10,9 @@ import {
 import {
   FileText, BarChart2, Layers, PenTool, Hammer, Search,
   TrendingUp, ChevronDown, ChevronUp, Euro, Calendar,
-  MapPin, Building2, ExternalLink, Plus, FolderOpen, ReceiptText,
+  MapPin, Building2, ExternalLink, Plus, FolderOpen,
   ChevronRight, AlertTriangle, Wand2, Settings2, Calculator, RefreshCw,
+  Ruler, GanttChart,
 } from "lucide-react";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { PanneauMissionsLivrables, MissionProjet } from "./PanneauMissionsLivrables";
@@ -596,6 +597,11 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
   const afficherAppelsOffres =
     ["act", "rapport_analyse_offres", "reponse_appel_offres"].some((c) => codesMission.has(c));
   const afficherRentabilite = estEntreprise;
+  const afficherMetres =
+    estMOE || estEntreprise ||
+    ["estimation_par_lot", "estimation_infrastructure", "verifier_enveloppe", "metre_definitif"].some((c) => codesMission.has(c));
+  const afficherPlanning = afficherExecution || estMOE ||
+    ["opc", "exe", "det"].some((c) => codesMission.has(c));
 
   const phaseActuelle = projet.phase_actuelle || synthese?.phase_code || "";
   const phaseIndex = synthese?.phase_index ?? PHASES_CYCLE.indexOf(phaseActuelle);
@@ -921,54 +927,99 @@ export function DashboardProjet({ projet }: { projet: ProjetDetail }) {
         className="rounded-xl p-5"
         style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}
       >
-        <h3 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--texte-3)" }}>
-          Actions rapides
-        </h3>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+            Actions rapides
+          </h3>
+          <Link
+            href={`/projets/${idProjet}/modifier`}
+            className="inline-flex items-center gap-1 text-xs hover:opacity-70 transition"
+            style={{ color: "var(--texte-3)" }}
+          >
+            <Settings2 size={12} /> Paramètres du projet
+          </Link>
+        </div>
+
+        {/* Actions métier principales */}
+        <div className="flex flex-wrap gap-2 mb-3">
           <Link
             href={`/projets/${idProjet}/economie/nouvelle`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90"
             style={{ background: "var(--c-base)" }}
           >
-            <Plus size={14} /> Nouvelle étude économique
+            <Calculator size={14} /> Nouvelle étude économique
           </Link>
-          <Link
-            href={`/projets/${idProjet}/documents`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
-            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
-          >
-            <FileText size={14} /> Ajouter un document
-          </Link>
+
           {afficherPiecesEcrites && (
             <Link
               href={`/projets/${idProjet}/pieces-ecrites/nouvelle`}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
               style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
             >
               <PenTool size={14} /> Nouvelle pièce écrite
             </Link>
           )}
+
+          {afficherMetres && (
+            <Link
+              href={`/projets/${idProjet}/metres/nouveau`}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+              style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            >
+              <Ruler size={14} /> Nouveau métré
+            </Link>
+          )}
+
+          {afficherAppelsOffres && (
+            <Link
+              href={`/projets/${idProjet}/appels-offres/nouveau`}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+              style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            >
+              <Search size={14} /> Nouvel appel d&apos;offres
+            </Link>
+          )}
+
+          {afficherPlanning && (
+            <Link
+              href={`/projets/${idProjet}/planning`}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+              style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            >
+              <GanttChart size={14} /> Planning
+            </Link>
+          )}
+
+          {afficherRentabilite && (
+            <Link
+              href={`/projets/${idProjet}/rentabilite`}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+              style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            >
+              <TrendingUp size={14} /> Rentabilité
+            </Link>
+          )}
+        </div>
+
+        {/* Séparateur */}
+        <div className="border-t my-3" style={{ borderColor: "var(--bordure)" }} />
+
+        {/* Actions utilitaires */}
+        <div className="flex flex-wrap gap-2">
           <Link
-            href={`/societe/devis/nouveau?projet=${idProjet}`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
-            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            href={`/projets/${idProjet}/documents`}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}
           >
-            <ReceiptText size={14} /> Créer un devis
-          </Link>
-          <Link
-            href={`/projets/${idProjet}/modifier`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
-            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
-          >
-            Modifier le projet
+            <FileText size={13} /> Ajouter un document
           </Link>
           <button
             type="button"
             onClick={() => setModaleDocumentOuverte(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
-            style={{ borderColor: "var(--bordure)", color: "var(--texte)" }}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:bg-[color:var(--fond-entree)]"
+            style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}
           >
-            <Wand2 size={14} /> Générer un document
+            <Wand2 size={13} /> Générer un document
           </button>
         </div>
       </section>
