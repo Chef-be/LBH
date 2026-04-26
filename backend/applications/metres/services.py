@@ -187,10 +187,21 @@ def calculer_zone_mesure(zone) -> dict:
         unite = "m²"
 
     elif zone.type_mesure in ("longueur", "perimetre"):
-        valeur_brute = calculer_longueur_polyligne_px(points, echelle)
-        total_deductions = 0.0
-        valeur_nette = valeur_brute
-        unite = "ml"
+        longueur = calculer_longueur_polyligne_px(points, echelle)
+        hauteur = float(zone.hauteur or 0)
+        if hauteur > 0:
+            valeur_brute = longueur * hauteur
+            total_deductions = sum(
+                float(d.get("surface_m2", 0))
+                for d in (zone.deductions or [])
+            )
+            valeur_nette = max(0.0, valeur_brute - total_deductions)
+            unite = "m²"
+        else:
+            valeur_brute = longueur
+            total_deductions = 0.0
+            valeur_nette = valeur_brute
+            unite = "ml"
 
     elif zone.type_mesure == "comptage":
         valeur_brute = float(len(points))
@@ -1275,7 +1286,16 @@ def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
             f" = Net {resultats['valeur_nette']:.3f} m2"
         )
     elif zone.type_mesure in ("longueur", "perimetre"):
-        detail = f"{prefixe}Longueur {resultats['valeur_nette']:.3f} ml"
+        hauteur = float(zone.hauteur or 0)
+        if hauteur > 0:
+            detail = (
+                f"{prefixe}Longueur {resultats['valeur_brute'] / hauteur:.3f} ml"
+                f" × h={hauteur:.2f} m"
+                f" - Déductions {resultats['valeur_deduction']:.3f} m²"
+                f" = Net {resultats['valeur_nette']:.3f} m²"
+            )
+        else:
+            detail = f"{prefixe}Longueur {resultats['valeur_nette']:.3f} ml"
 
     ligne = LigneMetre.objects.create(
         metre=metre,

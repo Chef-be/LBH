@@ -961,7 +961,9 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           .map((d) => ({
             designation: d.designation,
             points_px: d.points.map((p) => [p.x, p.y]),
-            surface_m2: d.valeur,
+            // surface_m2 : si déduction longueur avec hauteur, convertir en m²
+            surface_m2: d.type === "longueur" && d.hauteur ? d.valeur * d.hauteur : d.valeur,
+            hauteur: d.hauteur ?? null,
           }));
         // Résoudre le dbId de la zone parente (hiérarchie)
         const parentDbId = zone.sousZoneDeId
@@ -973,6 +975,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           type_mesure: zone.type,
           points_px: zone.points.map((p) => [p.x, p.y]),
           deductions: deductionsFilles,
+          hauteur: zone.hauteur ?? null,
           unite: zone.unite,
           couleur: zone.couleur,
           ordre: zonesAEnregistrer.filter((z) => z.mode === "ajout").indexOf(zone),
@@ -2042,7 +2045,8 @@ ${lignesLegende.map((z) => `
       const zonesExistantes = await api.get<Array<{
         id: string; localisation?: string; designation: string; type_mesure: string;
         points_px: Array<[number, number]>;
-        deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
+        deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number; hauteur?: number | null}>;
+        hauteur?: number | null;
         unite: string; couleur: string; ordre: number;
         zone_parente?: string | null;
         numero?: string;
@@ -2063,19 +2067,26 @@ ${lignesLegende.map((z) => `
           id: localId, dbId: z.id, type, mode: "ajout",
           localisation: z.localisation ?? "",
           designation: z.designation, unite: z.unite, points: pts, valeur,
+          hauteur: z.hauteur != null ? Number(z.hauteur) : undefined,
           couleur: z.couleur, deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
           numeroZone: z.numero || undefined,
         });
         for (let i = 0; i < z.deductions.length; i++) {
           const d = z.deductions[i];
           const ptsDed = d.points_px.map(([x, y]) => ({ x, y }));
-          const valDed = type === "surface"
-            ? calculerSurface(ptsDed) / (echelle * echelle)
-            : calculerLongueur(ptsDed) / echelle;
+          // Si la déduction a une hauteur, reconstituer la valeur en longueur (ml)
+          const hDed = d.hauteur ? Number(d.hauteur) : null;
+          const valDed = hDed
+            ? calculerLongueur(ptsDed) / echelle  // longueur en ml, la hauteur est séparée
+            : type === "surface"
+              ? calculerSurface(ptsDed) / (echelle * echelle)
+              : calculerLongueur(ptsDed) / echelle;
           zonesChargees.push({
-            id: `ded-chargee-${z.id}-${i}`, type: type === "surface" ? "surface" : "longueur",
+            id: `ded-chargee-${z.id}-${i}`,
+            type: hDed ? "longueur" : (type === "surface" ? "surface" : "longueur"),
             mode: "soustraction", parentZoneId: localId,
             designation: d.designation, unite: z.unite, points: ptsDed, valeur: valDed,
+            hauteur: hDed ?? undefined,
             couleur: COULEUR_SOUSTRACTION, deductions: [],
           });
         }

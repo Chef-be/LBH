@@ -262,6 +262,13 @@ class ZoneMesure(models.Model):
         help_text="Liste de zones à soustraire : [{designation, points_px, surface_m2}]",
     )
 
+    # Hauteur optionnelle — pour longueur × hauteur → surface (m²)
+    hauteur = models.DecimalField(
+        max_digits=8, decimal_places=3, null=True, blank=True,
+        verbose_name="Hauteur (m)",
+        help_text="Si renseignée, longueur × hauteur → surface en m²",
+    )
+
     # Résultat calculé
     valeur_brute = models.DecimalField(
         max_digits=14, decimal_places=4, null=True, blank=True,

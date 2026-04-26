@@ -200,7 +200,7 @@ class ZoneMesureSerialiseur(serializers.ModelSerializer):
         fields = [
             "id", "fond_plan", "zone_parente", "numero", "ligne_metre",
             "localisation", "designation", "type_mesure", "type_libelle",
-            "points_px", "deductions",
+            "points_px", "deductions", "hauteur",
             "valeur_brute", "valeur_deduction", "valeur_nette", "unite",
             "couleur", "ordre", "date_modification",
         ]
