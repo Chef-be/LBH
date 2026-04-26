@@ -536,3 +536,87 @@ class PreanalyseSourcesProjet(models.Model):
 
     def __str__(self):
         return f"Préanalyse {self.pk} ({self.get_statut_display()})"
+
+
+class PlanningGeneral(models.Model):
+    """Planning général d'un projet (MOE / OPC) — Gantt par lots."""
+
+    MODES = [
+        ("general", "Planning général"),
+        ("execution", "Planning d'exécution"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    projet = models.ForeignKey(
+        "projets.Projet",
+        on_delete=models.CASCADE,
+        related_name="plannings_generaux",
+        verbose_name="Projet",
+    )
+    intitule = models.CharField(max_length=300, verbose_name="Intitulé", default="Planning général")
+    mode = models.CharField(max_length=20, choices=MODES, default="general", verbose_name="Mode")
+    date_debut = models.DateField(null=True, blank=True, verbose_name="Date de début")
+    date_fin = models.DateField(null=True, blank=True, verbose_name="Date de fin prévue")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "projets_planning_general"
+        verbose_name = "Planning général"
+        verbose_name_plural = "Plannings généraux"
+        ordering = ["-date_modification"]
+
+    def __str__(self):
+        return f"{self.intitule} — {self.projet}"
+
+
+class TacheGantt(models.Model):
+    """Tâche d'un planning Gantt (lot ou article DPGF, ou tâche libre)."""
+
+    TYPES = [
+        ("lot", "Lot"),
+        ("article", "Article DPGF"),
+        ("tache", "Tâche libre"),
+        ("jalon", "Jalon"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    planning = models.ForeignKey(
+        PlanningGeneral,
+        on_delete=models.CASCADE,
+        related_name="taches",
+        verbose_name="Planning",
+    )
+    tache_parente = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sous_taches",
+        verbose_name="Tâche parente",
+    )
+    type_tache = models.CharField(max_length=20, choices=TYPES, default="tache", verbose_name="Type")
+    ordre = models.PositiveIntegerField(default=0, verbose_name="Ordre")
+    code = models.CharField(max_length=50, blank=True, verbose_name="Code")
+    intitule = models.CharField(max_length=500, verbose_name="Intitulé")
+    date_debut = models.DateField(verbose_name="Date de début")
+    date_fin = models.DateField(verbose_name="Date de fin")
+    progression = models.PositiveSmallIntegerField(default=0, verbose_name="Avancement (%)")
+    dependances = models.JSONField(default=list, blank=True, verbose_name="Dépendances (IDs)")
+    ressources = models.JSONField(default=list, blank=True, verbose_name="Ressources affectées")
+    montant_ht = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, verbose_name="Montant HT"
+    )
+    source_ligne_dpgf = models.UUIDField(null=True, blank=True, verbose_name="ID ligne DPGF source")
+    couleur = models.CharField(max_length=20, blank=True, verbose_name="Couleur")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "projets_tache_gantt"
+        verbose_name = "Tâche Gantt"
+        verbose_name_plural = "Tâches Gantt"
+        ordering = ["planning", "ordre"]
+
+    def __str__(self):
+        return f"{self.code} — {self.intitule}" if self.code else self.intitule

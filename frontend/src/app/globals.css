@@ -893,3 +893,10 @@ html.theme-brun-dore {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover { background-color: var(--texte-3); }
+
+/* ── Frappe Gantt ──────────────────────────────────────────────────────── */
+.gantt-frappe-container { overflow-x: auto; }
+.gantt-frappe-container svg { width: 100%; }
+.gantt .bar-wrapper .bar { fill: #6c8ebf; }
+.gantt .bar-wrapper.tache-lot .bar { fill: #2c5f9e; }
+.gantt .bar-wrapper.tache-jalon .bar { fill: #f59e0b; }

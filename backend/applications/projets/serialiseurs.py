@@ -4,7 +4,7 @@ Sérialiseurs pour l'application Projets — Plateforme LBH.
 
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, AffectationProjet
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, AffectationProjet, PlanningGeneral, TacheGantt
 from .services import (
     construire_processus_recommande,
     construire_suggestion_phase_projet,
@@ -313,3 +313,48 @@ class PreanalyseSourcesProjetSerialiseur(serializers.ModelSerializer):
             "date_modification",
             "date_fin",
         ]
+
+
+class TacheGanttSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = TacheGantt
+        fields = [
+            "id", "planning", "tache_parente", "type_tache", "ordre",
+            "code", "intitule", "date_debut", "date_fin",
+            "progression", "dependances", "ressources",
+            "montant_ht", "source_ligne_dpgf", "couleur",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+        extra_kwargs = {
+            "planning": {"required": False},
+        }
+
+
+class PlanningGeneralSerialiseur(serializers.ModelSerializer):
+    taches = TacheGanttSerialiseur(many=True, read_only=True)
+
+    class Meta:
+        model = PlanningGeneral
+        fields = [
+            "id", "projet", "intitule", "mode",
+            "date_debut", "date_fin",
+            "taches",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class PlanningGeneralListeSerialiseur(serializers.ModelSerializer):
+    nb_taches = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PlanningGeneral
+        fields = [
+            "id", "projet", "intitule", "mode",
+            "date_debut", "date_fin", "nb_taches",
+            "date_creation", "date_modification",
+        ]
+
+    def get_nb_taches(self, obj):
+        return obj.taches.count()

@@ -27,6 +27,11 @@ from .views import (
     vue_appliquer_phase_suggeree,
     vue_statuts_livrables,
     vue_calculer_variation_prix,
+    vue_plannings_projet,
+    vue_planning_detail,
+    vue_taches_planning,
+    vue_tache_detail,
+    vue_sauvegarder_taches_gantt,
 )
 
 urlpatterns = [
@@ -53,4 +58,9 @@ urlpatterns = [
     path("<uuid:projet_id>/affectations/", VueAffectationsProjet.as_view(), name="projets-affectations"),
     path("<uuid:projet_id>/affectations/<uuid:pk>/", VueAffectationProjetDetail.as_view(), name="projets-affectation-detail"),
     path("<uuid:projet_id>/equipe-assignable/", vue_equipe_assignable_projet, name="projets-equipe-assignable"),
+    path("<uuid:projet_id>/plannings/", vue_plannings_projet, name="projets-plannings"),
+    path("<uuid:projet_id>/plannings/<uuid:planning_id>/", vue_planning_detail, name="projets-planning-detail"),
+    path("<uuid:projet_id>/plannings/<uuid:planning_id>/taches/", vue_taches_planning, name="projets-planning-taches"),
+    path("<uuid:projet_id>/plannings/<uuid:planning_id>/taches/<uuid:tache_id>/", vue_tache_detail, name="projets-planning-tache-detail"),
+    path("<uuid:projet_id>/plannings/<uuid:planning_id>/sauvegarder/", vue_sauvegarder_taches_gantt, name="projets-planning-sauvegarder"),
 ]

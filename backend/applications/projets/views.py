@@ -779,3 +779,97 @@ def vue_statuts_livrables(requete, projet_id):
     projet.qualification_wizard = qualification
     projet.save(update_fields=["qualification_wizard", "date_modification"])
     return Response(statuts)
+
+
+# ---------------------------------------------------------------------------
+# Planning Général (Gantt)
+# ---------------------------------------------------------------------------
+
+from .models import PlanningGeneral, TacheGantt
+from .serialiseurs import PlanningGeneralSerialiseur, PlanningGeneralListeSerialiseur, TacheGanttSerialiseur
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_plannings_projet(requete, projet_id):
+    """Liste et création de plannings Gantt pour un projet."""
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+
+    if requete.method == "GET":
+        plannings = PlanningGeneral.objects.filter(projet=projet)
+        return Response(PlanningGeneralListeSerialiseur(plannings, many=True).data)
+
+    serialiseur = PlanningGeneralSerialiseur(data=requete.data)
+    serialiseur.is_valid(raise_exception=True)
+    serialiseur.save(projet=projet)
+    return Response(serialiseur.data, status=201)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_planning_detail(requete, projet_id, planning_id):
+    """Détail, modification et suppression d'un planning Gantt."""
+    planning = generics.get_object_or_404(PlanningGeneral, pk=planning_id, projet_id=projet_id)
+
+    if requete.method == "GET":
+        return Response(PlanningGeneralSerialiseur(planning).data)
+
+    if requete.method == "PATCH":
+        serialiseur = PlanningGeneralSerialiseur(planning, data=requete.data, partial=True)
+        serialiseur.is_valid(raise_exception=True)
+        serialiseur.save()
+        return Response(serialiseur.data)
+
+    planning.delete()
+    return Response(status=204)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_taches_planning(requete, projet_id, planning_id):
+    """Liste et création de tâches Gantt."""
+    planning = generics.get_object_or_404(PlanningGeneral, pk=planning_id, projet_id=projet_id)
+
+    if requete.method == "GET":
+        taches = TacheGantt.objects.filter(planning=planning)
+        return Response(TacheGanttSerialiseur(taches, many=True).data)
+
+    serialiseur = TacheGanttSerialiseur(data=requete.data)
+    serialiseur.is_valid(raise_exception=True)
+    serialiseur.save(planning=planning)
+    return Response(serialiseur.data, status=201)
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_tache_detail(requete, projet_id, planning_id, tache_id):
+    """Modification et suppression d'une tâche Gantt."""
+    tache = generics.get_object_or_404(TacheGantt, pk=tache_id, planning__id=planning_id)
+
+    if requete.method == "PATCH":
+        serialiseur = TacheGanttSerialiseur(tache, data=requete.data, partial=True)
+        serialiseur.is_valid(raise_exception=True)
+        serialiseur.save()
+        return Response(serialiseur.data)
+
+    tache.delete()
+    return Response(status=204)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_sauvegarder_taches_gantt(requete, projet_id, planning_id):
+    """Sauvegarde complète (remplacement) de toutes les tâches d'un planning."""
+    planning = generics.get_object_or_404(PlanningGeneral, pk=planning_id, projet_id=projet_id)
+    taches_data = requete.data.get("taches", [])
+
+    TacheGantt.objects.filter(planning=planning).delete()
+
+    creees = []
+    for i, td in enumerate(taches_data):
+        td["ordre"] = i
+        s = TacheGanttSerialiseur(data=td)
+        s.is_valid(raise_exception=True)
+        creees.append(s.save(planning=planning))
+
+    return Response(TacheGanttSerialiseur(creees, many=True).data, status=200)
