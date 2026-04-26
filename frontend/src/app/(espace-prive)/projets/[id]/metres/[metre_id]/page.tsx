@@ -1268,7 +1268,7 @@ ${lignesLegende.map((z) => `
         // Étiquette de mesure
         const mx = (A.x + B.x) / 2;
         const my = (A.y + B.y) / 2 - 12 / zoom;
-        const labelRegle = `${distM.toFixed(3)} ml`;
+        const labelRegle = `${distM.toFixed(2)} ml`;
         ctx.font = `bold ${12 / zoom}px system-ui`;
         ctx.textAlign = "center";
         const tw = ctx.measureText(labelRegle).width;
@@ -1345,7 +1345,7 @@ ${lignesLegende.map((z) => `
           const distPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
           const dist = outil === "surface" || outil === "soustraction_surface"
             ? `≈ ${(distPx / echellePixelParMetre).toFixed(2)} m`
-            : `${(distPx / echellePixelParMetre).toFixed(3)} m`;
+            : `${(distPx / echellePixelParMetre).toFixed(2)} m`;
           ctx.font = `${10 / zoom}px system-ui`;
           ctx.textAlign = "left";
           const tw = ctx.measureText(dist).width;
@@ -1670,11 +1670,11 @@ ${lignesLegende.map((z) => `
     if (mousePos && pointsEnCours.length > 0) {
       if (outil === "longueur" || outil === "soustraction_longueur") {
         const longueurPx = calculerLongueur([...pointsEnCours, pt]);
-        setMesureEnCours(`${(longueurPx / echellePixelParMetre).toFixed(3)} ml`);
+        setMesureEnCours(`${(longueurPx / echellePixelParMetre).toFixed(2)} ml`);
       } else if (outil === "surface" || outil === "soustraction_surface") {
         if (pointsEnCours.length >= 2) {
           const surfacePx = calculerSurface([...pointsEnCours, pt]);
-          setMesureEnCours(`≈ ${(surfacePx / (echellePixelParMetre * echellePixelParMetre)).toFixed(3)} m²`);
+          setMesureEnCours(`≈ ${(surfacePx / (echellePixelParMetre * echellePixelParMetre)).toFixed(2)} m²`);
         }
       } else if (outil === "calibrer" && calibrationPoints.length === 1) {
         const dx = pt.x - calibrationPoints[0].x;
