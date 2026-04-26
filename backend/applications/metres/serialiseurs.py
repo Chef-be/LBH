@@ -17,7 +17,7 @@ class LigneMetre_Serialiseur(serializers.ModelSerializer):
         model = LigneMetre
         fields = [
             "id", "metre", "numero_ordre", "code_article",
-            "designation", "nature", "nature_libelle",
+            "localisation", "designation", "nature", "nature_libelle",
             "quantite", "unite", "detail_calcul",
             "quantite_calculee", "apercu_calcul",
             "prix_unitaire_ht", "montant_ht",
@@ -199,7 +199,7 @@ class ZoneMesureSerialiseur(serializers.ModelSerializer):
         model = ZoneMesure
         fields = [
             "id", "fond_plan", "zone_parente", "numero", "ligne_metre",
-            "designation", "type_mesure", "type_libelle",
+            "localisation", "designation", "type_mesure", "type_libelle",
             "points_px", "deductions",
             "valeur_brute", "valeur_deduction", "valeur_nette", "unite",
             "couleur", "ordre", "date_modification",

@@ -90,6 +90,7 @@ class LigneMetre(models.Model):
     # Position dans le bordereau
     numero_ordre = models.PositiveSmallIntegerField(verbose_name="N° d'ordre")
     code_article = models.CharField(max_length=50, blank=True, verbose_name="Code article")
+    localisation = models.CharField(max_length=200, blank=True, default="", verbose_name="Localisation (pièce, niveau, bâtiment)")
     designation = models.TextField(verbose_name="Désignation de l'ouvrage")
     nature = models.CharField(
         max_length=30, choices=NATURES, default="travaux",
@@ -243,6 +244,7 @@ class ZoneMesure(models.Model):
         verbose_name="Ligne de métré associée",
     )
 
+    localisation = models.CharField(max_length=200, blank=True, default="", verbose_name="Localisation (pièce, niveau, bâtiment)")
     designation = models.CharField(max_length=300, verbose_name="Désignation de la zone")
     type_mesure = models.CharField(max_length=20, choices=TYPES, verbose_name="Type de mesure")
 

@@ -20,6 +20,7 @@ interface LigneMetre {
   metre: string;
   numero_ordre: number;
   code_article: string;
+  localisation: string;
   designation: string;
   nature: string;
   nature_libelle: string;
@@ -67,6 +68,7 @@ const NATURES = [
 const VIDE_LIGNE = {
   numero_ordre: "",
   code_article: "",
+  localisation: "",
   designation: "",
   nature: "travaux",
   quantite: "",
@@ -333,6 +335,13 @@ function ModalFormules({ onInserer, onFermer }: { onInserer: (texte: string, uni
 // Formulaire ligne de métré
 // ---------------------------------------------------------------------------
 
+// Formate une valeur mesurée : 2 décimales pour m²/ml, 3 décimales pour m³
+function formaterMesure(valeur: number, unite: string): string {
+  const isVolume = /m[³3]/i.test(unite);
+  const dec = isVolume ? 3 : 2;
+  return valeur.toLocaleString("fr-FR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
 interface ArticleCCTPSuggestion {
   id: string;
   intitule: string;
@@ -342,6 +351,65 @@ interface ArticleCCTPSuggestion {
   statut: string;
   statut_libelle: string;
   ligne_prix_designation: string | null;
+}
+
+// Champ de désignation avec autocomplete CCTP — version compacte pour les zones
+function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestation…", className = "" }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; className?: string;
+}) {
+  const [sugg, setSugg] = useState<ArticleCCTPSuggestion[]>([]);
+  const [ouvert, setOuvert] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOuvert(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  useEffect(() => {
+    const q = value.trim();
+    if (q.length < 2) { setSugg([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.get<{ results?: ArticleCCTPSuggestion[] } | ArticleCCTPSuggestion[]>(
+          `/api/pieces-ecrites/articles/?search=${encodeURIComponent(q)}&est_dans_bibliotheque=true`
+        );
+        const liste = Array.isArray(r) ? r : (r.results ?? []);
+        setSugg(liste.slice(0, 6));
+        if (liste.length > 0) setOuvert(true);
+      } catch { setSugg([]); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [value]);
+  return (
+    <div className={`relative ${className}`} ref={ref}>
+      <input
+        type="text" className="champ-saisie w-full text-xs py-1"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOuvert(true); }}
+        onFocus={() => { if (sugg.length > 0) setOuvert(true); }}
+        placeholder={placeholder} autoComplete="off"
+      />
+      {ouvert && sugg.length > 0 && (
+        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+          <ul className="max-h-44 overflow-y-auto divide-y divide-slate-50">
+            {sugg.map((art) => (
+              <li key={art.id}>
+                <button type="button" className="w-full text-left px-3 py-2 hover:bg-primaire-50 transition"
+                  onMouseDown={(e) => { e.preventDefault(); onChange(art.intitule); setSugg([]); setOuvert(false); }}>
+                  <p className="text-xs font-medium text-slate-800 truncate">{art.intitule}</p>
+                  {(art.code_reference || art.lot_intitule) && (
+                    <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                      {[art.code_reference, art.lot_intitule].filter(Boolean).join(" — ")}
+                    </p>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface FormLigneProps {
@@ -459,6 +527,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
         metre: metreId,
         numero_ordre: Number(form.numero_ordre),
         code_article: form.code_article,
+        localisation: form.localisation,
         designation: form.designation,
         nature: form.nature,
         quantite: form.quantite === "" ? null : Number(form.quantite),
@@ -517,6 +586,13 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                   {NATURES.map((n) => <option key={n.val} value={n.val}>{n.lib}</option>)}
                 </select>
               </div>
+            </div>
+
+            {/* Localisation */}
+            <div>
+              <label className="libelle-champ">Localisation</label>
+              <input type="text" className="champ-saisie w-full" placeholder="Ex. : RDC — Séjour, Bât. A niveau 2…"
+                value={form.localisation} onChange={(e) => maj("localisation", e.target.value)} />
             </div>
 
             {/* Désignation avec autocomplete CCTP */}
@@ -652,7 +728,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                     <div>
                       <p className="text-sm font-semibold text-blue-900">Quantité calculée</p>
                       <p className="text-2xl font-semibold text-blue-900">
-                        {apercuCalcul.quantite_calculee.toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                        {formaterMesure(apercuCalcul.quantite_calculee, form.unite)}
                       </p>
                     </div>
                     <button type="button" onClick={() => maj("quantite", String(apercuCalcul.quantite_calculee))}
@@ -665,7 +741,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                       <div key={i} className="rounded-xl border border-blue-100 bg-white px-3 py-2">
                         <p className="font-medium">{etape.libelle}</p>
                         <p className="font-mono">{etape.expression}</p>
-                        <p className="mt-1 text-blue-700">= {etape.valeur.toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</p>
+                        <p className="mt-1 text-blue-700">= {formaterMesure(etape.valeur, form.unite)}</p>
                       </div>
                     ))}
                   </div>
@@ -721,6 +797,7 @@ interface ZoneVisualisee {
   parentZoneId?: string;  // Pour les soustractions : ID de la zone parent
   sousZoneDeId?: string;  // Pour la hiérarchie : ID de la zone parente (zone 1.1 sous zone 1)
   numeroZone?: string;    // Numéro d'affichage (ex: "1", "1.1", "1.2")
+  localisation?: string;
   designation: string;
   unite: string;
   points: PointCanvas[];
@@ -891,6 +968,7 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
           ? (zonesAEnregistrer.find((z) => z.id === zone.sousZoneDeId)?.dbId ?? null)
           : null;
         const payload = {
+          localisation: zone.localisation ?? "",
           designation: zone.designation,
           type_mesure: zone.type,
           points_px: zone.points.map((p) => [p.x, p.y]),
@@ -1008,7 +1086,7 @@ ${lignesLegende.map((z) => `
   <tr>
     <td><span class="puce" style="background:${z.couleur}"></span>${z.designation}</td>
     <td>${z.type === "surface" ? "Surface" : z.type === "longueur" ? "Longueur" : "Comptage"}</td>
-    <td>${z.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 3 })}</td>
+    <td>${formaterMesure(z.valeur, z.unite)}</td>
     <td>${z.unite}</td>
     <td>${echelle.toFixed(1)} px/m</td>
   </tr>
@@ -1016,14 +1094,14 @@ ${lignesLegende.map((z) => `
   <tr class="soustraction">
     <td>↳ − ${d.designation}</td>
     <td>Déduction</td>
-    <td>− ${d.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 3 })}</td>
+    <td>− ${formaterMesure(d.valeur, z.unite)}</td>
     <td>${d.unite}</td>
     <td></td>
   </tr>`).join("")}
   ${z.deductions_zones.length > 0 ? `
   <tr class="nette">
     <td colspan="2">Valeur nette — ${z.designation}</td>
-    <td>${z.valeurNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })}</td>
+    <td>${formaterMesure(z.valeurNette, z.unite)}</td>
     <td>${z.unite}</td>
     <td></td>
   </tr>` : ""}
@@ -1922,7 +2000,7 @@ ${lignesLegende.map((z) => `
     const echelle = (fp.echelle && fp.echelle > 0) ? fp.echelle : 50;
     try {
       const zonesExistantes = await api.get<Array<{
-        id: string; designation: string; type_mesure: string;
+        id: string; localisation?: string; designation: string; type_mesure: string;
         points_px: Array<[number, number]>;
         deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number}>;
         unite: string; couleur: string; ordre: number;
@@ -1943,6 +2021,7 @@ ${lignesLegende.map((z) => `
         dbIdToLocalId[z.id] = localId;
         zonesChargees.push({
           id: localId, dbId: z.id, type, mode: "ajout",
+          localisation: z.localisation ?? "",
           designation: z.designation, unite: z.unite, points: pts, valeur,
           couleur: z.couleur, deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
           numeroZone: z.numero || undefined,
@@ -2734,18 +2813,26 @@ ${lignesLegende.map((z) => `
                             )}
                           </div>
                           <input
-                            type="text" className="champ-saisie w-full text-xs py-1"
-                            value={zone.designation}
-                            onChange={(e) => modifierZone(zone.id, { designation: e.target.value })}
+                            type="text" className="champ-saisie w-full text-xs py-1 mb-1"
+                            value={zone.localisation ?? ""}
+                            onChange={(e) => modifierZone(zone.id, { localisation: e.target.value })}
                             onClick={(e) => e.stopPropagation()}
+                            placeholder="Localisation (pièce, niveau…)"
                           />
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <ChampCCTP
+                              value={zone.designation}
+                              onChange={(v) => modifierZone(zone.id, { designation: v })}
+                              placeholder="Désignation de la prestation…"
+                            />
+                          </div>
                           <div className="mt-1 flex items-center gap-2">
                             <p className="font-mono text-xs text-slate-600">
                               {zone.type === "comptage"
                                 ? `${zone.points.length} u`
                                 : zone.type === "longueur" && zone.hauteur
-                                  ? `${(zone.valeur * zone.hauteur).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} m²`
-                                  : `${zone.valeur.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${zone.unite}`
+                                  ? `${formaterMesure(zone.valeur * zone.hauteur, "m²")} m²`
+                                  : `${formaterMesure(zone.valeur, zone.unite)} ${zone.unite}`
                               }
                             </p>
                           </div>
@@ -2911,7 +2998,7 @@ ${lignesLegende.map((z) => `
                       <div className="ml-5 rounded-lg bg-green-50 border border-green-200 px-3 py-1.5 flex items-center justify-between">
                         <span className="text-xs text-green-700 font-medium">Valeur nette</span>
                         <span className="font-mono text-xs font-bold text-green-800">
-                          {valeurNette.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} {zone.type === "longueur" && zone.hauteur ? "m²" : zone.unite}
+                          {formaterMesure(valeurNette, zone.type === "longueur" && zone.hauteur ? "m²" : zone.unite)} {zone.type === "longueur" && zone.hauteur ? "m²" : zone.unite}
                         </span>
                       </div>
                     )}
@@ -3262,6 +3349,7 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
           initial={edition ? {
             numero_ordre: String(edition.numero_ordre),
             code_article: edition.code_article,
+            localisation: edition.localisation ?? "",
             designation: edition.designation,
             nature: edition.nature,
             quantite: edition.quantite != null ? String(edition.quantite) : "",

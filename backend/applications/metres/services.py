@@ -1278,6 +1278,7 @@ def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
     ligne = LigneMetre.objects.create(
         metre=metre,
         numero_ordre=numero_ordre,
+        localisation=getattr(zone, "localisation", "") or "",
         designation=zone.designation,
         nature="travaux",
         quantite=Decimal(str(resultats["valeur_nette"])),
