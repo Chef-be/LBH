@@ -354,18 +354,26 @@ interface ArticleCCTPSuggestion {
 }
 
 // Champ de désignation avec autocomplete CCTP — version compacte pour les zones
+// Comportement : une fois une valeur confirmée (blur ou sélection), affiche en lecture avec une croix de réinitialisation.
 function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestation…", className = "" }: {
   value: string; onChange: (v: string) => void; placeholder?: string; className?: string;
 }) {
+  const [saisieActive, setSaisieActive] = useState(!value);
   const [sugg, setSugg] = useState<ArticleCCTPSuggestion[]>([]);
   const [ouvert, setOuvert] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Si la valeur change depuis l'extérieur (chargement depuis BDD), refléter l'état
+  useEffect(() => { if (!value) setSaisieActive(true); }, [value]);
+
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOuvert(false); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, []);
+
   useEffect(() => {
+    if (!saisieActive) { setSugg([]); return; }
     const q = value.trim();
     if (q.length < 2) { setSugg([]); return; }
     const t = setTimeout(async () => {
@@ -379,7 +387,26 @@ function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestati
       } catch { setSugg([]); }
     }, 350);
     return () => clearTimeout(t);
-  }, [value]);
+  }, [value, saisieActive]);
+
+  // Mode lecture — désignation confirmée
+  if (!saisieActive && value) {
+    return (
+      <div className={`flex items-start gap-1 rounded-lg bg-primaire-50 border border-primaire-200 px-2 py-1 ${className}`}>
+        <span className="flex-1 text-xs text-primaire-900 leading-snug break-words">{value}</span>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onChange(""); setSaisieActive(true); }}
+          className="shrink-0 ml-1 text-primaire-400 hover:text-red-500 transition mt-0.5"
+          title="Effacer la désignation"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+
+  // Mode saisie — autocomplete actif
   return (
     <div className={`relative ${className}`} ref={ref}>
       <input
@@ -387,7 +414,9 @@ function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestati
         value={value}
         onChange={(e) => { onChange(e.target.value); setOuvert(true); }}
         onFocus={() => { if (sugg.length > 0) setOuvert(true); }}
+        onBlur={() => { if (value.trim()) { setSaisieActive(false); setOuvert(false); } }}
         placeholder={placeholder} autoComplete="off"
+        autoFocus={!!value}
       />
       {ouvert && sugg.length > 0 && (
         <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
@@ -395,7 +424,13 @@ function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestati
             {sugg.map((art) => (
               <li key={art.id}>
                 <button type="button" className="w-full text-left px-3 py-2 hover:bg-primaire-50 transition"
-                  onMouseDown={(e) => { e.preventDefault(); onChange(art.intitule); setSugg([]); setOuvert(false); }}>
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onChange(art.intitule);
+                    setSugg([]);
+                    setOuvert(false);
+                    setSaisieActive(false);
+                  }}>
                   <p className="text-xs font-medium text-slate-800 truncate">{art.intitule}</p>
                   {(art.code_reference || art.lot_intitule) && (
                     <p className="text-[10px] text-slate-400 mt-0.5 truncate">
