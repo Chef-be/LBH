@@ -1359,7 +1359,7 @@ ${lignesLegende.map((z) => `
     }
 
     // Indicateur d'accroche objet (cercle jaune + croix)
-    if (pointSnap && outil !== "selection" && outil !== "calibrer") {
+    if (pointSnap && outil !== "selection") {
       const r = 8 / zoom;
       ctx.save();
       ctx.globalAlpha = 1;
@@ -1509,7 +1509,7 @@ ${lignesLegende.map((z) => `
       return;
     }
     if (outil === "calibrer") {
-      const pt = coordCanvas(e);
+      const pt = pointSnap ?? coordCanvas(e);
       setCalibrationPoints((prev) => {
         const next = [...prev, pt];
         if (next.length === 2 && longueurConnue) {
@@ -1543,7 +1543,7 @@ ${lignesLegende.map((z) => `
       return;
     }
     if (outil === "regle") {
-      const pt = coordCanvas(e);
+      const pt = pointSnap ?? coordCanvas(e);
       setReglePoints((prev) => {
         if (prev.length >= 2) return [pt]; // Nouveau segment : réinitialise
         return [...prev, pt];
@@ -1632,7 +1632,7 @@ ${lignesLegende.map((z) => `
 
     // Accroche objet : cherche le point DXF le plus proche dans le rayon de snap
     let snap: PointCanvas | null = null;
-    if (accrocheActive && pointsAccroche.length > 0 && fondPlan && outil !== "selection" && outil !== "calibrer") {
+    if (accrocheActive && pointsAccroche.length > 0 && fondPlan && outil !== "selection") {
       const imgW = fondPlan.naturalWidth;
       const imgH = fondPlan.naturalHeight;
       const rayonImg = RAYON_SNAP_PX / zoom; // rayon en pixels image
