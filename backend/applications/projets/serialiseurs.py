@@ -343,6 +343,9 @@ class PlanningGeneralSerialiseur(serializers.ModelSerializer):
             "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]
+        extra_kwargs = {
+            "projet": {"required": False},
+        }
 
 
 class PlanningGeneralListeSerialiseur(serializers.ModelSerializer):

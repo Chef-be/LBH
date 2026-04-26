@@ -135,7 +135,7 @@ function ModalRessources({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl">
+      <div className="bg-[var(--fond-carte)] rounded-2xl shadow-xl w-full max-w-xl border border-[var(--bordure-fm)]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gris-100">
           <div>
             <h3 className="text-sm font-semibold text-gris-900">Ressources affectées</h3>
@@ -153,13 +153,13 @@ function ModalRessources({
           {ressources.map((r, i) => (
             <div key={i} className="flex items-center gap-2">
               <input
-                className="flex-1 min-w-0 rounded-lg border border-gris-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primaire-400"
+                className="champ-saisie flex-1 min-w-0 !py-1 !px-2 !text-xs"
                 placeholder="Nom / Équipe"
                 value={r.nom}
                 onChange={(e) => modifier(i, "nom", e.target.value)}
               />
               <input
-                className="w-28 rounded-lg border border-gris-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primaire-400"
+                className="champ-saisie w-28 !py-1 !px-2 !text-xs"
                 placeholder="Rôle"
                 value={r.role}
                 onChange={(e) => modifier(i, "role", e.target.value)}
@@ -167,13 +167,13 @@ function ModalRessources({
               <input
                 type="number"
                 min={0}
-                className="w-16 rounded-lg border border-gris-200 px-2 py-1.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-primaire-400"
+                className="champ-saisie w-16 !py-1 !px-2 !text-xs text-right"
                 placeholder="0"
                 value={r.charge || ""}
                 onChange={(e) => modifier(i, "charge", parseFloat(e.target.value) || 0)}
               />
               <select
-                className="w-14 rounded-lg border border-gris-200 px-1 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primaire-400"
+                className="champ-saisie w-14 !py-1 !px-1 !text-xs"
                 value={r.unite}
                 onChange={(e) => modifier(i, "unite", e.target.value)}
               >
@@ -197,7 +197,7 @@ function ModalRessources({
             Ajouter une ressource
           </button>
           <div className="flex gap-2">
-            <button onClick={onFermer} className="px-3 py-1.5 text-xs text-gris-600 border border-gris-200 rounded-lg hover:bg-gris-50">
+            <button onClick={onFermer} className="px-3 py-1.5 text-xs text-[var(--texte-2)] border border-[var(--bordure-fm)] rounded-lg hover:bg-[var(--fond-survol)]">
               Annuler
             </button>
             <button
@@ -236,7 +236,7 @@ function ModalDependances({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+      <div className="bg-[var(--fond-carte)] rounded-2xl shadow-xl w-full max-w-md border border-[var(--bordure-fm)]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gris-100">
           <h3 className="text-sm font-semibold text-gris-900">Dépendances (finit-début)</h3>
           <button onClick={onFermer} className="text-gris-400 hover:text-gris-600"><X className="w-4 h-4" /></button>
@@ -258,7 +258,7 @@ function ModalDependances({
           ))}
         </div>
         <div className="px-5 py-3 border-t border-gris-100 flex justify-end gap-2">
-          <button onClick={onFermer} className="px-3 py-1.5 text-xs text-gris-600 border border-gris-200 rounded-lg hover:bg-gris-50">Annuler</button>
+          <button onClick={onFermer} className="px-3 py-1.5 text-xs text-[var(--texte-2)] border border-[var(--bordure-fm)] rounded-lg hover:bg-[var(--fond-survol)]">Annuler</button>
           <button onClick={() => onSauvegarder(deps)} className="px-3 py-1.5 text-xs font-medium text-white bg-primaire-600 rounded-lg hover:bg-primaire-700">Valider</button>
         </div>
       </div>
@@ -949,7 +949,7 @@ export function PlanningGeneralGantt({ projetId }: { projetId: string }) {
       {/* Modal création planning */}
       {modalCreation && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+          <div className="bg-[var(--fond-carte)] rounded-2xl shadow-xl w-full max-w-md p-6 border border-[var(--bordure-fm)]">
             <h3 className="text-base font-semibold text-gris-900 mb-4">Nouveau planning Gantt</h3>
 
             <div className="space-y-4">
@@ -959,7 +959,7 @@ export function PlanningGeneralGantt({ projetId }: { projetId: string }) {
                   type="text"
                   value={nomNouveauPlanning}
                   onChange={(e) => setNomNouveauPlanning(e.target.value)}
-                  className="w-full rounded-lg border border-gris-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primaire-400"
+                  className="champ-saisie"
                   placeholder="Ex : Planning de chantier 2025"
                 />
               </div>
@@ -984,11 +984,11 @@ export function PlanningGeneralGantt({ projetId }: { projetId: string }) {
                       onClick={() => setModeNouveauPlanning(m.val as "general" | "execution")}
                       className={`text-left p-3 rounded-xl border-2 transition-colors ${
                         modeNouveauPlanning === m.val
-                          ? "border-primaire-400 bg-primaire-50"
-                          : "border-gris-200 hover:border-gris-300"
+                          ? "border-primaire-400 bg-primaire-50 dark:bg-primaire-900/20"
+                          : "border-[var(--bordure-fm)] hover:border-[var(--bordure-fort)]"
                       }`}
                     >
-                      <div className={`text-sm font-medium ${modeNouveauPlanning === m.val ? "text-primaire-700" : "text-gris-700"}`}>
+                      <div className={`text-sm font-medium ${modeNouveauPlanning === m.val ? "text-primaire-700" : "text-[var(--texte)]"}`}>
                         {m.label}
                       </div>
                       <div className="text-xs text-gris-400 mt-0.5">{m.desc}</div>
@@ -1001,7 +1001,7 @@ export function PlanningGeneralGantt({ projetId }: { projetId: string }) {
             <div className="flex gap-2 mt-6">
               <button
                 onClick={() => setModalCreation(false)}
-                className="flex-1 px-4 py-2 text-sm text-gris-600 border border-gris-200 rounded-lg hover:bg-gris-50"
+                className="flex-1 px-4 py-2 text-sm text-[var(--texte-2)] border border-[var(--bordure-fm)] rounded-lg hover:bg-[var(--fond-survol)]"
               >
                 Annuler
               </button>
