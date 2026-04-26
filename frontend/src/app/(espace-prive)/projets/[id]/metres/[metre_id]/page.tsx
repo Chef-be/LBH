@@ -1229,9 +1229,9 @@ ${lignesLegende.map((z) => `
 
         if (zone.mode === "soustraction") {
           ctx.fillStyle = COULEUR_SOUSTRACTION;
-          ctx.fillText(`− ${zone.designation}`, cx, cy);
+          ctx.fillText(`− ${zone.localisation || zone.designation}`, cx, cy);
         } else {
-          ctx.fillText(zone.designation, cx, cy);
+          ctx.fillText(zone.localisation || zone.designation, cx, cy);
         }
         ctx.font = `${11 / zoom}px system-ui`;
         ctx.fillStyle = couleur;
@@ -1318,57 +1318,89 @@ ${lignesLegende.map((z) => `
       }
     }
 
-    // Règle de mesure — tracé temporaire en vert avec cotation
+    // Règle de mesure — tracé temporaire en vert avec cotation (multi-points)
     if (outil === "regle" && echellePixelParMetre > 0) {
-      const pointsRegle = mousePos && reglePoints.length === 1
+      const tousPoints = mousePos && reglePoints.length >= 1
         ? [...reglePoints, mousePos]
         : reglePoints;
-      if (pointsRegle.length >= 2) {
-        const [A, B] = pointsRegle;
-        const dx = B.x - A.x;
-        const dy = B.y - A.y;
-        const distPx = Math.sqrt(dx * dx + dy * dy);
-        const distM = distPx / echellePixelParMetre;
-        // Ligne principale
+      if (tousPoints.length >= 2) {
         ctx.globalAlpha = 1;
         ctx.strokeStyle = "#16a34a";
         ctx.lineWidth = 2 / zoom;
         ctx.setLineDash([]);
-        ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
-        // Tirets perpendiculaires aux extrémités
-        const angle = Math.atan2(dy, dx);
-        const perpLen = 8 / zoom;
-        for (const pt of [A, B]) {
+        // Tracé polyline
+        ctx.beginPath();
+        ctx.moveTo(tousPoints[0].x, tousPoints[0].y);
+        for (let i = 1; i < tousPoints.length; i++) ctx.lineTo(tousPoints[i].x, tousPoints[i].y);
+        ctx.stroke();
+        // Remplissage polygone si >= 3 points fixés
+        if (reglePoints.length >= 3) {
+          ctx.globalAlpha = 0.1;
+          ctx.fillStyle = "#16a34a";
           ctx.beginPath();
-          ctx.moveTo(pt.x + Math.cos(angle + Math.PI / 2) * perpLen, pt.y + Math.sin(angle + Math.PI / 2) * perpLen);
-          ctx.lineTo(pt.x - Math.cos(angle + Math.PI / 2) * perpLen, pt.y - Math.sin(angle + Math.PI / 2) * perpLen);
-          ctx.stroke();
+          ctx.moveTo(reglePoints[0].x, reglePoints[0].y);
+          for (let i = 1; i < reglePoints.length; i++) ctx.lineTo(reglePoints[i].x, reglePoints[i].y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 1;
         }
-        // Étiquette de mesure
-        const mx = (A.x + B.x) / 2;
-        const my = (A.y + B.y) / 2 - 12 / zoom;
-        const labelRegle = `${distM.toFixed(2)} ml`;
+        // Longueur totale
+        let perimPx = 0;
+        for (let i = 0; i < tousPoints.length - 1; i++) {
+          const dx = tousPoints[i + 1].x - tousPoints[i].x;
+          const dy = tousPoints[i + 1].y - tousPoints[i].y;
+          perimPx += Math.sqrt(dx * dx + dy * dy);
+        }
+        const perimM = perimPx / echellePixelParMetre;
+        // Étiquette longueur totale au centroïde
+        const cxR = tousPoints.reduce((s, p) => s + p.x, 0) / tousPoints.length;
+        const cyR = tousPoints.reduce((s, p) => s + p.y, 0) / tousPoints.length - 14 / zoom;
         ctx.font = `bold ${12 / zoom}px system-ui`;
         ctx.textAlign = "center";
+        let labelRegle = `${perimM.toFixed(2)} ml`;
+        // Surface si >= 3 points fixés
+        if (reglePoints.length >= 3) {
+          const surfPx = calculerSurface(reglePoints);
+          const surfM2 = surfPx / (echellePixelParMetre * echellePixelParMetre);
+          labelRegle = `${perimM.toFixed(2)} ml  |  ${surfM2.toFixed(2)} m²`;
+        }
         const tw = ctx.measureText(labelRegle).width;
         ctx.fillStyle = "#15803d";
-        ctx.fillRect(mx - tw / 2 - 4 / zoom, my - 13 / zoom, tw + 8 / zoom, 17 / zoom);
+        ctx.fillRect(cxR - tw / 2 - 4 / zoom, cyR - 13 / zoom, tw + 8 / zoom, 17 / zoom);
         ctx.fillStyle = "white";
-        ctx.fillText(labelRegle, mx, my);
-      } else if (reglePoints.length === 1 && mousePos) {
-        // Aperçu avant le 2e clic
-        ctx.globalAlpha = 0.7;
+        ctx.fillText(labelRegle, cxR, cyR);
+        // Segment actif : étiquette distance depuis dernier point fixé
+        if (mousePos && reglePoints.length >= 1) {
+          const last = reglePoints[reglePoints.length - 1];
+          const ddx = mousePos.x - last.x;
+          const ddy = mousePos.y - last.y;
+          const segM = Math.sqrt(ddx * ddx + ddy * ddy) / echellePixelParMetre;
+          const smx = (last.x + mousePos.x) / 2;
+          const smy = (last.y + mousePos.y) / 2 - 8 / zoom;
+          const segLabel = `${segM.toFixed(2)} ml`;
+          const stw = ctx.measureText(segLabel).width;
+          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = "#15803d";
+          ctx.fillRect(smx - stw / 2 - 3 / zoom, smy - 11 / zoom, stw + 6 / zoom, 14 / zoom);
+          ctx.fillStyle = "white";
+          ctx.fillText(segLabel, smx, smy);
+          ctx.globalAlpha = 1;
+        }
+      } else if (reglePoints.length === 0 && mousePos) {
+        // Aperçu premier point
+        ctx.globalAlpha = 0.6;
         ctx.strokeStyle = "#16a34a";
         ctx.lineWidth = 1.5 / zoom;
         ctx.setLineDash([5 / zoom, 3 / zoom]);
-        ctx.beginPath(); ctx.moveTo(reglePoints[0].x, reglePoints[0].y); ctx.lineTo(mousePos.x, mousePos.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(mousePos.x, mousePos.y); ctx.stroke();
         ctx.setLineDash([]);
-      }
-      // Point de départ
-      if (reglePoints.length >= 1) {
-        ctx.fillStyle = "#16a34a";
         ctx.globalAlpha = 1;
-        ctx.beginPath(); ctx.arc(reglePoints[0].x, reglePoints[0].y, 4 / zoom, 0, Math.PI * 2); ctx.fill();
+      }
+      // Points fixés
+      ctx.fillStyle = "#16a34a";
+      ctx.globalAlpha = 1;
+      for (const rp of reglePoints) {
+        ctx.beginPath(); ctx.arc(rp.x, rp.y, 4 / zoom, 0, Math.PI * 2); ctx.fill();
       }
     }
 
@@ -1545,6 +1577,7 @@ ${lignesLegende.map((z) => `
     let numeroZone: string | undefined;
     let designation: string;
 
+    let localisation = "";
     if (!estSoustraction && pendingParentId) {
       // Mode sous-zone : tag la zone avec le parent
       const parent = zones.find((z) => z.id === pendingParentId);
@@ -1552,17 +1585,22 @@ ${lignesLegende.map((z) => `
       const existingChildren = zones.filter((z) => z.sousZoneDeId === pendingParentId);
       const parentNum = parent?.numeroZone || String(zonesAjout.filter((z) => !z.sousZoneDeId).indexOf(parent!) + 1);
       numeroZone = `${parentNum}.${existingChildren.length + 1}`;
-      designation = parent?.designation ?? `Sous-zone ${numeroZone}`;
+      localisation = `Zone ${numeroZone}`;
+      designation = "";
     } else {
-      designation = estSoustraction
-        ? `Déduction ${zones.filter((z) => z.mode === "soustraction").length + 1}`
-        : `Zone ${zonesAjout.filter((z) => !z.sousZoneDeId).length + 1}`;
+      if (estSoustraction) {
+        localisation = `Déduction ${zones.filter((z) => z.mode === "soustraction").length + 1}`;
+      } else {
+        localisation = `Zone ${zonesAjout.filter((z) => !z.sousZoneDeId).length + 1}`;
+      }
+      designation = "";
     }
 
     const nouvelleZone: ZoneVisualisee = {
       id: `zone-${Date.now()}`,
       type: typeZone,
       mode: estSoustraction ? "soustraction" : "ajout",
+      localisation,
       designation,
       sousZoneDeId,
       numeroZone,
@@ -1590,6 +1628,10 @@ ${lignesLegende.map((z) => `
         });
         setPointsEnCours([]);
         setZoneSelectionnee(nouvelleZone.id);
+        // Pour une déduction longueur, demander la hauteur automatiquement
+        if (typeZone === "longueur") {
+          setModalHauteur({ zoneId: nouvelleZone.id, hauteurActuelle: "" });
+        }
       } else {
         setModalParentSoustraction(nouvelleZone);
         setPointsEnCours([]);
@@ -1673,10 +1715,7 @@ ${lignesLegende.map((z) => `
     }
     if (outil === "regle") {
       const pt = pointSnap ?? coordCanvas(e);
-      setReglePoints((prev) => {
-        if (prev.length >= 2) return [pt]; // Nouveau segment : réinitialise
-        return [...prev, pt];
-      });
+      setReglePoints((prev) => [...prev, pt]);
       return;
     }
     const pt = pointSnap ?? coordCanvas(e);
@@ -1686,6 +1725,7 @@ ${lignesLegende.map((z) => `
   const gererClicDroit = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     if (outil === "selection") return;
+    if (outil === "regle") { setReglePoints([]); return; }
     finaliserZone();
   };
 
@@ -2313,10 +2353,12 @@ ${lignesLegende.map((z) => `
   const instructionOutil = {
     selection: "Glisser pour naviguer — Molette pour zoomer",
     regle: reglePoints.length === 0
-      ? "Clic pour poser le 1er point de mesure"
+      ? "Clic pour poser le 1er point — clic droit pour réinitialiser"
       : reglePoints.length === 1
-        ? "Clic pour poser le 2e point — la cote s'affiche en vert"
-        : "Clic pour recommencer une nouvelle mesure",
+        ? "Clic pour ajouter un point — longueur totale s'affiche en vert"
+        : reglePoints.length >= 3
+          ? `${reglePoints.length} pts — longueur + surface affichées — clic droit pour réinitialiser`
+          : `${reglePoints.length} pts posés — continuez pour mesurer une surface (≥ 3 pts) — clic droit pour réinitialiser`,
     surface: "Clic pour poser un point — Clic droit pour fermer le polygone",
     soustraction_surface: "Surface à déduire (rouge) — Clic droit pour fermer",
     longueur: "Clic pour ajouter un segment — Clic droit pour terminer",
@@ -2363,6 +2405,9 @@ ${lignesLegende.map((z) => `
                     });
                     setZoneSelectionnee(avecParent.id);
                     setModalParentSoustraction(null);
+                    if (modalParentSoustraction!.type === "longueur") {
+                      setModalHauteur({ zoneId: avecParent.id, hauteurActuelle: "" });
+                    }
                   }}
                   className="w-full flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-left text-sm hover:border-primaire-300 hover:bg-primaire-50 transition"
                 >
@@ -2389,9 +2434,10 @@ ${lignesLegende.map((z) => `
       {modalHauteur && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="font-semibold text-slate-800">Hauteur de la polyligne</h3>
+            <h3 className="font-semibold text-slate-800">Hauteur à appliquer</h3>
             <p className="text-sm text-slate-500">
-              En renseignant une hauteur, la longueur sera multipliée pour obtenir une surface (ex: mur vertical, ouverture).
+              Indiquez la hauteur (m) à multiplier par la longueur tracée pour obtenir la surface (m²).
+              Exemple : largeur d&apos;une ouverture × hauteur = surface à déduire.
             </p>
             <div>
               <label className="libelle-champ">Hauteur (m)</label>

@@ -1265,15 +1265,17 @@ def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
     from .models import LigneMetre
 
     resultats = calculer_zone_mesure(zone)
-    detail = f"Mesure visuelle {zone.type_mesure}"
+    loc = getattr(zone, "localisation", "") or ""
+    prefixe = f"{loc} — " if loc else ""
+    detail = f"{prefixe}Mesure visuelle {zone.type_mesure}"
     if zone.type_mesure == "surface":
         detail = (
-            f"Brut {resultats['valeur_brute']:.3f} m2"
+            f"{prefixe}Brut {resultats['valeur_brute']:.3f} m2"
             f" - Deductions {resultats['valeur_deduction']:.3f} m2"
             f" = Net {resultats['valeur_nette']:.3f} m2"
         )
     elif zone.type_mesure in ("longueur", "perimetre"):
-        detail = f"Longueur {resultats['valeur_nette']:.3f} ml"
+        detail = f"{prefixe}Longueur {resultats['valeur_nette']:.3f} ml"
 
     ligne = LigneMetre.objects.create(
         metre=metre,
