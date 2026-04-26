@@ -814,12 +814,13 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
   const [opaciteSecondaire, setOpaciteSecondaire] = useState(0.4);
   const [panneauSuppressionFond, setPanneauSuppressionFond] = useState(false);
 
-  // Accroche objet (snap) — points DXF en coordonnées image normalisées [0,1]
-  const [pointsAccroche, setPointsAccroche] = useState<Array<[number, number]>>([]);
+  // Accroche objet (snap) — points en coordonnées image normalisées [0,1] + type ("e","m","c","q","z")
+  const [pointsAccroche, setPointsAccroche] = useState<Array<[number, number, string?]>>([]);
   const [pointSnap, setPointSnap] = useState<PointCanvas | null>(null);
+  const [pointSnapType, setPointSnapType] = useState<string>("e");
   const [accrocheActive, setAccrocheActive] = useState(true);
   const [echelleAutoInfo, setEchelleAutoInfo] = useState<{ confiance: string; methode: string; details: string } | null>(null);
-  const RAYON_SNAP_PX = 14; // pixels écran
+  const RAYON_SNAP_PX = 16; // pixels écran
 
   // Adapte le canvas à la taille du conteneur
   useEffect(() => {
@@ -1359,30 +1360,78 @@ ${lignesLegende.map((z) => `
       }
     }
 
-    // Indicateur d'accroche objet (cercle jaune + croix)
+    // Indicateur d'accroche objet — visuel différencié par type
     if (pointSnap && outil !== "selection") {
-      const r = 8 / zoom;
+      const r = 9 / zoom;
+      const lw = 1.5 / zoom;
       ctx.save();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = "#f59e0b";
-      ctx.fillStyle = "rgba(251,191,36,0.15)";
-      ctx.lineWidth = 1.5 / zoom;
-      ctx.beginPath();
-      ctx.arc(pointSnap.x, pointSnap.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Croix intérieure
-      ctx.beginPath();
-      ctx.moveTo(pointSnap.x - r * 0.6, pointSnap.y);
-      ctx.lineTo(pointSnap.x + r * 0.6, pointSnap.y);
-      ctx.moveTo(pointSnap.x, pointSnap.y - r * 0.6);
-      ctx.lineTo(pointSnap.x, pointSnap.y + r * 0.6);
-      ctx.stroke();
+      ctx.lineWidth = lw;
+
+      const COULEURS: Record<string, [string, string]> = {
+        e: ["#f59e0b", "rgba(251,191,36,0.15)"],  // Extrémité — jaune
+        m: ["#3b82f6", "rgba(59,130,246,0.15)"],  // Milieu — bleu
+        c: ["#10b981", "rgba(16,185,129,0.15)"],  // Centre — vert
+        q: ["#8b5cf6", "rgba(139,92,246,0.15)"],  // Quadrant — violet
+        z: ["#ef4444", "rgba(239,68,68,0.15)"],   // Zone — rouge
+      };
+      const [stroke, fill] = COULEURS[pointSnapType] ?? COULEURS["e"];
+      ctx.strokeStyle = stroke;
+      ctx.fillStyle = fill;
+
+      if (pointSnapType === "e" || pointSnapType === "z") {
+        // Carré pour extrémité / sommet de zone
+        ctx.beginPath();
+        ctx.rect(pointSnap.x - r, pointSnap.y - r, r * 2, r * 2);
+        ctx.fill(); ctx.stroke();
+      } else if (pointSnapType === "m") {
+        // Losange pour milieu
+        ctx.beginPath();
+        ctx.moveTo(pointSnap.x, pointSnap.y - r);
+        ctx.lineTo(pointSnap.x + r, pointSnap.y);
+        ctx.lineTo(pointSnap.x, pointSnap.y + r);
+        ctx.lineTo(pointSnap.x - r, pointSnap.y);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else if (pointSnapType === "c") {
+        // Cercle + point central pour centre
+        ctx.beginPath();
+        ctx.arc(pointSnap.x, pointSnap.y, r, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(pointSnap.x, pointSnap.y, r * 0.2, 0, Math.PI * 2);
+        ctx.fillStyle = stroke; ctx.fill();
+      } else {
+        // Cercle + croix pour quadrant
+        ctx.beginPath();
+        ctx.arc(pointSnap.x, pointSnap.y, r, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pointSnap.x - r * 0.7, pointSnap.y);
+        ctx.lineTo(pointSnap.x + r * 0.7, pointSnap.y);
+        ctx.moveTo(pointSnap.x, pointSnap.y - r * 0.7);
+        ctx.lineTo(pointSnap.x, pointSnap.y + r * 0.7);
+        ctx.stroke();
+      }
+
+      // Label de type
+      const LABELS: Record<string, string> = {
+        e: "Extrémité", m: "Milieu", c: "Centre", q: "Quadrant", z: "Zone",
+      };
+      const label = LABELS[pointSnapType] ?? "Accroche";
+      ctx.font = `${10 / zoom}px system-ui`;
+      ctx.textAlign = "left";
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = stroke;
+      ctx.fillRect(pointSnap.x + r + 2 / zoom, pointSnap.y - 9 / zoom, tw + 4 / zoom, 12 / zoom);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, pointSnap.x + r + 4 / zoom, pointSnap.y);
+
       ctx.restore();
     }
 
     ctx.restore();
-  }, [fondPlan, fondPlanSecondaire, opaciteSecondaire, zones, zoneSelectionnee, pointsEnCours, mousePos, pointSnap, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
+  }, [fondPlan, fondPlanSecondaire, opaciteSecondaire, zones, zoneSelectionnee, pointsEnCours, mousePos, pointSnap, pointSnapType, offset, zoom, echellePixelParMetre, outil, calibrationPoints, reglePoints]);
 
   useEffect(() => { dessiner(); }, [dessiner]);
 
@@ -1632,24 +1681,44 @@ ${lignesLegende.map((z) => `
   const gererMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pt = coordCanvas(e);
 
-    // Accroche objet : cherche le point DXF le plus proche dans le rayon de snap
+    // Accroche objet : cherche le point le plus proche (plan + zones existantes)
     let snap: PointCanvas | null = null;
-    if (accrocheActive && pointsAccroche.length > 0 && fondPlan && outil !== "selection") {
+    let snapType = "e";
+    if (accrocheActive && fondPlan && outil !== "selection") {
       const imgW = fondPlan.naturalWidth;
       const imgH = fondPlan.naturalHeight;
-      const rayonImg = RAYON_SNAP_PX / zoom; // rayon en pixels image
+      const rayonImg = RAYON_SNAP_PX / zoom;
+      // Priorité : endpoints (e/q) > milieux (m) > centres (c) > zones (z)
+      const PRIO: Record<string, number> = { e: 0, q: 1, m: 2, c: 3, z: 4 };
       let distMin = Infinity;
-      for (const [nx, ny] of pointsAccroche) {
+      let prioMin = 9;
+
+      // Points extraits du plan
+      for (const [nx, ny, typ] of pointsAccroche) {
         const px = nx * imgW;
         const py = ny * imgH;
         const d = Math.hypot(px - pt.x, py - pt.y);
-        if (d < rayonImg && d < distMin) {
-          distMin = d;
-          snap = { x: px, y: py };
+        const p = PRIO[typ ?? "e"] ?? 4;
+        if (d < rayonImg && (d < distMin - 1 || (d < distMin + 1 && p < prioMin))) {
+          distMin = d; prioMin = p;
+          snap = { x: px, y: py }; snapType = typ ?? "e";
+        }
+      }
+
+      // Accroche sur les sommets des zones existantes
+      for (const zone of zones) {
+        for (const zpt of zone.points) {
+          const d = Math.hypot(zpt.x - pt.x, zpt.y - pt.y);
+          const p = PRIO["z"];
+          if (d < rayonImg && (d < distMin - 1 || (d < distMin + 1 && p < prioMin))) {
+            distMin = d; prioMin = p;
+            snap = { x: zpt.x, y: zpt.y }; snapType = "z";
+          }
         }
       }
     }
     setPointSnap(snap);
+    setPointSnapType(snapType);
     setMousePos(snap ?? pt);
 
     const isPanning = isDragging.current || isMidDragging.current;

@@ -251,17 +251,51 @@ def _convertir_dwg_en_dxf(chemin_dwg: str) -> str:
 
 
 def _extents_valides(doc) -> tuple | None:
-    """Retourne (xmin, ymin, xmax, ymax) depuis $EXTMIN/$EXTMAX si valides, sinon None."""
+    """
+    Retourne (xmin, ymin, xmax, ymax) depuis $EXTMIN/$EXTMAX si valides.
+    Fallback : calcul depuis la bounding-box réelle des entités du modelspace.
+    """
     import math
     try:
         extmin = doc.header.get("$EXTMIN")
         extmax = doc.header.get("$EXTMAX")
-        if not (extmin and extmax):
-            return None
-        xmin, ymin = float(extmin[0]), float(extmin[1])
-        xmax, ymax = float(extmax[0]), float(extmax[1])
-        if all(math.isfinite(v) for v in (xmin, ymin, xmax, ymax)) and xmax > xmin and ymax > ymin:
-            return xmin, ymin, xmax, ymax
+        if extmin and extmax:
+            xmin, ymin = float(extmin[0]), float(extmin[1])
+            xmax, ymax = float(extmax[0]), float(extmax[1])
+            # Valeurs "unset" qu'AutoCAD place souvent dans les headers invalides
+            INVALIDE = 1e+20
+            if (all(math.isfinite(v) for v in (xmin, ymin, xmax, ymax))
+                    and xmax > xmin and ymax > ymin
+                    and abs(xmin) < INVALIDE and abs(ymin) < INVALIDE):
+                return xmin, ymin, xmax, ymax
+    except Exception:
+        pass
+
+    # Fallback : parcourt les entités du modelspace pour calculer le bbox réel
+    try:
+        from ezdxf.bbox import BoundingBox2d
+        bb = BoundingBox2d()
+        for entity in doc.modelspace():
+            try:
+                t = entity.dxftype()
+                if t == "LINE":
+                    bb.extend([entity.dxf.start[:2], entity.dxf.end[:2]])
+                elif t in ("LWPOLYLINE",):
+                    bb.extend([v[:2] for v in entity.get_points()])
+                elif t in ("ARC", "CIRCLE"):
+                    c = entity.dxf.center
+                    r = entity.dxf.radius
+                    bb.extend([(c.x - r, c.y - r), (c.x + r, c.y + r)])
+                elif t in ("INSERT", "TEXT", "MTEXT"):
+                    ins = entity.dxf.insert
+                    bb.extend([(ins.x, ins.y)])
+            except Exception:
+                pass
+        if bb.has_data:
+            xmin, ymin = bb.extmin
+            xmax, ymax = bb.extmax
+            if xmax > xmin and ymax > ymin:
+                return float(xmin), float(ymin), float(xmax), float(ymax)
     except Exception:
         pass
     return None
@@ -738,15 +772,15 @@ def detecter_echelle_auto(fond_plan) -> dict:
 
 
 def _dedupliquer_points(points: list, tolerance: float = 0.0015) -> list:
-    """Déduplique une liste de points [x,y] normalisés par grille."""
+    """Déduplique une liste de points [x, y, type] normalisés par grille (priorité : e > q > m > c > z)."""
+    PRIORITE = {"e": 0, "q": 1, "m": 2, "c": 3, "z": 4}
     grille: dict = {}
-    resultat: list = []
     for p in points:
         clef = (int(p[0] / tolerance), int(p[1] / tolerance))
-        if clef not in grille:
-            grille[clef] = True
-            resultat.append(p)
-    return resultat
+        typ = p[2] if len(p) > 2 else "e"
+        if clef not in grille or PRIORITE.get(typ, 9) < PRIORITE.get(grille[clef][2], 9):
+            grille[clef] = p
+    return list(grille.values())
 
 
 def _normaliser_point(x: float, y: float, x0: float, y0: float, total_w: float, total_h: float):
@@ -796,14 +830,14 @@ def _extraire_points_dxf(chemin: str) -> list:
     points: list = []
     MAX = 10000
 
-    def ajouter(wx, wy):
+    def ajouter(wx, wy, typ="e"):
         if len(points) < MAX:
             p = norm(wx, wy)
             if p:
-                points.append(p)
+                points.append([p[0], p[1], typ])
 
     def ajouter_milieu(ax, ay, bx, by):
-        ajouter((ax + bx) / 2, (ay + by) / 2)
+        ajouter((ax + bx) / 2, (ay + by) / 2, "m")
 
     def traiter(entity, ox=0.0, oy=0.0, sx=1.0, sy=1.0, cos_r=1.0, sin_r=0.0, profondeur=0):
         if len(points) >= MAX or profondeur > 5:
@@ -853,22 +887,57 @@ def _extraire_points_dxf(chemin: str) -> list:
 
             elif t == "ARC":
                 c, r = entity.dxf.center, entity.dxf.radius
-                sa, ea = math.radians(entity.dxf.start_angle), math.radians(entity.dxf.end_angle)
-                for angle in (sa, ea, (sa + ea) / 2):
+                sa = math.radians(entity.dxf.start_angle)
+                ea = math.radians(entity.dxf.end_angle)
+                if ea <= sa:
+                    ea += 2 * math.pi
+                # Extrémités
+                for angle in (sa, ea):
                     lx, ly = c.x + r * math.cos(angle), c.y + r * math.sin(angle)
                     wx, wy = appliquer_transform(lx, ly, ox, oy, sx, sy, cos_r, sin_r)
-                    ajouter(wx, wy)
+                    ajouter(wx, wy, "e")
+                # Milieu
+                mid = (sa + ea) / 2
+                lx, ly = c.x + r * math.cos(mid), c.y + r * math.sin(mid)
+                wx, wy = appliquer_transform(lx, ly, ox, oy, sx, sy, cos_r, sin_r)
+                ajouter(wx, wy, "m")
+                # Centre
                 wx, wy = appliquer_transform(c.x, c.y, ox, oy, sx, sy, cos_r, sin_r)
-                ajouter(wx, wy)
+                ajouter(wx, wy, "c")
+                # Quadrants dans l'étendue de l'arc
+                for qa in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2):
+                    if sa <= qa <= ea or sa <= qa + 2 * math.pi <= ea:
+                        lx, ly = c.x + r * math.cos(qa), c.y + r * math.sin(qa)
+                        wx, wy = appliquer_transform(lx, ly, ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx, wy, "q")
 
             elif t == "CIRCLE":
-                wx, wy = appliquer_transform(entity.dxf.center.x, entity.dxf.center.y, ox, oy, sx, sy, cos_r, sin_r)
-                ajouter(wx, wy)
+                c, r = entity.dxf.center, entity.dxf.radius
+                wx, wy = appliquer_transform(c.x, c.y, ox, oy, sx, sy, cos_r, sin_r)
+                ajouter(wx, wy, "c")
+                # 4 quadrants
+                for qa in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2):
+                    lx, ly = c.x + r * math.cos(qa), c.y + r * math.sin(qa)
+                    wx, wy = appliquer_transform(lx, ly, ox, oy, sx, sy, cos_r, sin_r)
+                    ajouter(wx, wy, "q")
 
             elif t == "ELLIPSE":
                 c = entity.dxf.center
                 wx, wy = appliquer_transform(c.x, c.y, ox, oy, sx, sy, cos_r, sin_r)
-                ajouter(wx, wy)
+                ajouter(wx, wy, "c")
+                try:
+                    major = entity.dxf.major_axis
+                    ratio = entity.dxf.ratio
+                    for fx, fy in ((1, 1), (-1, -1)):
+                        ex, ey = c.x + major.x * fx, c.y + major.y * fx
+                        wx, wy = appliquer_transform(ex, ey, ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx, wy, "q")
+                        ex2 = c.x + (-major.y * ratio) * fy
+                        ey2 = c.y + (major.x * ratio) * fy
+                        wx, wy = appliquer_transform(ex2, ey2, ox, oy, sx, sy, cos_r, sin_r)
+                        ajouter(wx, wy, "q")
+                except Exception:
+                    pass
 
             elif t in ("TEXT", "MTEXT"):
                 ins = entity.dxf.insert if entity.dxf.hasattr("insert") else None
@@ -932,39 +1001,37 @@ def _extraire_points_pdf(chemin: str) -> list:
     def milieu(ax, ay, bx, by):
         return norm((ax + bx) / 2, (ay + by) / 2)
 
+    def ap(p, typ="e"):
+        if p:
+            points.append([p[0], p[1], typ])
+
     for path in page.get_drawings():
         for item in path.get("items", []):
             try:
                 op = item[0]
                 if op == "l":  # segment
                     p1, p2 = item[1], item[2]
-                    for pt in (norm(p1.x, p1.y), norm(p2.x, p2.y), milieu(p1.x, p1.y, p2.x, p2.y)):
-                        if pt:
-                            points.append(pt)
+                    ap(norm(p1.x, p1.y), "e")
+                    ap(norm(p2.x, p2.y), "e")
+                    ap(milieu(p1.x, p1.y, p2.x, p2.y), "m")
                 elif op == "re":  # rectangle
                     r = item[1]
                     corners = [(r.x0, r.y0), (r.x1, r.y0), (r.x1, r.y1), (r.x0, r.y1)]
-                    for i, (cx, cy) in enumerate(corners):
-                        p = norm(cx, cy)
-                        if p:
-                            points.append(p)
-                    # Milieux des côtés
+                    for cx, cy in corners:
+                        ap(norm(cx, cy), "e")
                     for i in range(4):
                         ax, ay = corners[i]
                         bx, by = corners[(i + 1) % 4]
-                        pm = milieu(ax, ay, bx, by)
-                        if pm:
-                            points.append(pm)
+                        ap(milieu(ax, ay, bx, by), "m")
                 elif op == "c":  # courbe de Bézier
                     p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
-                    for pt in (norm(p1.x, p1.y), norm(p4.x, p4.y), milieu(p1.x, p1.y, p4.x, p4.y)):
-                        if pt:
-                            points.append(pt)
+                    ap(norm(p1.x, p1.y), "e")
+                    ap(norm(p4.x, p4.y), "e")
+                    ap(milieu(p1.x, p1.y, p4.x, p4.y), "m")
                 elif op == "qu":  # quadrant arc
                     p1, p2 = item[1], item[2]
-                    for pt in (norm(p1.x, p1.y), norm(p2.x, p2.y)):
-                        if pt:
-                            points.append(pt)
+                    ap(norm(p1.x, p1.y), "q")
+                    ap(norm(p2.x, p2.y), "q")
             except Exception:
                 pass
 
@@ -1018,7 +1085,7 @@ def _extraire_points_image(chemin: str) -> list:
         px, py = float(c[0][0]), float(c[0][1])
         nx, ny = px / rw, py / rh
         if 0 <= nx <= 1 and 0 <= ny <= 1:
-            points.append([round(nx, 6), round(ny, 6)])
+            points.append([round(nx, 6), round(ny, 6), "e"])
 
     return points
 
