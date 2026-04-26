@@ -895,8 +895,33 @@ html.theme-brun-dore {
 ::-webkit-scrollbar-thumb:hover { background-color: var(--texte-3); }
 
 /* ── Frappe Gantt ──────────────────────────────────────────────────────── */
-.gantt-frappe-container { overflow-x: auto; }
-.gantt-frappe-container svg { width: 100%; }
-.gantt .bar-wrapper .bar { fill: #6c8ebf; }
-.gantt .bar-wrapper.tache-lot .bar { fill: #2c5f9e; }
-.gantt .bar-wrapper.tache-jalon .bar { fill: #f59e0b; }
+.gantt-frappe-container { overflow: auto; }
+
+/* Thème sombre — surcharge des variables internes de frappe-gantt */
+html.sombre {
+  --g-arrow-color:              #94a3b8;
+  --g-bar-color:                #334155;
+  --g-bar-border:               #475569;
+  --g-tick-color-thick:         #1e293b;
+  --g-tick-color:               #0f172a;
+  --g-actions-background:       #1e293b;
+  --g-border-color:             #334155;
+  --g-text-muted:               #94a3b8;
+  --g-text-light:               #f1f5f9;
+  --g-text-dark:                #e2e8f0;
+  --g-progress-color:           #475569;
+  --g-handle-color:             #cbd5e1;
+  --g-weekend-label-color:      #334155;
+  --g-expected-progress:        #4a5568;
+  --g-header-background:        #1e293b;
+  --g-row-color:                #0f172a;
+  --g-row-border-color:         #334155;
+  --g-today-highlight:          #6366f1;
+  --g-popup-actions:            #334155;
+  --g-weekend-highlight-color:  #172032;
+}
+
+/* Couleurs des barres */
+.gantt .bar-wrapper .bar             { fill: var(--c-moyen); }
+.gantt .bar-wrapper.tache-lot .bar   { fill: var(--c-fort); }
+.gantt .bar-wrapper.tache-jalon .bar { fill: var(--c-accent); }

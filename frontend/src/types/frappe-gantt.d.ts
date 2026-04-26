@@ -22,6 +22,8 @@ declare module "frappe-gantt" {
     on_progress_change?: (task: GanttTask, progress: number) => void;
     on_click?: (task: GanttTask) => void;
     on_view_change?: (mode: string) => void;
+    scroll_to?: string | Date;
+    view_mode_padding?: string;
   }
 
   export default class Gantt {
