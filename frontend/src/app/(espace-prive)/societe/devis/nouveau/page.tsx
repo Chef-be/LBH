@@ -161,6 +161,7 @@ export default function PageNouveauDevis() {
   const [assistantInitialise, setAssistantInitialise] = useState(false);
   const [utilisateurPressenti, setUtilisateurPressenti] = useState("");
   const [clientLocalId, setClientLocalId] = useState("");
+  const [clientPublicSelectionne, setClientPublicSelectionne] = useState<EntreprisePubliqueOption | null>(null);
   const [roleSocieteAutre, setRoleSocieteAutre] = useState(false);
 
   const requeteParcours = useMemo(() => {
@@ -324,12 +325,16 @@ export default function PageNouveauDevis() {
 
   const mettreAJourFormulaire = <K extends keyof DevisForm>(champ: K, valeur: DevisForm[K]) => {
     setForm((courant) => ({ ...courant, [champ]: valeur }));
-    if (champ === "client_nom") setClientLocalId("");
+    if (champ === "client_nom") {
+      setClientLocalId("");
+      setClientPublicSelectionne(null);
+    }
     if (champ === "role_lbh") setRoleSocieteAutre(!ROLES_SOCIETE.includes(String(valeur)) && Boolean(valeur));
   };
 
   const appliquerClientLocal = (client: OrganisationOption) => {
     setClientLocalId(client.id);
+    setClientPublicSelectionne(null);
     setForm((courant) => ({
       ...courant,
       client_nom: client.nom,
@@ -341,6 +346,7 @@ export default function PageNouveauDevis() {
 
   const appliquerClientPublic = (client: EntreprisePubliqueOption) => {
     setClientLocalId("");
+    setClientPublicSelectionne(client);
     setForm((courant) => ({
       ...courant,
       client_nom: client.nom,
@@ -358,15 +364,21 @@ export default function PageNouveauDevis() {
     if (clientLocalId || !form.client_nom.trim()) return;
     const existe = clientsLocaux.some((client) => client.nom.toLowerCase() === form.client_nom.trim().toLowerCase());
     if (existe) return;
+    const adresseSource = clientPublicSelectionne?.adresse || form.client_adresse;
+    const codePostalSource = clientPublicSelectionne?.code_postal || "";
+    const villeSource = clientPublicSelectionne?.ville || "";
     try {
       const client = await api.post<OrganisationOption>("/api/organisations/", {
         code: `CLIENT-${Date.now()}`,
         nom: form.client_nom.trim(),
         type_organisation: typeOrganisationDepuisClient(),
-        adresse: form.client_adresse,
+        siret: clientPublicSelectionne?.siret || "",
+        adresse: adresseSource,
+        code_postal: codePostalSource,
+        ville: villeSource,
         telephone: form.client_telephone,
         courriel: form.client_email,
-        pays: "France",
+        pays: clientPublicSelectionne?.pays || "France",
         est_active: true,
       });
       setClientLocalId(client.id);

@@ -4,6 +4,7 @@ import json
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+from django.db.models import ProtectedError
 from rest_framework import generics, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
@@ -36,11 +37,22 @@ class VueDetailOrganisation(generics.RetrieveUpdateDestroyAPIView):
     queryset = Organisation.objects.all()
 
     def destroy(self, request, *args, **kwargs):
-        from rest_framework.response import Response
         obj = self.get_object()
-        obj.est_active = False
-        obj.save(update_fields=["est_active"])
-        return Response({"detail": "Organisation désactivée."})
+        if obj.est_active:
+            obj.est_active = False
+            obj.save(update_fields=["est_active"])
+            return Response({"detail": "Organisation désactivée.", "suppression_definitive": False})
+        try:
+            obj.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": "Suppression définitive impossible : cette organisation est encore liée à des projets, utilisateurs ou documents.",
+                    "suppression_definitive": False,
+                },
+                status=400,
+            )
+        return Response({"detail": "Organisation supprimée définitivement.", "suppression_definitive": True})
 
 
 class VueGroupesOrganisation(generics.ListCreateAPIView):

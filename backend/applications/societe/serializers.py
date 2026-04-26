@@ -16,6 +16,7 @@ from .models import (
     Paiement,
     TempsPasse,
 )
+from applications.projets.models import MissionClient
 
 
 # ─────────────────────────────────────────────
@@ -107,6 +108,33 @@ class ChargeFixeStructureSerializer(serializers.ModelSerializer):
             "actif", "ordre", "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "montant_annuel", "date_creation", "date_modification"]
+
+
+class MissionClientSocieteSerializer(serializers.ModelSerializer):
+    livrables_count = serializers.IntegerField(source="livrables.count", read_only=True)
+    profil_horaire_defaut_libelle = serializers.CharField(source="profil_horaire_defaut.libelle", read_only=True)
+
+    class Meta:
+        model = MissionClient
+        fields = [
+            "id",
+            "code",
+            "libelle",
+            "description",
+            "famille_client",
+            "sous_types_client",
+            "nature_ouvrage",
+            "phases_concernees",
+            "est_active",
+            "est_obligatoire",
+            "profil_horaire_defaut",
+            "profil_horaire_defaut_libelle",
+            "duree_etude_heures",
+            "ordre",
+            "livrables_count",
+            "date_creation",
+        ]
+        read_only_fields = ["id", "date_creation", "livrables_count", "profil_horaire_defaut_libelle"]
 
 
 # ─────────────────────────────────────────────

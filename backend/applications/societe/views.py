@@ -32,6 +32,7 @@ from .serializers import (
     LigneFactureSerializer,
     PaiementSerializer,
     TempsPasseSerializer,
+    MissionClientSocieteSerializer,
 )
 from .services import (
     construire_contexte_projet_saisi,
@@ -43,7 +44,9 @@ from .services import (
 )
 from applications.messagerie.services import MessagerieErreur, envoyer_courriel
 from applications.projets.models import Projet
+from applications.projets.models import MissionClient, AffectationProjet
 from applications.projets.serialiseurs import ProjetDetailSerialiseur
+from applications.comptes.models import Utilisateur
 
 
 # ─────────────────────────────────────────────
@@ -241,6 +244,102 @@ class ChargeFixeStructureViewSet(viewsets.ModelViewSet):
     serializer_class = ChargeFixeStructureSerializer
     permission_classes = [permissions.IsAuthenticated]
     queryset = ChargeFixeStructure.objects.all()
+
+
+class MissionClientSocieteViewSet(viewsets.ModelViewSet):
+    serializer_class = MissionClientSocieteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = MissionClient.objects.select_related("profil_horaire_defaut").prefetch_related("livrables")
+        famille_client = self.request.query_params.get("famille_client")
+        nature_ouvrage = self.request.query_params.get("nature_ouvrage")
+        if famille_client:
+            qs = qs.filter(famille_client=famille_client)
+        if nature_ouvrage:
+            qs = qs.filter(nature_ouvrage__in=[nature_ouvrage, "tous"])
+        return qs
+
+
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_assignation_automatique(request):
+    if request.method == "GET":
+        projet_id = request.query_params.get("projet")
+        projet = Projet.objects.filter(pk=projet_id).first() if projet_id else None
+        organisation = (projet.organisation if projet else None) or request.user.organisation
+        utilisateurs = Utilisateur.objects.filter(est_actif=True)
+        if organisation:
+            utilisateurs = utilisateurs.filter(organisation=organisation)
+        utilisateurs = utilisateurs.select_related("profil", "profil_horaire_societe__profil_horaire")
+
+        depuis = timezone.localdate() - timedelta(days=30)
+        suggestions = []
+        for utilisateur in utilisateurs:
+            nb_affectations = AffectationProjet.objects.filter(utilisateur=utilisateur).count()
+            heures_30j = (
+                TempsPasse.objects.filter(utilisateur=utilisateur, date_saisie__gte=depuis)
+                .aggregate(total=Sum("nb_heures"))["total"]
+                or Decimal("0")
+            )
+            profil_horaire = getattr(getattr(utilisateur, "profil_horaire_societe", None), "profil_horaire", None)
+            score_charge = max(0, 100 - int(heures_30j) - (nb_affectations * 3))
+            suggestions.append({
+                "utilisateur": str(utilisateur.id),
+                "nom_complet": utilisateur.nom_complet,
+                "fonction": utilisateur.fonction,
+                "profil_droits": utilisateur.profil.libelle if utilisateur.profil else "",
+                "profil_horaire": str(profil_horaire.id) if profil_horaire else "",
+                "profil_horaire_libelle": profil_horaire.libelle if profil_horaire else "",
+                "nb_affectations": nb_affectations,
+                "heures_30j": str(heures_30j),
+                "score": score_charge,
+            })
+
+        return Response({
+            "suggestions": sorted(suggestions, key=lambda item: item["score"], reverse=True),
+        })
+
+    projet = get_object_or_404(Projet, pk=request.data.get("projet"))
+    utilisateur = get_object_or_404(Utilisateur, pk=request.data.get("utilisateur"), est_actif=True)
+    affectations = request.data.get("affectations") or []
+    if not affectations:
+        affectations = [{"nature": "projet", "code_cible": "", "libelle_cible": projet.intitule, "role": "pilotage"}]
+
+    creees = []
+    for item in affectations:
+        affectation, _ = AffectationProjet.objects.update_or_create(
+            projet=projet,
+            utilisateur=utilisateur,
+            nature=item.get("nature") or "mission",
+            code_cible=item.get("code_cible") or "",
+            defaults={
+                "libelle_cible": item.get("libelle_cible") or "",
+                "role": item.get("role") or "contribution",
+                "commentaires": item.get("commentaires") or "Assignation automatique",
+                "cree_par": request.user,
+            },
+        )
+        creees.append(affectation)
+
+    if request.data.get("responsable") is True:
+        projet.responsable = utilisateur
+        projet.save(update_fields=["responsable", "date_modification"])
+
+    return Response({
+        "detail": f"{len(creees)} affectation(s) enregistrée(s).",
+        "affectations": [
+            {
+                "id": str(affectation.id),
+                "utilisateur": str(affectation.utilisateur_id),
+                "nature": affectation.nature,
+                "code_cible": affectation.code_cible,
+                "libelle_cible": affectation.libelle_cible,
+                "role": affectation.role,
+            }
+            for affectation in creees
+        ],
+    }, status=status.HTTP_201_CREATED)
 
 
 SOURCE_SMIC_SERVICE_PUBLIC = "https://www.service-public.gouv.fr/particuliers/vosdroits/F2300"

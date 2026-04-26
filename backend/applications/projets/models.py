@@ -337,6 +337,20 @@ class MissionClient(models.Model):
     )
     est_active = models.BooleanField(default=True, verbose_name="Active")
     est_obligatoire = models.BooleanField(default=False, verbose_name="Obligatoire")
+    profil_horaire_defaut = models.ForeignKey(
+        "societe.ProfilHoraire",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="missions_client_defaut",
+        verbose_name="Profil horaire par défaut",
+    )
+    duree_etude_heures = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        default=8,
+        verbose_name="Durée d'étude par défaut",
+    )
     ordre = models.PositiveSmallIntegerField(default=0, verbose_name="Ordre d'affichage")
     date_creation = models.DateTimeField(auto_now_add=True)
 

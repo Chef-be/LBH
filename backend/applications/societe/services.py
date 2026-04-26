@@ -100,7 +100,7 @@ def lister_missions_livrables(
     sous_type_client: str = "",
     nature_ouvrage: str = "",
 ) -> list[dict[str, Any]]:
-    missions_qs = MissionClient.objects.filter(est_active=True).prefetch_related("livrables")
+    missions_qs = MissionClient.objects.filter(est_active=True).select_related("profil_horaire_defaut").prefetch_related("livrables")
 
     if famille_client:
         missions_qs = missions_qs.filter(famille_client=famille_client)
@@ -136,6 +136,10 @@ def lister_missions_livrables(
             "icone": mission.icone,
             "couleur": mission.couleur,
             "est_obligatoire": mission.est_obligatoire,
+            "profil_horaire_defaut_id": str(mission.profil_horaire_defaut_id) if mission.profil_horaire_defaut_id else "",
+            "profil_horaire_defaut_libelle": mission.profil_horaire_defaut.libelle if mission.profil_horaire_defaut_id else "",
+            "profil_horaire_defaut_taux": str(mission.profil_horaire_defaut.taux_horaire_ht) if mission.profil_horaire_defaut_id else "",
+            "duree_etude_heures": str(mission.duree_etude_heures),
             "livrables": livrables,
         })
     return missions
@@ -179,6 +183,16 @@ def construire_suggestions_prestations(missions: list[dict[str, Any]], profil_ho
                 "profil_horaire_libelle": profil_horaire.libelle,
                 "taux_horaire_suggere": str(profil_horaire.taux_horaire_ht),
             })
+        elif mission.get("profil_horaire_defaut_id"):
+            suggestion.update({
+                "type_ligne": "horaire",
+                "unite": "h",
+                "profil_horaire_id": mission.get("profil_horaire_defaut_id") or "",
+                "profil_horaire_libelle": mission.get("profil_horaire_defaut_libelle") or "",
+                "taux_horaire_suggere": mission.get("profil_horaire_defaut_taux") or "0.00",
+            })
+        if mission.get("duree_etude_heures"):
+            suggestion["nb_heures_suggerees"] = mission["duree_etude_heures"]
         suggestions.append(suggestion)
     return suggestions
 

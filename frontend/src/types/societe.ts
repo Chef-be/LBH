@@ -41,6 +41,10 @@ export interface MissionAssistantSociete {
   icone: string;
   couleur: string;
   est_obligatoire: boolean;
+  profil_horaire_defaut_id?: string;
+  profil_horaire_defaut_libelle?: string;
+  profil_horaire_defaut_taux?: string;
+  duree_etude_heures?: string;
   livrables: LivrableMissionSociete[];
 }
 

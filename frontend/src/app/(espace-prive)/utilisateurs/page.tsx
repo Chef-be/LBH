@@ -108,10 +108,11 @@ export default function PageUtilisateurs() {
     executerAction(
       `suppression-${utilisateurSuppression.id}`,
       async () => {
-        await api.supprimer(`/api/auth/utilisateurs/${utilisateurSuppression.id}/`);
+        const reponse = await api.supprimer(`/api/auth/utilisateurs/${utilisateurSuppression.id}/`) as { detail?: string; suppression_definitive?: boolean; reaffecte_a?: string };
         setUtilisateurSuppression(null);
+        if (reponse?.detail) setMessage(reponse.detail + (reponse.reaffecte_a ? ` Reprise par ${reponse.reaffecte_a}.` : ""));
       },
-      "Compte utilisateur supprimé de l'accès actif."
+      utilisateurSuppression.est_actif ? "Compte utilisateur désactivé." : "Compte utilisateur supprimé définitivement."
     );
   };
 
@@ -391,7 +392,9 @@ export default function PageUtilisateurs() {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
             <h2 className="text-lg font-semibold text-slate-900">Confirmer la suppression</h2>
             <p className="mt-2 text-sm text-slate-600">
-              Le compte de {utilisateurSuppression.nom_complet} ne pourra plus accéder à la plateforme.
+              {utilisateurSuppression.est_actif
+                ? `Le compte de ${utilisateurSuppression.nom_complet} sera désactivé.`
+                : `Le compte inactif de ${utilisateurSuppression.nom_complet} sera supprimé définitivement. Ses dossiers seront repris par un super-administrateur.`}
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setUtilisateurSuppression(null)} className="btn-secondaire">Annuler</button>

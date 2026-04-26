@@ -70,7 +70,6 @@ const GROUPE_ADMIN: GroupeMenu = {
   entrees: [
     { libelle: "Administration", chemin: "/administration", icone: Shield },
     { libelle: "Utilisateurs", chemin: "/utilisateurs", icone: Users },
-    { libelle: "Messagerie admin", chemin: "/administration/messagerie", icone: Mail },
     { libelle: "Supervision", chemin: "/supervision", icone: Activity },
     { libelle: "Site public", chemin: "/", icone: Globe, nouvelOnglet: true },
   ],

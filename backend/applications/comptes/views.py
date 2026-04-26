@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import PROTECT
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -52,6 +53,37 @@ def _construire_url_frontend(requete, chemin: str) -> str:
 
 def _peut_administrer_utilisateurs(utilisateur: Utilisateur) -> bool:
     return utilisateur.est_super_admin or utilisateur.a_droit("comptes.modifier_utilisateur")
+
+
+def _obtenir_super_admin_reaffectation(utilisateur_a_supprimer: Utilisateur) -> Utilisateur | None:
+    return (
+        Utilisateur.objects.filter(courriel__iexact="admin@lbh-economiste.com", est_super_admin=True)
+        .exclude(pk=utilisateur_a_supprimer.pk)
+        .first()
+        or Utilisateur.objects.filter(est_super_admin=True, est_actif=True)
+        .exclude(pk=utilisateur_a_supprimer.pk)
+        .order_by("date_creation")
+        .first()
+    )
+
+
+def _reaffecter_references_protegees(utilisateur: Utilisateur, cible: Utilisateur) -> int:
+    nb_reaffectations = 0
+    for relation in Utilisateur._meta.related_objects:
+        if relation.on_delete is not PROTECT:
+            continue
+        modele = relation.related_model
+        champ = relation.field
+        queryset = modele._default_manager.filter(**{champ.name: utilisateur})
+        nb = queryset.count()
+        if nb == 0:
+            continue
+        if champ.null:
+            queryset.update(**{champ.name: None})
+        else:
+            queryset.update(**{champ.name: cible})
+        nb_reaffectations += nb
+    return nb_reaffectations
 
 
 def _serialiser_session(utilisateur: Utilisateur) -> dict:
@@ -385,9 +417,34 @@ class VueDetailUtilisateur(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, requete, *args, **kwargs):
         objet = self.get_object()
-        objet.est_actif = False
-        objet.save(update_fields=["est_actif"])
-        return Response({"detail": "Compte désactivé."}, status=status.HTTP_200_OK)
+        if objet.pk == requete.user.pk:
+            return Response({"detail": "Vous ne pouvez pas supprimer votre propre compte."}, status=status.HTTP_400_BAD_REQUEST)
+        if objet.est_super_admin:
+            return Response({"detail": "Un super-administrateur ne peut pas être supprimé depuis cet écran."}, status=status.HTTP_400_BAD_REQUEST)
+        if objet.est_actif:
+            objet.est_actif = False
+            objet.save(update_fields=["est_actif"])
+            return Response({"detail": "Compte désactivé.", "suppression_definitive": False}, status=status.HTTP_200_OK)
+
+        cible = _obtenir_super_admin_reaffectation(objet)
+        if cible is None:
+            return Response(
+                {"detail": "Suppression définitive impossible : aucun super-administrateur de reprise n'a été trouvé."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            nb_reaffectations = _reaffecter_references_protegees(objet, cible)
+            objet.delete()
+        return Response(
+            {
+                "detail": "Compte supprimé définitivement.",
+                "suppression_definitive": True,
+                "reaffecte_a": cible.courriel,
+                "references_reaffectees": nb_reaffectations,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class VueInvitationDetail(generics.GenericAPIView):

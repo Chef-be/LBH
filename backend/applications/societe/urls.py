@@ -10,12 +10,14 @@ from .views import (
     ProfilHoraireUtilisateurViewSet,
     ParametreSocieteViewSet,
     ChargeFixeStructureViewSet,
+    MissionClientSocieteViewSet,
     SimulationSalaireViewSet,
     TempsPasseViewSet,
     DevisHonorairesViewSet,
     FactureViewSet,
     vue_tableau_de_bord,
     vue_reference_smic,
+    vue_assignation_automatique,
     vue_validation_devis_client,
     vue_simulations_profil,
     vue_previsualiser_simulation,
@@ -26,6 +28,7 @@ router.register(r"profils-horaires", ProfilHoraireViewSet, basename="profil-hora
 router.register(r"profils-horaires-utilisateurs", ProfilHoraireUtilisateurViewSet, basename="profil-horaire-utilisateur")
 router.register(r"parametres-societe", ParametreSocieteViewSet, basename="parametre-societe")
 router.register(r"charges-fixes", ChargeFixeStructureViewSet, basename="charge-fixe-structure")
+router.register(r"missions-client", MissionClientSocieteViewSet, basename="mission-client-societe")
 router.register(r"simulations-salaire", SimulationSalaireViewSet, basename="simulation-salaire")
 router.register(r"temps-passes", TempsPasseViewSet, basename="temps-passe")
 router.register(r"devis", DevisHonorairesViewSet, basename="devis-honoraires")
@@ -34,6 +37,7 @@ router.register(r"factures", FactureViewSet, basename="facture")
 urlpatterns = [
     path("tableau-de-bord/", vue_tableau_de_bord, name="societe-tableau-de-bord"),
     path("references/smic/", vue_reference_smic, name="societe-reference-smic"),
+    path("assignation-automatique/", vue_assignation_automatique, name="societe-assignation-automatique"),
     path(
         "validation-client/devis/<str:jeton>/",
         vue_validation_devis_client,

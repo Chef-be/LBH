@@ -454,7 +454,7 @@ export function GestionMessagerie() {
                   Un serveur peut porter les réglages SMTP applicatifs et les réglages IMAP du webmail.
                 </p>
               </div>
-              <button onClick={reinitialiser} className="btn-secondaire text-xs">Nouveau</button>
+              {serveurs.length === 0 && <button onClick={reinitialiser} className="btn-secondaire text-xs">Nouveau</button>}
             </div>
 
             {serveurs.length === 0 ? (
@@ -502,9 +502,27 @@ export function GestionMessagerie() {
 
           {onglet === "smtp" && (
             <div className="carte space-y-5">
+              {serveurs.length > 0 && !serveurEditionId ? (
+                <div className="rounded-2xl border p-5" style={{ borderColor: "var(--bordure)", background: "var(--fond-entree)" }}>
+                  <h3>SMTP applicatif configuré</h3>
+                  <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
+                    {serveurDefaut
+                      ? `${serveurDefaut.nom} · ${serveurDefaut.hote}:${serveurDefaut.port}`
+                      : "Un serveur SMTP existe déjà pour la plateforme."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => charger(serveurDefaut ?? serveurs[0], "smtp")}
+                    className="btn-primaire mt-4"
+                  >
+                    Modifier le SMTP
+                  </button>
+                </div>
+              ) : (
+              <>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3>{serveurEditionId ? "Modifier le SMTP applicatif" : "Ajouter un SMTP applicatif"}</h3>
+                  <h3>{serveurEditionId ? "Modifier le SMTP applicatif" : "Configurer le SMTP applicatif"}</h3>
                   <p className="mt-1 text-sm" style={{ color: "var(--texte-2)" }}>
                     Ces réglages alimentent les e-mails envoyés par la plateforme.
                   </p>
@@ -575,12 +593,32 @@ export function GestionMessagerie() {
                   </button>
                 </div>
               </div>
+              </>
+              )}
             </div>
           )}
 
           {onglet === "webmail" && (
             <div className="space-y-6">
               <div className="carte space-y-5">
+                {serveurs.length > 0 && !serveurEditionId ? (
+                  <div className="rounded-2xl border p-5" style={{ borderColor: "var(--bordure)", background: "var(--fond-entree)" }}>
+                    <h3>Connexion IMAP configurée</h3>
+                    <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
+                      {serveurDefaut?.imap_hote
+                        ? `${serveurDefaut.nom} · ${serveurDefaut.imap_hote}:${serveurDefaut.imap_port}`
+                        : "Un serveur existe déjà. Renseignez l'IMAP uniquement si le webmail doit être utilisé."}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => charger(serveurDefaut ?? serveurs[0], "webmail")}
+                      className="btn-primaire mt-4"
+                    >
+                      Modifier l’IMAP
+                    </button>
+                  </div>
+                ) : (
+                <>
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="flex items-center gap-2">
@@ -623,6 +661,8 @@ export function GestionMessagerie() {
                     {enregistrement ? "Enregistrement…" : "Enregistrer IMAP"}
                   </button>
                 </div>
+                </>
+                )}
               </div>
 
               <div className="carte space-y-5">
