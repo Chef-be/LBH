@@ -3353,7 +3353,7 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
                       <td className={`px-4 py-3 text-right font-mono text-sm font-semibold ${
                         ligne.quantite !== null && ligne.quantite < 0 ? "text-red-600" : "text-slate-800"
                       }`}>
-                        {ligne.quantite != null ? Number(ligne.quantite).toLocaleString("fr-FR", { maximumFractionDigits: 3 }) : "—"}
+                        {ligne.quantite != null ? formaterMesure(Number(ligne.quantite), ligne.unite) : "—"}
                       </td>
                       <td className="px-4 py-3 text-center font-mono text-xs text-slate-500">{ligne.unite}</td>
                       {metre.statut !== "valide" && (
