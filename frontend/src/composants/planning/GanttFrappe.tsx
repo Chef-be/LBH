@@ -70,10 +70,19 @@ export default function GanttFrappe({
           : undefined,
       });
 
-      // Traduire "Today" → "Aujourd'hui"
+      // Traduire "Today" → "Aujourd'hui" et corriger le scroll en vue Mois
       requestAnimationFrame(() => {
+        const wrapper = containerRef.current?.querySelector(".gantt-container");
         containerRef.current?.querySelectorAll(".today-button").forEach((btn) => {
-          if (btn.textContent === "Today") btn.textContent = "Aujourd'hui";
+          btn.textContent = "Aujourd'hui";
+          (btn as HTMLElement).onclick = () => {
+            // Scroll manuel sur le marqueur du jour courant
+            const marqueur = containerRef.current?.querySelector<HTMLElement>(".current-highlight");
+            if (marqueur && wrapper) {
+              const left = parseFloat(marqueur.style.left || "0");
+              wrapper.scrollLeft = Math.max(0, left - wrapper.clientWidth / 2);
+            }
+          };
         });
       });
     });
