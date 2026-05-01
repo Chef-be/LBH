@@ -8,7 +8,7 @@ from pathlib import Path
 from django.conf import settings
 from rest_framework import generics, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, MissionClient, LivrableType, ModeleDocument, AffectationProjet
@@ -188,6 +188,8 @@ class VueAffectationsProjet(generics.ListCreateAPIView):
         ).select_related("utilisateur")
 
     def perform_create(self, serialiseur):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Accès réservé au super-administrateur.")
         projet = generics.get_object_or_404(Projet, pk=self.kwargs["projet_id"])
         affectation = serialiseur.save(
             projet=projet,
@@ -201,6 +203,8 @@ class VueAffectationProjetDetail(generics.DestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if not self.request.user.est_super_admin:
+            raise PermissionDenied("Accès réservé au super-administrateur.")
         return AffectationProjet.objects.filter(
             projet_id=self.kwargs["projet_id"]
         )
@@ -209,6 +213,8 @@ class VueAffectationProjetDetail(generics.DestroyAPIView):
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_equipe_assignable_projet(requete, projet_id):
+    if not requete.user.est_super_admin:
+        raise PermissionDenied("Accès réservé au super-administrateur.")
     projet = generics.get_object_or_404(Projet, pk=projet_id)
     organisation = projet.organisation or requete.user.organisation
     if not organisation:

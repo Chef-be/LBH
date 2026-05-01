@@ -396,10 +396,16 @@ interface ArticleCCTPSuggestion {
   statut_libelle: string;
 }
 
+interface ReponsePointsAccroche {
+  points?: Array<[number, number, string?]>;
+  points_accroche?: Array<[number, number, string?]>;
+  nb_points?: number;
+}
+
 // Champ de désignation avec autocomplete CCTP — version compacte pour les zones
 // Comportement : une fois une valeur confirmée (blur ou sélection), affiche en lecture avec une croix de réinitialisation.
-function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestation…", className = "" }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; className?: string;
+function ChampCCTP({ value, onChange, onSelectionArticle, placeholder = "Désignation de l'ouvrage élémentaire…", className = "" }: {
+  value: string; onChange: (v: string) => void; onSelectionArticle?: (article: ArticleCCTPSuggestion | null) => void; placeholder?: string; className?: string;
 }) {
   const [saisieActive, setSaisieActive] = useState(!value);
   const [sugg, setSugg] = useState<ArticleCCTPSuggestion[]>([]);
@@ -435,15 +441,29 @@ function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestati
   // Mode lecture — désignation confirmée
   if (!saisieActive && value) {
     return (
-      <div className={`flex items-start gap-1 rounded-lg bg-primaire-50 border border-primaire-200 px-2 py-1 ${className}`}>
-        <span className="flex-1 text-xs text-primaire-900 leading-snug break-words">{value}</span>
+      <div
+        className={`flex items-start gap-2 rounded-xl border px-3 py-2 ${className}`}
+        style={{
+          background: "color-mix(in srgb, var(--fond-carte) 82%, var(--c-base) 18%)",
+          borderColor: "color-mix(in srgb, var(--bordure) 60%, var(--c-base) 40%)",
+        }}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--texte-3)" }}>
+            Ouvrage élémentaire
+          </p>
+          <span className="block text-sm font-semibold leading-snug break-words" style={{ color: "var(--texte)" }}>
+            {value}
+          </span>
+        </div>
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); onChange(""); setSaisieActive(true); }}
-          className="shrink-0 ml-1 text-primaire-400 hover:text-red-500 transition mt-0.5"
+          onClick={(e) => { e.stopPropagation(); onChange(""); onSelectionArticle?.(null); setSaisieActive(true); }}
+          className="shrink-0 rounded-lg p-1 transition hover:bg-red-500/10 hover:text-red-500"
+          style={{ color: "var(--texte-3)" }}
           title="Effacer la désignation"
         >
-          <X className="w-3 h-3" />
+          <X className="w-4 h-4" />
         </button>
       </div>
     );
@@ -453,30 +473,34 @@ function ChampCCTP({ value, onChange, placeholder = "Désignation de la prestati
   return (
     <div className={`relative ${className}`} ref={ref}>
       <input
-        type="text" className="champ-saisie w-full text-xs py-1"
+        type="text" className="champ-saisie w-full py-2 text-sm font-semibold"
         value={value}
-        onChange={(e) => { onChange(e.target.value); setOuvert(true); }}
+        onChange={(e) => { onChange(e.target.value); onSelectionArticle?.(null); setOuvert(true); }}
         onFocus={() => { if (sugg.length > 0) setOuvert(true); }}
         onBlur={() => { if (value.trim()) { setSaisieActive(false); setOuvert(false); } }}
         placeholder={placeholder} autoComplete="off"
         autoFocus={!!value}
       />
       {ouvert && sugg.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-          <ul className="max-h-44 overflow-y-auto divide-y divide-slate-50">
+        <div
+          className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border shadow-lg overflow-hidden"
+          style={{ background: "var(--fond-carte)", borderColor: "var(--bordure)" }}
+        >
+          <ul className="max-h-44 overflow-y-auto">
             {sugg.map((art) => (
               <li key={art.id}>
-                <button type="button" className="w-full text-left px-3 py-2 hover:bg-primaire-50 transition"
+                <button type="button" className="w-full text-left px-3 py-2 transition hover:bg-[color-mix(in_srgb,var(--fond-carte)_82%,var(--c-base)_18%)]"
                   onMouseDown={(e) => {
                     e.preventDefault();
                     onChange(art.intitule);
+                    onSelectionArticle?.(art);
                     setSugg([]);
                     setOuvert(false);
                     setSaisieActive(false);
                   }}>
-                  <p className="text-xs font-medium text-slate-800 truncate">{art.intitule}</p>
+                  <p className="text-sm font-semibold truncate" style={{ color: "var(--texte)" }}>{art.intitule}</p>
                   {(art.code_reference || art.lot_intitule) && (
-                    <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                    <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--texte-3)" }}>
                       {[art.code_reference, art.lot_intitule].filter(Boolean).join(" — ")}
                     </p>
                   )}
@@ -883,6 +907,10 @@ interface ZoneVisualisee {
   numeroZone?: string;    // Numéro d'affichage (ex: "1", "1.1", "1.2")
   localisation?: string;
   designation: string;
+  articleCCTPId?: string | null;
+  codeArticle?: string;
+  chapitreCCTP?: string;
+  lotCCTP?: string;
   unite: string;
   points: PointCanvas[];
   valeur: number;
@@ -1056,6 +1084,11 @@ function MetreVisuel({ metreId, onLignesCreees }: { metreId: string; onLignesCre
         const payload = {
           localisation: zone.localisation ?? "",
           designation: zone.designation,
+          article_cctp: zone.articleCCTPId || null,
+          code_article: zone.codeArticle ?? "",
+          chapitre_cctp: zone.chapitreCCTP ?? "",
+          lot_cctp: zone.lotCCTP ?? "",
+          source_article_cctp: zone.articleCCTPId ? "cctp" : "zone_visuelle",
           type_mesure: zone.type,
           points_px: zone.points.map((p) => [p.x, p.y]),
           deductions: deductionsFilles,
@@ -1689,6 +1722,10 @@ ${lignesLegende.map((z) => `
       mode: estSoustraction ? "soustraction" : "ajout",
       localisation,
       designation,
+      articleCCTPId: null,
+      codeArticle: "",
+      chapitreCCTP: "",
+      lotCCTP: "",
       sousZoneDeId,
       numeroZone,
       unite: typeZone === "surface" ? "m²" : typeZone === "longueur" ? "ml" : "u",
@@ -2119,8 +2156,11 @@ ${lignesLegende.map((z) => `
     }
     // Charger les points d'accroche (tous formats : DXF, PDF, image)
     setPointsAccroche([]);
-    api.get<{ points: Array<[number, number]>; nb_points: number }>(`/api/metres/${metreId}/fonds-plan/${fp.id}/geometrie/`)
-      .then((geo) => { if ((geo.nb_points ?? 0) > 0) setPointsAccroche(geo.points); })
+    api.get<ReponsePointsAccroche>(`/api/metres/${metreId}/fonds-plan/${fp.id}/points-accroche/`)
+      .then((geo) => {
+        const points = geo.points ?? geo.points_accroche ?? [];
+        setPointsAccroche(points);
+      })
       .catch(() => { /* silencieux — accroche indisponible */ });
 
     // Charger les zones pour ce fond de plan
@@ -2128,6 +2168,7 @@ ${lignesLegende.map((z) => `
     try {
       const zonesExistantes = await api.get<Array<{
         id: string; localisation?: string; designation: string; type_mesure: string;
+        article_cctp?: string | null; code_article?: string; chapitre_cctp?: string; lot_cctp?: string;
         points_px: Array<[number, number]>;
         deductions: Array<{designation: string; points_px: Array<[number, number]>; surface_m2: number; hauteur?: number | null}>;
         hauteur?: number | null;
@@ -2150,6 +2191,10 @@ ${lignesLegende.map((z) => `
         zonesChargees.push({
           id: localId, dbId: z.id, type, mode: "ajout",
           localisation: z.localisation ?? "",
+          articleCCTPId: z.article_cctp ?? null,
+          codeArticle: z.code_article ?? "",
+          chapitreCCTP: z.chapitre_cctp ?? "",
+          lotCCTP: z.lot_cctp ?? "",
           designation: z.designation, unite: z.unite, points: pts, valeur,
           hauteur: z.hauteur != null ? Number(z.hauteur) : undefined,
           couleur: z.couleur, deductions: z.deductions.map((d) => ({ designation: d.designation, valeur: d.surface_m2 })),
@@ -2718,14 +2763,21 @@ ${lignesLegende.map((z) => `
               </div>
             );
           })}
-          {/* Bouton accroche objet (visible uniquement si points DXF disponibles) */}
-          {pointsAccroche.length > 0 && (
+          {/* Bouton accroche objet — visible dès qu'un fond de plan est chargé */}
+          {fondPlanId && (
             <button
               type="button"
-              title={accrocheActive ? "Accroche objet activée — cliquez pour désactiver" : "Accroche objet désactivée — cliquez pour activer"}
+              title={
+                pointsAccroche.length === 0
+                  ? "Aucun point d'accroche détecté pour ce fond de plan"
+                  : accrocheActive ? "Accroche objet activée — cliquez pour désactiver" : "Accroche objet désactivée — cliquez pour activer"
+              }
+              disabled={pointsAccroche.length === 0}
               onClick={() => setAccrocheActive((v) => !v)}
               className={`flex h-10 w-10 items-center justify-center rounded-xl border transition ${
-                accrocheActive
+                pointsAccroche.length === 0
+                  ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-300"
+                  : accrocheActive
                   ? "border-amber-300 bg-amber-50 text-amber-600"
                   : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
               }`}
@@ -2938,11 +2990,15 @@ ${lignesLegende.map((z) => `
                   <div key={zone.id} className="space-y-1">
                     {/* Zone principale */}
                     <div
-                      className={`rounded-xl border p-3 cursor-pointer transition ${
-                        zone.id === zoneSelectionnee
-                          ? "border-primaire-200 bg-primaire-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"
-                      }`}
+                      className="rounded-xl border p-3 cursor-pointer transition"
+                      style={{
+                        borderColor: zone.id === zoneSelectionnee
+                          ? "color-mix(in srgb, var(--bordure) 45%, var(--c-base) 55%)"
+                          : "var(--bordure)",
+                        background: zone.id === zoneSelectionnee
+                          ? "color-mix(in srgb, var(--fond-carte) 78%, var(--c-base) 22%)"
+                          : "var(--fond-carte)",
+                      }}
                       onClick={() => setZoneSelectionnee(zone.id === zoneSelectionnee ? null : zone.id)}
                     >
                       <div className="flex items-start gap-2">
@@ -2950,7 +3006,7 @@ ${lignesLegende.map((z) => `
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1 mb-0.5">
                             {zone.numeroZone && (
-                              <span className="text-[10px] font-bold text-slate-400 font-mono">{zone.numeroZone}</span>
+                              <span className="text-[10px] font-bold font-mono" style={{ color: "var(--texte-3)" }}>{zone.numeroZone}</span>
                             )}
                           </div>
                           <input
@@ -2961,10 +3017,19 @@ ${lignesLegende.map((z) => `
                             placeholder="Localisation (pièce, niveau…)"
                           />
                           <div onClick={(e) => e.stopPropagation()}>
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--texte-3)" }}>
+                              Désignation d&apos;ouvrage
+                            </p>
                             <ChampCCTP
                               value={zone.designation}
                               onChange={(v) => modifierZone(zone.id, { designation: v })}
-                              placeholder="Désignation de la prestation…"
+                              onSelectionArticle={(article) => modifierZone(zone.id, {
+                                articleCCTPId: article?.id ?? null,
+                                codeArticle: article?.code_reference ?? "",
+                                chapitreCCTP: article?.chapitre ?? "",
+                                lotCCTP: article?.lot_intitule ?? "",
+                              })}
+                              placeholder="Désignation de l'ouvrage élémentaire…"
                             />
                           </div>
                           <div className="mt-1 flex items-center gap-2">
@@ -3278,7 +3343,7 @@ ${lignesLegende.map((z) => `
 // Page principale
 // ---------------------------------------------------------------------------
 
-function PanneauControleDPGF({ metreId, onSucces }: { metreId: string; onSucces: (message: string) => void }) {
+function PanneauControleDPGF({ metreId, onSucces, mode }: { metreId: string; onSucces: (message: string) => void; mode: "controle" | "dpgf" }) {
   const [controle, setControle] = useState<ControleCoherenceMetre | null>(null);
   const [previsualisation, setPrevisualisation] = useState<PrevisualisationDPGF | null>(null);
   const [chargement, setChargement] = useState(false);
@@ -3350,7 +3415,7 @@ function PanneauControleDPGF({ metreId, onSucces }: { metreId: string; onSucces:
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {mode === "controle" && (
         <div className="carte p-5">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold text-slate-800">Contrôles de cohérence</h2>
@@ -3377,7 +3442,10 @@ function PanneauControleDPGF({ metreId, onSucces }: { metreId: string; onSucces:
             {!controle && chargement && <p className="text-sm text-slate-400">Contrôle du métré en cours…</p>}
           </div>
         </div>
+      )}
 
+      {mode === "dpgf" && (
+        <>
         <div className="carte p-5">
           <h2 className="font-semibold text-slate-800">Génération DPGF</h2>
           <p className="mt-2 text-sm text-slate-500">
@@ -3393,7 +3461,6 @@ function PanneauControleDPGF({ metreId, onSucces }: { metreId: string; onSucces:
             {generation ? "Génération…" : "Générer une DPGF depuis ce métré"}
           </button>
         </div>
-      </div>
 
       <div className="carte overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
@@ -3446,6 +3513,8 @@ function PanneauControleDPGF({ metreId, onSucces }: { metreId: string; onSucces:
           </table>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -3589,8 +3658,12 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
         <MetreVisuel metreId={metreId} onLignesCreees={() => { charger(); setOnglet("lignes"); }} />
       )}
 
-      {(onglet === "controle" || onglet === "dpgf") && (
-        <PanneauControleDPGF metreId={metreId} onSucces={(message) => { flash(message); charger(); }} />
+      {onglet === "controle" && (
+        <PanneauControleDPGF metreId={metreId} mode="controle" onSucces={(message) => { flash(message); charger(); }} />
+      )}
+
+      {onglet === "dpgf" && (
+        <PanneauControleDPGF metreId={metreId} mode="dpgf" onSucces={(message) => { flash(message); charger(); }} />
       )}
 
       {onglet === "lignes" && (
