@@ -15,7 +15,9 @@ interface Metre {
   projet: string;
   statut: string;
   statut_libelle: string;
-  montant_total_ht: number | null;
+  quantites_par_unite?: Record<string, number | string>;
+  nb_lignes?: number;
+  nb_zones_mesurees?: number;
   date_modification: string;
 }
 
@@ -31,6 +33,15 @@ const STYLES_STATUT: Record<string, string> = {
   valide: "badge-succes",
   archive: "badge-neutre",
 };
+
+function resumeQuantites(metre: Metre): string {
+  const entrees = Object.entries(metre.quantites_par_unite ?? {});
+  if (entrees.length === 0) return "—";
+  return entrees
+    .slice(0, 3)
+    .map(([unite, valeur]) => `${Number(valeur || 0).toLocaleString("fr-FR")} ${unite}`)
+    .join(" · ");
+}
 
 export function ListeMetres() {
   const queryClient = useQueryClient();
@@ -105,7 +116,7 @@ export function ListeMetres() {
                 <th className="text-left py-2 pr-4 font-medium">Projet</th>
                 <th className="text-left py-2 pr-4 font-medium">Intitulé</th>
                 <th className="text-left py-2 pr-4 font-medium">Statut</th>
-                <th className="text-right py-2 pr-4 font-medium">Total</th>
+                <th className="text-right py-2 pr-4 font-medium">Quantités</th>
                 <th className="text-right py-2 pr-4 font-medium">Modifié</th>
                 <th className="text-right py-2 font-medium">Actions</th>
               </tr>
@@ -129,7 +140,10 @@ export function ListeMetres() {
                     </span>
                   </td>
                   <td className="py-3 pr-4 text-right font-mono text-xs">
-                    {m.montant_total_ht != null ? Number(m.montant_total_ht).toLocaleString("fr-FR") : "—"}
+                    {resumeQuantites(m)}
+                    {typeof m.nb_lignes === "number" && (
+                      <span className="ml-2 text-slate-400">({m.nb_lignes} ligne{m.nb_lignes > 1 ? "s" : ""})</span>
+                    )}
                   </td>
                   <td className="py-3 pr-4 text-right text-xs text-slate-400">
                     {new Date(m.date_modification).toLocaleDateString("fr-FR")}

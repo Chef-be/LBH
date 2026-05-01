@@ -404,10 +404,8 @@ class VueDetailArticleCCTP(generics.RetrieveUpdateDestroyAPIView):
 def vue_creation_rapide_article_cctp(request):
     """
     Crée rapidement un ArticleCCTP depuis le formulaire de ligne de métré.
-    Crée simultanément une LignePrixBibliotheque liée en statut 'brouillon'.
     Corps : {intitule, unite (optionnel), nature (optionnel), lot_id (optionnel)}
     """
-    from applications.bibliotheque.models import LignePrixBibliotheque
     import re
 
     intitule = (request.data.get("intitule") or "").strip()
@@ -434,26 +432,7 @@ def vue_creation_rapide_article_cctp(request):
     if ArticleCCTP.objects.filter(numero_article=numero).exists():
         numero = f"{numero}-{nb_existants + 1}"
 
-    # Créer la ligne de prix en bibliothèque en statut 'brouillon'
-    famille = (lot.intitule if lot else "À classer")[:100]
-    code_prix = f"PRIX-{code_base[:40]}"
-    if LignePrixBibliotheque.objects.filter(code=code_prix).exists():
-        code_prix = f"{code_prix}-{nb_existants + 1}"
-
-    ligne_prix = LignePrixBibliotheque.objects.create(
-        code=code_prix[:50],
-        famille=famille,
-        designation_longue=intitule,
-        designation_courte=intitule[:300],
-        unite=unite,
-        niveau="reference",
-        statut_validation="brouillon",
-        auteur=request.user,
-        observations_economiques="Créé automatiquement depuis le métré — à compléter dans la bibliothèque de prix.",
-        lot_cctp_reference=lot,
-    )
-
-    # Créer l'article CCTP lié
+    # Créer uniquement l'article CCTP : le métré prépare les quantités, pas les prix.
     article = ArticleCCTP.objects.create(
         intitule=intitule,
         numero_article=numero,
@@ -461,16 +440,15 @@ def vue_creation_rapide_article_cctp(request):
         est_dans_bibliotheque=True,
         statut="a_completer",
         lot=lot,
-        ligne_prix_reference=ligne_prix,
         source="Métré",
         tags=["à_compléter"],
     )
 
     return Response(
         {
-            "detail": "Article CCTP et fiche de prix créés. À compléter dans la bibliothèque.",
+            "detail": "Article CCTP créé. À compléter dans les pièces écrites.",
             "article": ArticleCCTPSerialiseur(article).data,
-            "ligne_prix_id": str(ligne_prix.id),
+            "ligne_prix_id": None,
         },
         status=status.HTTP_201_CREATED,
     )

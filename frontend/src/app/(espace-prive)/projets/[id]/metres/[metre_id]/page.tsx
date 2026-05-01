@@ -20,6 +20,17 @@ interface LigneMetre {
   metre: string;
   numero_ordre: number;
   code_article: string;
+  article_cctp?: string | null;
+  article_cctp_code?: string;
+  article_cctp_libelle?: string;
+  article_cctp_intitule?: string;
+  chapitre_cctp?: string;
+  lot_cctp?: string;
+  designation_source?: "cctp" | "libre" | "importee" | "zone_visuelle";
+  article_a_completer?: boolean;
+  source_type?: string;
+  statut_ligne?: string;
+  statut_synchronisation?: string;
   localisation: string;
   designation: string;
   nature: string;
@@ -54,7 +65,39 @@ interface MetreDetail {
   statut: string;
   statut_libelle: string;
   lignes: LigneMetre[];
+  quantites_par_unite?: Record<string, string | number>;
+  nb_zones_mesurees?: number;
   date_modification: string;
+}
+
+interface ControleCoherenceMetre {
+  bloquant: boolean;
+  alertes: Array<{ code: string; message: string }>;
+  erreurs: Array<{ code: string; message: string }>;
+  nb_lignes: number;
+  nb_zones_non_converties: number;
+  nb_lignes_sans_article_cctp: number;
+}
+
+interface LignePrevisualisationDPGF {
+  ligne_metre_source: string;
+  lot: string;
+  chapitre: string;
+  code_article: string;
+  designation: string;
+  localisation: string;
+  quantite: string | number;
+  unite: string;
+  ordre: number;
+  observations: string;
+  statut: "validee" | "a_completer" | "brouillon";
+}
+
+interface PrevisualisationDPGF {
+  intitule: string;
+  nb_lignes: number;
+  lignes_a_completer: number;
+  lignes: LignePrevisualisationDPGF[];
 }
 
 const NATURES = [
@@ -68,6 +111,7 @@ const NATURES = [
 const VIDE_LIGNE = {
   numero_ordre: "",
   code_article: "",
+  article_cctp: "",
   localisation: "",
   designation: "",
   nature: "travaux",
@@ -350,7 +394,6 @@ interface ArticleCCTPSuggestion {
   lot_intitule: string | null;
   statut: string;
   statut_libelle: string;
-  ligne_prix_designation: string | null;
 }
 
 // Champ de désignation avec autocomplete CCTP — version compacte pour les zones
@@ -521,6 +564,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
 
   const selectionnerArticle = (article: ArticleCCTPSuggestion) => {
     maj("designation", article.intitule);
+    maj("article_cctp", article.id);
     if (article.code_reference) maj("code_article", article.code_reference);
     setArticleLie(article);
     setAfficherSuggestions(false);
@@ -537,8 +581,9 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
         { intitule, unite: form.unite || "u" }
       );
       setArticleLie(r.article);
+      maj("article_cctp", r.article.id);
       if (r.article.code_reference) maj("code_article", r.article.code_reference);
-      setSuccesCCTP("Article CCTP créé dans la bibliothèque — à compléter.");
+      setSuccesCCTP("Article CCTP créé — à compléter dans les pièces écrites.");
       setAfficherSuggestions(false);
       setTimeout(() => setSuccesCCTP(null), 5000);
     } catch (e) {
@@ -562,6 +607,9 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
         metre: metreId,
         numero_ordre: Number(form.numero_ordre),
         code_article: form.code_article,
+        article_cctp: form.article_cctp || null,
+        designation_source: form.article_cctp ? "cctp" : "libre",
+        article_a_completer: articleLie?.statut === "a_completer",
         localisation: form.localisation,
         designation: form.designation,
         nature: form.nature,
@@ -648,6 +696,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                 onChange={(e) => {
                   maj("designation", e.target.value);
                   setArticleLie(null);
+                  maj("article_cctp", "");
                 }}
                 onFocus={() => { if (suggestions.length > 0) setAfficherSuggestions(true); }}
                 autoComplete="off"
@@ -661,10 +710,10 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                     Article CCTP lié
                     {articleLie.lot_intitule && <> — {articleLie.lot_intitule}</>}
                     {articleLie.statut === "a_completer" && (
-                      <span className="ml-1.5 text-amber-600 font-medium">· à compléter dans la bibliothèque</span>
+                      <span className="ml-1.5 text-amber-600 font-medium">· à compléter</span>
                     )}
                   </span>
-                  <button type="button" onClick={() => setArticleLie(null)} className="text-green-500 hover:text-green-700">
+                  <button type="button" onClick={() => { setArticleLie(null); maj("article_cctp", ""); }} className="text-green-500 hover:text-green-700">
                     <X className="w-3 h-3" />
                   </button>
                 </div>
@@ -676,7 +725,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                   {suggestions.length > 0 ? (
                     <>
                       <div className="px-3 py-2 bg-slate-50 border-b border-slate-100">
-                        <p className="text-xs font-medium text-slate-500">Articles CCTP dans la bibliothèque</p>
+                        <p className="text-xs font-medium text-slate-500">Articles CCTP</p>
                       </div>
                       <ul className="max-h-56 overflow-y-auto divide-y divide-slate-50">
                         {suggestions.map((art) => (
@@ -710,7 +759,7 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                           className="flex items-center gap-1.5 text-xs text-primaire-600 hover:text-primaire-700 disabled:opacity-50"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          {creationCCTP ? "Création…" : `Créer « ${form.designation.trim().substring(0, 40)} » dans la bibliothèque`}
+                          {creationCCTP ? "Création…" : `Créer « ${form.designation.trim().substring(0, 40)} » comme article CCTP`}
                         </button>
                       </div>
                     </>
@@ -724,10 +773,10 @@ function FormLigne({ initial, metreId, onSuccess, onClose, ligneId, numeroOrdreI
                         className="flex items-center gap-1.5 text-xs font-medium text-primaire-600 hover:text-primaire-700 disabled:opacity-50"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        {creationCCTP ? "Création…" : `Créer cet article CCTP dans la bibliothèque`}
+                        {creationCCTP ? "Création…" : `Créer cet article CCTP à compléter`}
                       </button>
                       <p className="mt-1 text-xs text-slate-400">
-                        Il sera classé « à compléter » et lié à une fiche de prix vierge.
+                        Il sera classé « à compléter » dans les pièces écrites.
                       </p>
                     </div>
                   )}
@@ -3229,6 +3278,178 @@ ${lignesLegende.map((z) => `
 // Page principale
 // ---------------------------------------------------------------------------
 
+function PanneauControleDPGF({ metreId, onSucces }: { metreId: string; onSucces: (message: string) => void }) {
+  const [controle, setControle] = useState<ControleCoherenceMetre | null>(null);
+  const [previsualisation, setPrevisualisation] = useState<PrevisualisationDPGF | null>(null);
+  const [chargement, setChargement] = useState(false);
+  const [generation, setGeneration] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const charger = useCallback(async () => {
+    setChargement(true);
+    setErreur(null);
+    try {
+      const [controleApi, previsualisationApi] = await Promise.all([
+        api.get<ControleCoherenceMetre>(`/api/metres/${metreId}/controle-coherence/`),
+        api.get<PrevisualisationDPGF>(`/api/metres/${metreId}/previsualiser-dpgf/`),
+      ]);
+      setControle(controleApi);
+      setPrevisualisation(previsualisationApi);
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de contrôler le métré.");
+    } finally {
+      setChargement(false);
+    }
+  }, [metreId]);
+
+  useEffect(() => { charger(); }, [charger]);
+
+  const generer = async () => {
+    setGeneration(true);
+    setErreur(null);
+    try {
+      const r = await api.post<{ dpgf_id: string; nb_lignes: number; lignes_a_completer: number; detail: string }>(
+        `/api/metres/${metreId}/generer-dpgf/`,
+        { forcer: false },
+      );
+      onSucces(`${r.detail} ${r.nb_lignes} ligne${r.nb_lignes > 1 ? "s" : ""} préparée${r.nb_lignes > 1 ? "s" : ""}.`);
+      await charger();
+    } catch (e) {
+      setErreur(e instanceof ErreurApi ? e.detail : "Impossible de générer la DPGF.");
+    } finally {
+      setGeneration(false);
+    }
+  };
+
+  const lignes = previsualisation?.lignes ?? [];
+
+  return (
+    <div className="space-y-4">
+      {erreur && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0" />{erreur}
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="carte p-4">
+          <p className="text-xs text-slate-400">Lignes d&apos;avant-métré</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-800">{controle?.nb_lignes ?? "—"}</p>
+        </div>
+        <div className="carte p-4">
+          <p className="text-xs text-slate-400">Zones non converties</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-800">{controle?.nb_zones_non_converties ?? "—"}</p>
+        </div>
+        <div className="carte p-4">
+          <p className="text-xs text-slate-400">Articles CCTP manquants</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-800">{controle?.nb_lignes_sans_article_cctp ?? "—"}</p>
+        </div>
+        <div className="carte p-4">
+          <p className="text-xs text-slate-400">Lignes DPGF à compléter</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-800">{previsualisation?.lignes_a_completer ?? "—"}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="carte p-5">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold text-slate-800">Contrôles de cohérence</h2>
+            <button type="button" onClick={charger} disabled={chargement} className="btn-secondaire text-sm">
+              {chargement ? "Contrôle…" : "Recontrôler"}
+            </button>
+          </div>
+          <div className="mt-4 space-y-3">
+            {controle && !controle.bloquant && controle.alertes.length === 0 && (
+              <div className="rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+                Aucun blocage détecté. La DPGF quantitative peut être générée.
+              </div>
+            )}
+            {controle?.erreurs.map((item, index) => (
+              <div key={`erreur-${index}`} className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {item.message}
+              </div>
+            ))}
+            {controle?.alertes.map((item, index) => (
+              <div key={`alerte-${index}`} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                {item.message}
+              </div>
+            ))}
+            {!controle && chargement && <p className="text-sm text-slate-400">Contrôle du métré en cours…</p>}
+          </div>
+        </div>
+
+        <div className="carte p-5">
+          <h2 className="font-semibold text-slate-800">Génération DPGF</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            La DPGF reprend uniquement les désignations, localisations, quantités et unités. Aucun prix n&apos;est généré à cette étape.
+          </p>
+          <button
+            type="button"
+            onClick={generer}
+            disabled={generation || controle?.bloquant || lignes.length === 0}
+            className="btn-primaire mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <CheckSquare className="w-4 h-4" />
+            {generation ? "Génération…" : "Générer une DPGF depuis ce métré"}
+          </button>
+        </div>
+      </div>
+
+      <div className="carte overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
+          <div>
+            <h2 className="font-semibold text-slate-800">Prévisualisation DPGF</h2>
+            <p className="text-xs text-slate-400">{lignes.length} ligne{lignes.length > 1 ? "s" : ""} quantitative{lignes.length > 1 ? "s" : ""}</p>
+          </div>
+        </div>
+        {lignes.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-400">Aucune ligne prête pour la DPGF.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50">
+                <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Code</th>
+                <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Désignation</th>
+                <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider hidden md:table-cell">Localisation</th>
+                <th className="text-right px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Quantité</th>
+                <th className="text-center px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Unité</th>
+                <th className="text-center px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Statut</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {lignes.map((ligne) => (
+                <tr key={ligne.ligne_metre_source} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{ligne.code_article || "—"}</td>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800">{ligne.designation || "Désignation à compléter"}</p>
+                    {(ligne.lot || ligne.chapitre) && (
+                      <p className="text-xs text-slate-400 mt-0.5">{[ligne.lot, ligne.chapitre].filter(Boolean).join(" — ")}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 hidden md:table-cell text-slate-500">{ligne.localisation || "—"}</td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">
+                    {formaterMesure(Number(ligne.quantite || 0), ligne.unite)}
+                  </td>
+                  <td className="px-4 py-3 text-center font-mono text-xs text-slate-500">{ligne.unite || "—"}</td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                      ligne.statut === "validee"
+                        ? "bg-green-50 text-green-700 border-green-200"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}>
+                      {ligne.statut === "validee" ? "Prête" : "À compléter"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PageDetailMetre({ params }: { params: Promise<{ id: string; metre_id: string }> }) {
   const { id: projetId, metre_id: metreId } = use(params);
   const [metre, setMetre] = useState<MetreDetail | null>(null);
@@ -3238,7 +3459,7 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
   const [modal, setModal] = useState(false);
   const [edition, setEdition] = useState<LigneMetre | null>(null);
   const [suppressionId, setSuppressionId] = useState<string | null>(null);
-  const [onglet, setOnglet] = useState<"lignes" | "visuel">("lignes");
+  const [onglet, setOnglet] = useState<"lignes" | "visuel" | "controle" | "dpgf">("lignes");
 
   const charger = useCallback(async () => {
     try { setMetre(await api.get<MetreDetail>(`/api/metres/${metreId}/`)); }
@@ -3273,6 +3494,13 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
   );
 
   const lignes = metre.lignes ?? [];
+  const quantitesParUnite = Object.entries(metre.quantites_par_unite ?? {});
+  const onglets: Array<{ id: typeof onglet; libelle: string }> = [
+    { id: "lignes", libelle: `Lignes d'avant-métré (${lignes.length})` },
+    { id: "visuel", libelle: "Métré visuel" },
+    { id: "controle", libelle: "Contrôles / cohérence" },
+    { id: "dpgf", libelle: "DPGF" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -3312,7 +3540,10 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
                 <span className="text-sm text-slate-400">{metre.type_libelle}</span>
               </div>
               <h1 className="mt-1 text-xl font-bold text-slate-800">{metre.intitule}</h1>
-              <p className="text-sm text-slate-400 mt-1">{lignes.length} ligne{lignes.length !== 1 ? "s" : ""} de quantification</p>
+              <p className="text-sm text-slate-400 mt-1">
+                {lignes.length} ligne{lignes.length !== 1 ? "s" : ""} d&apos;avant-métré
+                {typeof metre.nb_zones_mesurees === "number" && <> · {metre.nb_zones_mesurees} zone{metre.nb_zones_mesurees > 1 ? "s" : ""} mesurée{metre.nb_zones_mesurees > 1 ? "s" : ""}</>}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
@@ -3325,14 +3556,24 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      {quantitesParUnite.length > 0 && (
+        <div className="grid gap-3 md:grid-cols-4">
+          {quantitesParUnite.map(([unite, total]) => (
+            <div key={unite} className="carte p-4">
+              <p className="text-xs text-slate-400">Quantité totale</p>
+              <p className="mt-1 text-xl font-semibold text-slate-800">
+                {formaterMesure(Number(total || 0), unite)} <span className="text-sm font-medium text-slate-400">{unite}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Onglets */}
       <div className="border-b border-slate-200">
         <nav className="flex gap-1 px-1">
-          {[
-            { id: "lignes", libelle: `Lignes de quantification (${lignes.length})` },
-            { id: "visuel", libelle: "Métré visuel" },
-          ].map((tab) => (
-            <button key={tab.id} type="button" onClick={() => setOnglet(tab.id as typeof onglet)}
+          {onglets.map((tab) => (
+            <button key={tab.id} type="button" onClick={() => setOnglet(tab.id)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 onglet === tab.id
                   ? "border-primaire-600 text-primaire-700"
@@ -3348,11 +3589,15 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
         <MetreVisuel metreId={metreId} onLignesCreees={() => { charger(); setOnglet("lignes"); }} />
       )}
 
+      {(onglet === "controle" || onglet === "dpgf") && (
+        <PanneauControleDPGF metreId={metreId} onSucces={(message) => { flash(message); charger(); }} />
+      )}
+
       {onglet === "lignes" && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="font-semibold text-slate-700">
-              {lignes.length} ligne{lignes.length !== 1 ? "s" : ""} de quantification
+              {lignes.length} ligne{lignes.length !== 1 ? "s" : ""} d&apos;avant-métré
             </p>
             {metre.statut !== "valide" && (
               <button onClick={() => { setEdition(null); setModal(true); }} className="btn-primaire">
@@ -3364,7 +3609,7 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
           {lignes.length === 0 ? (
             <div className="carte py-12 text-center">
               <Calculator className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 font-medium">Aucune ligne de quantification</p>
+              <p className="text-slate-500 font-medium">Aucune ligne d&apos;avant-métré</p>
               <p className="text-slate-400 text-sm mt-1">
                 Ajoutez des lignes manuellement ou utilisez le métré visuel.
               </p>
@@ -3376,6 +3621,7 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
                   <tr className="border-b border-slate-100 bg-slate-50">
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider w-8">#</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Désignation</th>
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider hidden lg:table-cell">Article CCTP</th>
                     <th className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider hidden sm:table-cell">Nature</th>
                     <th className="text-right px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Quantité</th>
                     <th className="text-center px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wider">Unité</th>
@@ -3389,8 +3635,25 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
                       <td className="px-4 py-3">
                         <p className="font-medium text-slate-800">{ligne.designation}</p>
                         {ligne.code_article && <p className="text-xs text-slate-400 font-mono">{ligne.code_article}</p>}
+                        {ligne.localisation && <p className="text-xs text-slate-400 mt-0.5">{ligne.localisation}</p>}
                         {ligne.detail_calcul && (
                           <p className="text-xs text-slate-400 font-mono mt-0.5 italic">{ligne.detail_calcul}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {ligne.article_cctp || ligne.article_cctp_intitule ? (
+                          <div>
+                            <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                              Article lié
+                            </span>
+                            {ligne.article_a_completer && (
+                              <p className="text-xs text-amber-600 mt-1">À compléter</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                            Désignation libre
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
@@ -3441,6 +3704,7 @@ export default function PageDetailMetre({ params }: { params: Promise<{ id: stri
           initial={edition ? {
             numero_ordre: String(edition.numero_ordre),
             code_article: edition.code_article,
+            article_cctp: edition.article_cctp ?? "",
             localisation: edition.localisation ?? "",
             designation: edition.designation,
             nature: edition.nature,

@@ -6,6 +6,7 @@ import ast
 import operator
 import re
 from decimal import Decimal, ROUND_HALF_UP
+from django.utils import timezone
 
 
 OPERATEURS_BINAIRES = {
@@ -284,28 +285,36 @@ def _extents_valides(doc) -> tuple | None:
 
     # Fallback : parcourt les entités du modelspace pour calculer le bbox réel
     try:
-        from ezdxf.bbox import BoundingBox2d
-        bb = BoundingBox2d()
+        points_bbox = []
         for entity in doc.modelspace():
             try:
                 t = entity.dxftype()
                 if t == "LINE":
-                    bb.extend([entity.dxf.start[:2], entity.dxf.end[:2]])
+                    s, e = entity.dxf.start, entity.dxf.end
+                    points_bbox.extend([(s.x, s.y), (e.x, e.y)])
                 elif t in ("LWPOLYLINE",):
-                    bb.extend([v[:2] for v in entity.get_points()])
+                    points_bbox.extend([(v[0], v[1]) for v in entity.get_points()])
                 elif t in ("ARC", "CIRCLE"):
                     c = entity.dxf.center
                     r = entity.dxf.radius
-                    bb.extend([(c.x - r, c.y - r), (c.x + r, c.y + r)])
+                    points_bbox.extend([(c.x - r, c.y - r), (c.x + r, c.y + r)])
                 elif t in ("INSERT", "TEXT", "MTEXT"):
                     ins = entity.dxf.insert
-                    bb.extend([(ins.x, ins.y)])
+                    points_bbox.append((ins.x, ins.y))
             except Exception:
                 pass
-        if bb.has_data:
-            xmin, ymin = bb.extmin
-            xmax, ymax = bb.extmax
-            if xmax > xmin and ymax > ymin:
+        if points_bbox:
+            xs = [float(point[0]) for point in points_bbox]
+            ys = [float(point[1]) for point in points_bbox]
+            xmin, xmax = min(xs), max(xs)
+            ymin, ymax = min(ys), max(ys)
+            if xmax > xmin or ymax > ymin:
+                if xmax == xmin:
+                    xmax += 1.0
+                    xmin -= 1.0
+                if ymax == ymin:
+                    ymax += 1.0
+                    ymin -= 1.0
                 return float(xmin), float(ymin), float(xmax), float(ymax)
     except Exception:
         pass
@@ -1251,6 +1260,11 @@ def extraire_geometrie_fond_plan(fond_plan) -> dict:
         return {"points": [], "format": fmt, "nb_points": 0}
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        try:
+            fond_plan.fichier.open("rb")
+            fond_plan.fichier.seek(0)
+        except Exception:
+            pass
         tmp.write(fond_plan.fichier.read())
         chemin = tmp.name
 
@@ -1302,6 +1316,17 @@ def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
         numero_ordre=numero_ordre,
         localisation=getattr(zone, "localisation", "") or "",
         designation=zone.designation,
+        article_cctp=zone.article_cctp,
+        code_article=zone.code_article,
+        chapitre_cctp=zone.chapitre_cctp,
+        lot_cctp=zone.lot_cctp,
+        designation_source="cctp" if zone.article_cctp_id else "zone_visuelle",
+        source_type="zone_visuelle",
+        source_fond_plan=zone.fond_plan,
+        source_zone_mesure=zone,
+        statut_ligne="calculee",
+        statut_synchronisation="synchronisee",
+        date_derniere_synchronisation=timezone.now(),
         nature="travaux",
         quantite=Decimal(str(resultats["valeur_nette"])),
         unite=resultats["unite"],
@@ -1312,5 +1337,249 @@ def creer_ligne_depuis_zone(zone, metre, numero_ordre: int):
     zone.valeur_deduction = Decimal(str(resultats["valeur_deduction"]))
     zone.valeur_nette = Decimal(str(resultats["valeur_nette"]))
     zone.unite = resultats["unite"]
+    zone.statut_calcul = "calculee"
+    zone.statut_conversion = "synchronisee"
+    zone.statut_synchronisation = "synchronisee"
+    zone.date_dernier_calcul = timezone.now()
+    zone.date_derniere_conversion = timezone.now()
+    zone.geometrie_modifiee_depuis_conversion = False
     zone.save()
     return ligne
+
+
+def synchroniser_ligne_depuis_zone(zone):
+    """Met à jour la ligne de métré liée avec les valeurs recalculées de la zone."""
+    if not zone.ligne_metre_id:
+        raise ValueError("Cette zone n'est pas encore convertie en ligne de métré.")
+
+    resultats = calculer_zone_mesure(zone)
+    ligne = zone.ligne_metre
+    ligne.localisation = zone.localisation
+    ligne.designation = zone.designation
+    ligne.article_cctp = zone.article_cctp
+    ligne.code_article = zone.code_article or ligne.code_article
+    ligne.chapitre_cctp = zone.chapitre_cctp
+    ligne.lot_cctp = zone.lot_cctp
+    ligne.quantite = Decimal(str(resultats["valeur_nette"]))
+    ligne.unite = resultats["unite"]
+    ligne.source_type = "zone_visuelle"
+    ligne.source_fond_plan = zone.fond_plan
+    ligne.source_zone_mesure = zone
+    ligne.statut_ligne = "calculee"
+    ligne.statut_synchronisation = "synchronisee"
+    ligne.date_derniere_synchronisation = timezone.now()
+    ligne.quantite_modifiee_manuellement = False
+    ligne.save()
+
+    zone.valeur_brute = Decimal(str(resultats["valeur_brute"]))
+    zone.valeur_deduction = Decimal(str(resultats["valeur_deduction"]))
+    zone.valeur_nette = Decimal(str(resultats["valeur_nette"]))
+    zone.unite = resultats["unite"]
+    zone.statut_calcul = "calculee"
+    zone.statut_conversion = "synchronisee"
+    zone.statut_synchronisation = "synchronisee"
+    zone.date_dernier_calcul = timezone.now()
+    zone.date_derniere_conversion = timezone.now()
+    zone.geometrie_modifiee_depuis_conversion = False
+    zone.message_erreur_calcul = ""
+    zone.save()
+    return ligne
+
+
+def synchroniser_zones_metre(metre):
+    """Synchronise toutes les zones converties désynchronisées d'un métré."""
+    from .models import ZoneMesure
+
+    zones = ZoneMesure.objects.filter(
+        fond_plan__metre=metre,
+        ligne_metre__isnull=False,
+        statut_synchronisation="desynchronisee",
+    ).select_related("ligne_metre", "fond_plan", "article_cctp")
+    lignes = []
+    for zone in zones:
+        lignes.append(synchroniser_ligne_depuis_zone(zone))
+    return lignes
+
+
+def controle_coherence_metre(metre) -> dict:
+    """Contrôle les incohérences avant validation ou génération DPGF."""
+    from .models import FondPlan, LigneMetre, ZoneMesure, DPGFQuantitative
+
+    erreurs = []
+    alertes = []
+    lignes = LigneMetre.objects.filter(metre=metre)
+    zones = ZoneMesure.objects.filter(fond_plan__metre=metre).select_related("fond_plan")
+
+    for ligne in lignes:
+        prefixe = f"Ligne {ligne.numero_ordre}"
+        if not (ligne.designation or "").strip():
+            erreurs.append({"code": "ligne_sans_designation", "message": f"{prefixe} sans désignation.", "ligne": str(ligne.id)})
+        if ligne.quantite in (None, ""):
+            erreurs.append({"code": "ligne_sans_quantite", "message": f"{prefixe} sans quantité.", "ligne": str(ligne.id)})
+        if not (ligne.unite or "").strip():
+            erreurs.append({"code": "ligne_sans_unite", "message": f"{prefixe} sans unité.", "ligne": str(ligne.id)})
+        if not ligne.article_cctp_id:
+            alertes.append({"code": "ligne_sans_article_cctp", "message": f"{prefixe} sans article CCTP lié.", "ligne": str(ligne.id)})
+        if ligne.statut_synchronisation == "desynchronisee":
+            alertes.append({"code": "ligne_desynchronisee", "message": f"{prefixe} issue d'une zone désynchronisée.", "ligne": str(ligne.id)})
+
+    doublons = {}
+    for ligne in lignes:
+        cle = ((ligne.designation or "").strip().lower(), (ligne.localisation or "").strip().lower())
+        if cle == ("", ""):
+            continue
+        doublons.setdefault(cle, []).append(ligne.numero_ordre)
+    for numeros in doublons.values():
+        if len(numeros) > 1:
+            alertes.append({"code": "doublon_designation_localisation", "message": f"Désignation/localisation en doublon : lignes {', '.join(map(str, numeros))}."})
+
+    for zone in zones:
+        if zone.statut_calcul == "erreur":
+            erreurs.append({"code": "zone_en_erreur", "message": f"Zone {zone.numero or zone.designation} en erreur de calcul.", "zone": str(zone.id)})
+        elif zone.valeur_nette is None:
+            alertes.append({"code": "zone_non_calculee", "message": f"Zone {zone.numero or zone.designation} non calculée.", "zone": str(zone.id)})
+        if not zone.ligne_metre_id:
+            alertes.append({"code": "zone_non_convertie", "message": f"Zone {zone.numero or zone.designation} non convertie en ligne.", "zone": str(zone.id)})
+
+    for fond in FondPlan.objects.filter(metre=metre):
+        if not fond.echelle:
+            alertes.append({"code": "fond_non_calibre", "message": f"Fond de plan « {fond.intitule} » non calibré.", "fond_plan": str(fond.id)})
+        if fond.statut_traitement == "erreur":
+            erreurs.append({"code": "fond_traitement_erreur", "message": f"Fond de plan « {fond.intitule} » en erreur de traitement.", "fond_plan": str(fond.id)})
+
+    if DPGFQuantitative.objects.filter(metre_source=metre).exists() and metre.lignes.filter(date_derniere_synchronisation__isnull=True).exists():
+        alertes.append({"code": "dpgf_existante", "message": "Une DPGF a déjà été générée ; vérifiez si une nouvelle génération est nécessaire."})
+
+    return {
+        "bloquant": bool(erreurs),
+        "alertes": alertes,
+        "erreurs": erreurs,
+        "nb_lignes": lignes.count(),
+        "nb_zones_non_converties": zones.filter(ligne_metre__isnull=True).count(),
+        "nb_lignes_sans_article_cctp": lignes.filter(article_cctp__isnull=True).count(),
+    }
+
+
+def previsualiser_dpgf_metre(metre) -> dict:
+    """Prépare les lignes de DPGF quantitative sans créer de DPGF."""
+    lignes = []
+    lignes_a_completer = 0
+    for ligne in metre.lignes.filter(inclure_dpgf=True).order_by("ordre_dpgf", "numero_ordre"):
+        statut = "validee" if ligne.article_cctp_id and ligne.designation and ligne.unite and ligne.quantite is not None else "a_completer"
+        if statut == "a_completer":
+            lignes_a_completer += 1
+        lignes.append({
+            "ligne_metre_source": str(ligne.id),
+            "zone_mesure_source": str(ligne.source_zone_mesure_id) if ligne.source_zone_mesure_id else None,
+            "article_cctp": str(ligne.article_cctp_id) if ligne.article_cctp_id else None,
+            "lot": ligne.lot_cctp or "",
+            "chapitre": ligne.chapitre_cctp or "",
+            "code_article": ligne.article_cctp_code or ligne.code_article or "",
+            "designation": ligne.article_cctp_libelle or ligne.designation,
+            "localisation": ligne.localisation,
+            "quantite": ligne.quantite or Decimal("0"),
+            "unite": ligne.unite,
+            "ordre": ligne.ordre_dpgf or ligne.numero_ordre,
+            "observations": ligne.observations,
+            "statut": statut,
+        })
+    return {
+        "metre": str(metre.id),
+        "intitule": f"DPGF quantitative — {metre.intitule}",
+        "nb_lignes": len(lignes),
+        "lignes_a_completer": lignes_a_completer,
+        "lignes": lignes,
+    }
+
+
+def generer_dpgf_quantitative(metre, cree_par=None, forcer=False):
+    """Crée une DPGF quantitative sans prix depuis les lignes de métré."""
+    from .models import DPGFQuantitative, LigneDPGFQuantitative
+
+    controle = controle_coherence_metre(metre)
+    if controle["bloquant"] and not forcer:
+        raise ValueError("La DPGF ne peut pas être générée tant que les erreurs bloquantes ne sont pas corrigées.")
+
+    previsualisation = previsualiser_dpgf_metre(metre)
+    dpgf = DPGFQuantitative.objects.create(
+        projet=metre.projet,
+        metre_source=metre,
+        intitule=previsualisation["intitule"],
+        cree_par=cree_par,
+    )
+    objets = []
+    for data in previsualisation["lignes"]:
+        objets.append(LigneDPGFQuantitative(
+            dpgf=dpgf,
+            ligne_metre_source_id=data["ligne_metre_source"],
+            zone_mesure_source_id=data["zone_mesure_source"],
+            article_cctp_id=data["article_cctp"],
+            lot=data["lot"],
+            chapitre=data["chapitre"],
+            code_article=data["code_article"],
+            designation=data["designation"],
+            localisation=data["localisation"],
+            quantite=data["quantite"],
+            unite=data["unite"],
+            ordre=data["ordre"],
+            observations=data["observations"],
+            statut=data["statut"],
+        ))
+    LigneDPGFQuantitative.objects.bulk_create(objets)
+    metre.lignes.filter(id__in=[item["ligne_metre_source"] for item in previsualisation["lignes"]]).update(statut_ligne="integree_dpgf")
+    return dpgf
+
+
+def extraire_et_stocker_geometrie_fond_plan(fond_plan) -> dict:
+    """Extrait les points d'accroche et stocke une géométrie unifiée simplifiée."""
+    from .models import GeometrieFondPlan
+
+    type_source = "dxf" if fond_plan.format_fichier == "dxf" else "pdf_vectoriel" if fond_plan.format_fichier == "pdf" else "raster_vectorise"
+    geometrie, _ = GeometrieFondPlan.objects.update_or_create(
+        fond_plan=fond_plan,
+        page=fond_plan.numero_page or 1,
+        type_source=type_source,
+        defaults={"statut": "en_cours", "message_erreur": ""},
+    )
+    try:
+        donnees = extraire_geometrie_fond_plan(fond_plan)
+        points = donnees.get("points", [])
+        geometrie.points_accroche = points
+        geometrie.segments = donnees.get("segments", [])
+        geometrie.contours = donnees.get("contours", [])
+        geometrie.calques = donnees.get("calques", [])
+        geometrie.donnees_geojson = {
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "geometry": {"type": "Point", "coordinates": [p[0], p[1]]}, "properties": {"type_accroche": p[2] if len(p) > 2 else "point"}}
+                for p in points
+            ],
+        }
+        geometrie.statistiques = {
+            "nb_points_accroche": len(points),
+            "nb_segments": len(geometrie.segments),
+            "nb_contours": len(geometrie.contours),
+        }
+        geometrie.statut = "disponible"
+        geometrie.date_generation = timezone.now()
+        geometrie.save()
+        fond_plan.statut_vectorisation = "vectorise"
+        fond_plan.message_vectorisation = ""
+        fond_plan.save(update_fields=["statut_vectorisation", "message_vectorisation"])
+        return {
+            "statut": "termine",
+            "segments": geometrie.segments,
+            "contours": geometrie.contours,
+            "points_accroche": points,
+            "qualite_detection": "moyenne" if points else "faible",
+            "nb_segments": len(geometrie.segments),
+            "nb_contours": len(geometrie.contours),
+        }
+    except Exception as exc:
+        geometrie.statut = "erreur"
+        geometrie.message_erreur = str(exc)
+        geometrie.save(update_fields=["statut", "message_erreur", "date_modification"])
+        fond_plan.statut_vectorisation = "erreur"
+        fond_plan.message_vectorisation = str(exc)
+        fond_plan.save(update_fields=["statut_vectorisation", "message_vectorisation"])
+        return {"statut": "erreur", "detail": str(exc), "segments": [], "contours": [], "points_accroche": []}
