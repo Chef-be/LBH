@@ -16,6 +16,8 @@ from .views import (
     DevisHonorairesViewSet,
     FactureViewSet,
     vue_tableau_de_bord,
+    vue_pilotage_economique,
+    vue_recalculer_tarifs,
     vue_reference_smic,
     vue_assignation_automatique,
     vue_validation_devis_client,
@@ -36,6 +38,8 @@ router.register(r"factures", FactureViewSet, basename="facture")
 
 urlpatterns = [
     path("tableau-de-bord/", vue_tableau_de_bord, name="societe-tableau-de-bord"),
+    path("pilotage-economique/", vue_pilotage_economique, name="societe-pilotage-economique"),
+    path("recalculer-tarifs/", vue_recalculer_tarifs, name="societe-recalculer-tarifs"),
     path("references/smic/", vue_reference_smic, name="societe-reference-smic"),
     path("assignation-automatique/", vue_assignation_automatique, name="societe-assignation-automatique"),
     path(

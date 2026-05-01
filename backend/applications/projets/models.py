@@ -305,6 +305,30 @@ class MissionClient(models.Model):
         ("mixte", "Mixte"),
         ("tous", "Tous types"),
     ]
+    MODES_CHIFFRAGE = [
+        ("taux_moyen_be", "Taux horaire moyen BE"),
+        ("taux_profil", "Taux horaire profil"),
+        ("forfait_jour_profil", "Forfait jour profil"),
+        ("forfait_mission", "Forfait mission"),
+    ]
+    COMPLEXITES = [
+        ("simple", "Simple"),
+        ("standard", "Standard"),
+        ("complexe", "Complexe"),
+        ("tres_complexe", "Très complexe"),
+    ]
+    PHASES_MISSION = [
+        ("ESQ", "ESQ"),
+        ("APS", "APS"),
+        ("APD", "APD"),
+        ("PRO", "PRO"),
+        ("ACT", "ACT"),
+        ("VISA", "VISA"),
+        ("DET", "DET"),
+        ("AOR", "AOR"),
+        ("OPC", "OPC"),
+        ("autre", "Autre"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     code = models.SlugField(max_length=80, unique=True, verbose_name="Code")
@@ -351,6 +375,38 @@ class MissionClient(models.Model):
         default=8,
         verbose_name="Durée d'étude par défaut",
     )
+    mode_chiffrage_defaut = models.CharField(
+        max_length=30,
+        choices=MODES_CHIFFRAGE,
+        default="taux_profil",
+        verbose_name="Mode de chiffrage par défaut",
+    )
+    duree_etude_jours = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        default=0,
+        verbose_name="Durée en jours par défaut",
+    )
+    complexite = models.CharField(
+        max_length=20,
+        choices=COMPLEXITES,
+        default="standard",
+        verbose_name="Complexité",
+    )
+    coefficient_complexite = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=1,
+        verbose_name="Coefficient de complexité",
+    )
+    phase_mission = models.CharField(
+        max_length=10,
+        choices=PHASES_MISSION,
+        default="autre",
+        verbose_name="Phase de mission",
+    )
+    nature_livrable = models.CharField(max_length=120, blank=True, default="", verbose_name="Nature de livrable")
+    inclusion_recommandee_devis = models.BooleanField(default=True, verbose_name="Recommandée dans les devis")
     ordre = models.PositiveSmallIntegerField(default=0, verbose_name="Ordre d'affichage")
     date_creation = models.DateTimeField(auto_now_add=True)
 

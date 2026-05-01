@@ -31,14 +31,16 @@ class SimulationSalaireSerializer(serializers.ModelSerializer):
             "salaire_net_mensuel", "primes_mensuelles", "avantages_mensuels",
             "salaire_brut_estime", "charges_salariales", "charges_patronales",
             "cout_employeur_mensuel", "cout_annuel",
-            "dhmo", "taux_vente_horaire",
+            "dhmo", "cout_direct_horaire", "taux_vente_horaire",
+            "taux_vente_horaire_calcule_k", "forfait_jour_ht_calcule",
             "actif", "ordre",
             "date_creation", "date_modification",
         ]
         read_only_fields = [
             "id", "profil",
             "salaire_brut_estime", "charges_salariales", "charges_patronales",
-            "cout_employeur_mensuel", "cout_annuel", "dhmo", "taux_vente_horaire",
+            "cout_employeur_mensuel", "cout_annuel", "dhmo", "cout_direct_horaire",
+            "taux_vente_horaire", "taux_vente_horaire_calcule_k", "forfait_jour_ht_calcule",
             "date_creation", "date_modification",
         ]
 
@@ -56,10 +58,17 @@ class ProfilHoraireSerializer(serializers.ModelSerializer):
             "taux_charges_salariales", "taux_charges_patronales",
             "heures_productives_an", "taux_marge_vente",
             "taux_horaire_ht_calcule", "utiliser_calcul",
+            "cout_direct_horaire", "taux_vente_horaire_calcule",
+            "forfait_jour_ht_calcule", "poids_ponderation",
+            "inclure_taux_moyen", "coefficient_k_applique",
             "simulations", "nb_simulations",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "taux_horaire_ht_calcule", "date_creation", "date_modification"]
+        read_only_fields = [
+            "id", "taux_horaire_ht_calcule", "taux_vente_horaire_calcule",
+            "forfait_jour_ht_calcule", "coefficient_k_applique",
+            "date_creation", "date_modification",
+        ]
 
     def get_nb_simulations(self, obj):
         return obj.simulations.filter(actif=True).count()
@@ -92,7 +101,11 @@ class ParametreSocieteSerializer(serializers.ModelSerializer):
             "id", "annee", "zone_smic", "smic_horaire_brut", "pmss", "pass_annuel",
             "taux_charges_salariales", "taux_charges_patronales",
             "heures_productives_be", "decomposition_heures_productives",
-            "objectif_marge_nette", "taux_tva_defaut",
+            "heures_facturables_jour",
+            "objectif_marge_nette", "taux_frais_generaux", "taux_frais_commerciaux",
+            "taux_risque_alea", "taux_imponderables", "taux_marge_cible",
+            "mode_arrondi_tarif", "pas_arrondi_tarif", "strategie_tarifaire",
+            "taux_tva_defaut",
             "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]
@@ -104,7 +117,7 @@ class ChargeFixeStructureSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChargeFixeStructure
         fields = [
-            "id", "libelle", "montant_mensuel", "montant_annuel",
+            "id", "libelle", "categorie", "montant_mensuel", "montant_annuel",
             "actif", "ordre", "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "montant_annuel", "date_creation", "date_modification"]
@@ -130,6 +143,13 @@ class MissionClientSocieteSerializer(serializers.ModelSerializer):
             "profil_horaire_defaut",
             "profil_horaire_defaut_libelle",
             "duree_etude_heures",
+            "mode_chiffrage_defaut",
+            "duree_etude_jours",
+            "complexite",
+            "coefficient_complexite",
+            "phase_mission",
+            "nature_livrable",
+            "inclusion_recommandee_devis",
             "ordre",
             "livrables_count",
             "date_creation",
@@ -149,17 +169,26 @@ class LigneDevisSerializer(serializers.ModelSerializer):
         model = LigneDevis
         fields = [
             "id", "ordre", "type_ligne", "phase_code",
+            "mode_chiffrage",
             "intitule", "description",
             "profil", "profil_libelle", "profil_couleur",
-            "nb_heures", "taux_horaire",
+            "nb_heures", "nb_jours", "taux_horaire",
             "montant_unitaire_ht", "quantite", "unite",
-            "montant_ht",
+            "montant_ht", "cout_direct_horaire_reference",
+            "cout_direct_total_estime", "coefficient_k_applique",
+            "marge_estimee_ht", "taux_marge_estime",
+            "forfait_jour_ht_reference", "source_tarif",
         ]
-        read_only_fields = ["id", "montant_ht"]
+        read_only_fields = [
+            "id", "montant_ht", "cout_direct_total_estime",
+            "coefficient_k_applique", "marge_estimee_ht",
+            "taux_marge_estime", "source_tarif",
+        ]
 
     def validate(self, data):
         type_ligne = data.get("type_ligne", "horaire")
-        if type_ligne == "horaire":
+        mode = data.get("mode_chiffrage") or ""
+        if type_ligne == "horaire" and mode not in ("taux_moyen_be", "taux_profil"):
             if not data.get("nb_heures") or not data.get("taux_horaire"):
                 raise serializers.ValidationError(
                     "Une ligne horaire nécessite un nombre d'heures et un taux."
@@ -169,14 +198,24 @@ class LigneDevisSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         instance = super().create(validated_data)
         instance.calculer_montant()
-        instance.save(update_fields=["montant_ht"])
+        instance.save(update_fields=[
+            "mode_chiffrage", "taux_horaire", "forfait_jour_ht_reference",
+            "cout_direct_horaire_reference", "cout_direct_total_estime",
+            "coefficient_k_applique", "montant_ht", "marge_estimee_ht",
+            "taux_marge_estime", "source_tarif",
+        ])
         instance.devis.recalculer_totaux()
         return instance
 
     def update(self, instance, validated_data):
         instance = super().update(instance, validated_data)
         instance.calculer_montant()
-        instance.save(update_fields=["montant_ht"])
+        instance.save(update_fields=[
+            "mode_chiffrage", "taux_horaire", "forfait_jour_ht_reference",
+            "cout_direct_horaire_reference", "cout_direct_total_estime",
+            "coefficient_k_applique", "montant_ht", "marge_estimee_ht",
+            "taux_marge_estime", "source_tarif",
+        ])
         instance.devis.recalculer_totaux()
         return instance
 
@@ -318,6 +357,10 @@ class TempsPasseSerializer(serializers.ModelSerializer):
             "libelle_cible",
             "nb_heures",
             "taux_horaire",
+            "taux_vente_horaire",
+            "cout_direct_horaire",
+            "montant_vendu_associe",
+            "marge_estimee",
             "cout_total",
             "commentaires",
             "date_creation",

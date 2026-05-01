@@ -15,9 +15,9 @@ from django.utils import timezone
 
 class ProfilHoraire(models.Model):
     """
-    Profil de facturation avec taux horaire.
-    Le taux peut être saisi manuellement ou calculé automatiquement depuis
-    les simulations salariales (moyenne des DHMO × marge de vente).
+    Profil de facturation avec coût interne et taux de vente.
+    La logique principale applique le coefficient K société au coût direct
+    horaire. Les anciens champs de marge restent présents pour compatibilité.
     """
     TYPE_PROFIL_CHOICES = [
         ("be", "Bureau d'études"),
@@ -65,6 +65,30 @@ class ProfilHoraire(models.Model):
     taux_horaire_ht_calcule = models.DecimalField(
         max_digits=8, decimal_places=2, null=True, blank=True,
         verbose_name="Taux calculé (moyenne simulations)",
+    )
+    cout_direct_horaire = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Coût direct horaire",
+    )
+    taux_vente_horaire_calcule = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Taux de vente horaire calculé",
+    )
+    forfait_jour_ht_calcule = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        verbose_name="Forfait jour HT calculé",
+    )
+    poids_ponderation = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("1.00"),
+        verbose_name="Poids de pondération",
+    )
+    inclure_taux_moyen = models.BooleanField(
+        default=True,
+        verbose_name="Inclus dans le taux moyen pondéré",
+    )
+    coefficient_k_applique = models.DecimalField(
+        max_digits=8, decimal_places=4, default=Decimal("1.0000"),
+        verbose_name="Coefficient K appliqué",
     )
     utiliser_calcul = models.BooleanField(
         default=False,
@@ -122,6 +146,12 @@ class SimulationSalaire(models.Model):
                                verbose_name="DHMO (€/h coût)")
     taux_vente_horaire = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0"),
                                              verbose_name="Taux de vente horaire (€/h)")
+    cout_direct_horaire = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0"),
+                                              verbose_name="Coût direct horaire")
+    taux_vente_horaire_calcule_k = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0"),
+                                                       verbose_name="Taux de vente horaire via coefficient K")
+    forfait_jour_ht_calcule = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"),
+                                                  verbose_name="Forfait jour HT calculé")
 
     actif = models.BooleanField(default=True, verbose_name="Inclus dans la moyenne")
     ordre = models.PositiveSmallIntegerField(default=0)
@@ -155,7 +185,10 @@ class SimulationSalaire(models.Model):
         self.cout_employeur_mensuel = fiche["cout_employeur_mensuel"]
         self.cout_annuel = fiche["cout_annuel"]
         self.dhmo = fiche["dhmo"]
+        self.cout_direct_horaire = fiche["cout_direct_horaire"]
         self.taux_vente_horaire = fiche["taux_vente_horaire"]
+        self.taux_vente_horaire_calcule_k = fiche.get("taux_vente_horaire_calcule_k", fiche["taux_vente_horaire"])
+        self.forfait_jour_ht_calcule = fiche.get("forfait_jour_ht_calcule", Decimal("0.00"))
 
     def save(self, *args, **kwargs):
         self.calculer()
@@ -198,6 +231,18 @@ class ProfilHoraireUtilisateur(models.Model):
 # ─────────────────────────────────────────────
 
 class ParametreSociete(models.Model):
+    MODES_ARRONDI_TARIF = [
+        ("aucun", "Aucun"),
+        ("euro", "Euro"),
+        ("cinq_euros", "5 euros"),
+        ("dix_euros", "10 euros"),
+    ]
+    STRATEGIES_TARIFAIRES = [
+        ("taux_unique", "Taux moyen unique"),
+        ("taux_par_profil", "Taux par profil"),
+        ("mixte", "Mixte"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     annee = models.PositiveSmallIntegerField(default=2026, unique=True)
     zone_smic = models.CharField(max_length=80, default="Mayotte")
@@ -212,7 +257,16 @@ class ParametreSociete(models.Model):
         blank=True,
         verbose_name="Décomposition heures productives BE",
     )
+    heures_facturables_jour = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("7.00"))
     objectif_marge_nette = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.1500"))
+    taux_frais_generaux = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.0000"))
+    taux_frais_commerciaux = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.0000"))
+    taux_risque_alea = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.0000"))
+    taux_imponderables = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.0000"))
+    taux_marge_cible = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.1500"))
+    mode_arrondi_tarif = models.CharField(max_length=20, choices=MODES_ARRONDI_TARIF, default="aucun")
+    pas_arrondi_tarif = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("1.00"))
+    strategie_tarifaire = models.CharField(max_length=20, choices=STRATEGIES_TARIFAIRES, default="mixte")
     taux_tva_defaut = models.DecimalField(max_digits=5, decimal_places=3, default=Decimal("0.200"))
     date_creation = models.DateTimeField(auto_now_add=True)
     date_modification = models.DateTimeField(auto_now=True)
@@ -226,8 +280,24 @@ class ParametreSociete(models.Model):
 
 
 class ChargeFixeStructure(models.Model):
+    CATEGORIES = [
+        ("loyer", "Loyer"),
+        ("logiciels", "Logiciels"),
+        ("assurances", "Assurances"),
+        ("comptabilite", "Comptabilité"),
+        ("vehicule", "Véhicule"),
+        ("telephonie", "Téléphonie"),
+        ("materiel", "Matériel"),
+        ("documentation", "Documentation"),
+        ("frais_bancaires", "Frais bancaires"),
+        ("sous_traitance_structurelle", "Sous-traitance structurelle"),
+        ("commercial", "Commercial"),
+        ("autres", "Autres"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     libelle = models.CharField(max_length=200)
+    categorie = models.CharField(max_length=40, choices=CATEGORIES, default="autres")
     montant_mensuel = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     actif = models.BooleanField(default=True)
     ordre = models.PositiveSmallIntegerField(default=0)
@@ -386,6 +456,14 @@ class LigneDevis(models.Model):
         ("frais", "Remboursement de frais"),
         ("sous_traitance", "Sous-traitance"),
     ]
+    MODES_CHIFFRAGE = [
+        ("taux_moyen_be", "Taux horaire moyen BE"),
+        ("taux_profil", "Taux horaire profil"),
+        ("forfait_jour_profil", "Forfait jour profil"),
+        ("forfait_mission", "Forfait mission"),
+        ("frais", "Frais / débours"),
+        ("sous_traitance", "Sous-traitance"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     devis = models.ForeignKey(
@@ -393,6 +471,13 @@ class LigneDevis(models.Model):
     )
     ordre = models.PositiveSmallIntegerField(default=0)
     type_ligne = models.CharField(max_length=20, choices=TYPES, default="horaire")
+    mode_chiffrage = models.CharField(
+        max_length=30,
+        choices=MODES_CHIFFRAGE,
+        blank=True,
+        default="",
+        verbose_name="Mode de chiffrage",
+    )
 
     # Phase ou section libre
     phase_code = models.CharField(max_length=30, blank=True, verbose_name="Code phase")
@@ -407,6 +492,10 @@ class LigneDevis(models.Model):
     nb_heures = models.DecimalField(
         max_digits=8, decimal_places=2, null=True, blank=True,
         verbose_name="Nombre d'heures"
+    )
+    nb_jours = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        verbose_name="Nombre de jours",
     )
     taux_horaire = models.DecimalField(
         max_digits=8, decimal_places=2, null=True, blank=True,
@@ -429,6 +518,31 @@ class LigneDevis(models.Model):
         max_digits=12, decimal_places=2, default=Decimal("0"),
         verbose_name="Montant HT"
     )
+    cout_direct_horaire_reference = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+        verbose_name="Coût direct horaire de référence",
+    )
+    cout_direct_total_estime = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        verbose_name="Coût direct total estimé",
+    )
+    coefficient_k_applique = models.DecimalField(
+        max_digits=8, decimal_places=4, null=True, blank=True,
+        verbose_name="Coefficient K appliqué",
+    )
+    marge_estimee_ht = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        verbose_name="Marge estimée HT",
+    )
+    taux_marge_estime = models.DecimalField(
+        max_digits=8, decimal_places=4, null=True, blank=True,
+        verbose_name="Taux de marge estimé",
+    )
+    forfait_jour_ht_reference = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        verbose_name="Forfait jour HT de référence",
+    )
+    source_tarif = models.CharField(max_length=80, blank=True, default="", verbose_name="Source tarif")
 
     class Meta:
         db_table = "societe_ligne_devis"
@@ -440,11 +554,12 @@ class LigneDevis(models.Model):
         return f"{self.devis.reference} — {self.intitule}"
 
     def calculer_montant(self):
-        """Calcule le montant HT selon le type de ligne."""
-        if self.type_ligne == "horaire" and self.nb_heures and self.taux_horaire:
-            self.montant_ht = (self.nb_heures * self.taux_horaire).quantize(Decimal("0.01"))
-        elif self.montant_unitaire_ht is not None:
-            self.montant_ht = (self.quantite * self.montant_unitaire_ht).quantize(Decimal("0.01"))
+        """Calcule le montant HT et la marge depuis le service économique."""
+        from applications.societe.services import calculer_ligne_devis
+
+        valeurs = calculer_ligne_devis(self)
+        for champ, valeur in valeurs.items():
+            setattr(self, champ, valeur)
         return self.montant_ht
 
 
@@ -696,6 +811,10 @@ class TempsPasse(models.Model):
     libelle_cible = models.CharField(max_length=255, blank=True, default="", verbose_name="Libellé cible")
     nb_heures = models.DecimalField(max_digits=8, decimal_places=2, verbose_name="Nombre d'heures")
     taux_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Taux horaire")
+    taux_vente_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Taux de vente horaire")
+    cout_direct_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Coût direct horaire")
+    montant_vendu_associe = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Montant vendu associé")
+    marge_estimee = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Marge estimée")
     cout_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Coût total")
     commentaires = models.TextField(blank=True, verbose_name="Commentaires")
     cree_par = models.ForeignKey(
@@ -718,7 +837,14 @@ class TempsPasse(models.Model):
         return f"{self.projet.reference} — {self.utilisateur.nom_complet} — {self.nb_heures} h"
 
     def save(self, *args, **kwargs):
-        if self.profil_horaire_id and (not self.taux_horaire or self.taux_horaire == Decimal("0")):
-            self.taux_horaire = self.profil_horaire.taux_horaire_ht
-        self.cout_total = (self.nb_heures * self.taux_horaire).quantize(Decimal("0.01"))
+        if self.profil_horaire_id:
+            if not self.cout_direct_horaire or self.cout_direct_horaire == Decimal("0"):
+                self.cout_direct_horaire = self.profil_horaire.cout_direct_horaire or self.profil_horaire.taux_horaire_ht
+            if not self.taux_vente_horaire or self.taux_vente_horaire == Decimal("0"):
+                self.taux_vente_horaire = self.profil_horaire.taux_horaire_ht
+            if not self.taux_horaire or self.taux_horaire == Decimal("0"):
+                self.taux_horaire = self.cout_direct_horaire
+        self.cout_total = (self.nb_heures * self.cout_direct_horaire).quantize(Decimal("0.01"))
+        self.montant_vendu_associe = (self.nb_heures * self.taux_vente_horaire).quantize(Decimal("0.01"))
+        self.marge_estimee = (self.montant_vendu_associe - self.cout_total).quantize(Decimal("0.01"))
         super().save(*args, **kwargs)

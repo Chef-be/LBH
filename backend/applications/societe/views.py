@@ -35,11 +35,13 @@ from .serializers import (
     MissionClientSocieteSerializer,
 )
 from .services import (
+    calculer_coefficient_k_societe,
     construire_contexte_projet_saisi,
     construire_suggestions_prestations,
     generer_jeton_validation,
     generer_pdf_devis,
     lister_missions_livrables,
+    recalculer_tarifs_societe,
     rendu_validation_html,
 )
 from applications.messagerie.services import MessagerieErreur, envoyer_courriel
@@ -244,6 +246,30 @@ class ChargeFixeStructureViewSet(viewsets.ModelViewSet):
     serializer_class = ChargeFixeStructureSerializer
     permission_classes = [permissions.IsAuthenticated]
     queryset = ChargeFixeStructure.objects.all()
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_pilotage_economique(request):
+    """Synthèse économique BE calculée côté serveur."""
+    annee = request.query_params.get("annee")
+    try:
+        synthese = calculer_coefficient_k_societe(int(annee) if annee else None)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(synthese)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_recalculer_tarifs(request):
+    """Recalcule le coefficient K, les simulations et les taux des profils."""
+    annee = request.data.get("annee") or request.query_params.get("annee")
+    try:
+        synthese = recalculer_tarifs_societe(int(annee) if annee else None)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(synthese)
 
 
 class MissionClientSocieteViewSet(viewsets.ModelViewSet):
@@ -1091,6 +1117,8 @@ def vue_tableau_de_bord(request):
     # Devis
     nb_devis_en_cours = DevisHonoraires.objects.filter(statut="brouillon").count()
     nb_devis_attente = DevisHonoraires.objects.filter(statut="envoye").count()
+    devis_acceptes = DevisHonoraires.objects.filter(statut="accepte")
+    ca_signe = devis_acceptes.aggregate(total=Sum("montant_ht"))["total"] or Decimal("0")
 
     devis_recents = DevisHonoraires.objects.order_by("-date_creation")[:5]
     factures_retard_qs = Facture.objects.filter(
@@ -1098,6 +1126,16 @@ def vue_tableau_de_bord(request):
         date_echeance__lt=aujourd_hui,
     ).order_by("date_echeance")[:10]
     temps_passes = TempsPasse.objects.select_related("projet", "utilisateur").order_by("-date_saisie", "-date_creation")
+    heures_vendues = LigneDevis.objects.filter(devis__statut="accepte").aggregate(total=Sum("nb_heures"))["total"] or Decimal("0")
+    heures_consommees = temps_passes.aggregate(total=Sum("nb_heures"))["total"] or Decimal("0")
+    cout_reel = temps_passes.aggregate(total=Sum("cout_total"))["total"] or Decimal("0")
+    marge_reelle = ca_signe - cout_reel
+    cout_previsionnel = LigneDevis.objects.filter(devis__statut="accepte").aggregate(total=Sum("cout_direct_total_estime"))["total"] or Decimal("0")
+    marge_previsionnelle = ca_signe - cout_previsionnel
+    try:
+        pilotage_economique = calculer_coefficient_k_societe()
+    except ValueError:
+        pilotage_economique = {}
 
     rentabilite_par_salarie = []
     for ligne in (
@@ -1155,6 +1193,19 @@ def vue_tableau_de_bord(request):
         "nb_devis_en_cours": nb_devis_en_cours,
         "nb_devis_attente_reponse": nb_devis_attente,
         "nb_factures_en_retard": len(factures_retard),
+        "pilotage_economique": {
+            **pilotage_economique,
+            "ca_signe": ca_signe,
+            "ca_facture": ca_annee,
+            "ca_encaisse": montant_encaisse,
+            "reste_a_produire": ca_signe - ca_annee,
+            "heures_vendues": heures_vendues,
+            "heures_consommees": heures_consommees,
+            "ecart_heures_vendues_passees": heures_vendues - heures_consommees,
+            "marge_previsionnelle": marge_previsionnelle,
+            "marge_reelle": marge_reelle,
+            "taux_occupation_facturable": (heures_consommees / heures_vendues).quantize(Decimal("0.0001")) if heures_vendues else Decimal("0.0000"),
+        },
         "devis_recents": DevisHonorairesListeSerializer(devis_recents, many=True).data,
         "factures_en_retard": FactureListeSerializer(factures_retard_qs, many=True).data,
         "temps_passes_recents": TempsPasseSerializer(temps_passes[:10], many=True).data,

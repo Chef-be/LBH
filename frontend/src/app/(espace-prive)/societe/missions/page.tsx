@@ -6,6 +6,7 @@ import { Save } from "lucide-react";
 
 import { api } from "@/crochets/useApi";
 import type { ProfilHoraire } from "@/types/societe";
+import type { ModeChiffrageDevis } from "@/types/societe";
 
 interface MissionParametrage {
   id: string;
@@ -21,6 +22,13 @@ interface MissionParametrage {
   profil_horaire_defaut: string | null;
   profil_horaire_defaut_libelle: string;
   duree_etude_heures: string;
+  duree_etude_jours: string;
+  mode_chiffrage_defaut: ModeChiffrageDevis;
+  complexite: "simple" | "standard" | "complexe" | "tres_complexe";
+  coefficient_complexite: string;
+  phase_mission: "ESQ" | "APS" | "APD" | "PRO" | "ACT" | "VISA" | "DET" | "AOR" | "OPC" | "autre";
+  nature_livrable: string;
+  inclusion_recommandee_devis: boolean;
   ordre: number;
   livrables_count: number;
 }
@@ -89,7 +97,7 @@ export default function PageMissionsSociete() {
       <div className="space-y-3">
         {missions.map((mission) => (
           <div key={mission.id} className="rounded-xl p-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
-            <div className="grid gap-4 xl:grid-cols-[1.2fr_160px_220px_120px_120px]">
+            <div className="grid gap-4 xl:grid-cols-[1.2fr_150px_150px_190px_190px_120px_120px]">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold" style={{ color: "var(--texte)" }}>{mission.libelle}</p>
@@ -99,12 +107,21 @@ export default function PageMissionsSociete() {
                 <p className="mt-1 text-sm" style={{ color: "var(--texte-3)" }}>{mission.description || `${mission.livrables_count} livrable(s)`}</p>
               </div>
               <div>
-                <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Durée défaut</label>
+                <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Durée heures</label>
                 <input
                   type="number"
                   className="champ-saisie w-full"
                   defaultValue={mission.duree_etude_heures}
                   onBlur={(e) => maj(mission, { duree_etude_heures: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Durée jours</label>
+                <input
+                  type="number"
+                  className="champ-saisie w-full"
+                  defaultValue={mission.duree_etude_jours}
+                  onBlur={(e) => maj(mission, { duree_etude_jours: e.target.value })}
                 />
               </div>
               <div>
@@ -118,8 +135,32 @@ export default function PageMissionsSociete() {
                   {profils.map((profil) => <option key={profil.id} value={profil.id}>{profil.libelle}</option>)}
                 </select>
               </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Mode par défaut</label>
+                <select className="champ-saisie w-full" value={mission.mode_chiffrage_defaut} onChange={(e) => maj(mission, { mode_chiffrage_defaut: e.target.value as ModeChiffrageDevis })}>
+                  <option value="taux_moyen_be">Taux moyen BE</option>
+                  <option value="taux_profil">Taux profil</option>
+                  <option value="forfait_jour_profil">Forfait jour profil</option>
+                  <option value="forfait_mission">Forfait mission</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Complexité</label>
+                <select className="champ-saisie w-full" value={mission.complexite} onChange={(e) => maj(mission, { complexite: e.target.value as MissionParametrage["complexite"] })}>
+                  <option value="simple">Simple</option>
+                  <option value="standard">Standard</option>
+                  <option value="complexe">Complexe</option>
+                  <option value="tres_complexe">Très complexe</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Phase</label>
+                <select className="champ-saisie w-full" value={mission.phase_mission} onChange={(e) => maj(mission, { phase_mission: e.target.value as MissionParametrage["phase_mission"] })}>
+                  {["ESQ", "APS", "APD", "PRO", "ACT", "VISA", "DET", "AOR", "OPC", "autre"].map((phase) => <option key={phase} value={phase}>{phase}</option>)}
+                </select>
+              </div>
               <label className="flex items-center gap-2 text-sm" style={{ color: "var(--texte-2)" }}>
-                <input type="checkbox" checked={mission.est_obligatoire} onChange={(e) => maj(mission, { est_obligatoire: e.target.checked })} />
+                <input type="checkbox" checked={mission.inclusion_recommandee_devis} onChange={(e) => maj(mission, { inclusion_recommandee_devis: e.target.checked })} />
                 Recommandée
               </label>
               <label className="flex items-center gap-2 text-sm" style={{ color: "var(--texte-2)" }}>

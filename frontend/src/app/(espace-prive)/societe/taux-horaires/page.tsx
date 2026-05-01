@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
-import { ParametreSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire } from "@/types/societe";
+import { ParametreSociete, PilotageEconomiqueSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire } from "@/types/societe";
 import {
   Plus, Pencil, Trash2, Check, X, ChevronDown, ChevronRight,
   Calculator, TrendingUp, Users, ToggleLeft, ToggleRight,
@@ -190,8 +190,8 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
     return moy !== null ? [...par, moy] : par;
   }
 
-  const moyenneDHMO = actives.length ? calculerMoyenne(sims, "dhmo") : null;
-  const moyenneTaux = actives.length ? calculerMoyenne(sims, "taux_vente_horaire") : null;
+  const moyenneCoutDirect = actives.length ? calculerMoyenne(sims, "cout_direct_horaire") : null;
+  const moyenneTaux = actives.length ? calculerMoyenne(sims, "taux_vente_horaire_calcule_k") : null;
 
   return (
     <div className="space-y-4 pt-2">
@@ -219,9 +219,9 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
           </p>
         </div>
         <div>
-          <p className="text-xs mb-1" style={{ color: "var(--texte-3)" }}>Marge de vente cible</p>
+          <p className="text-xs mb-1" style={{ color: "var(--texte-3)" }}>Coefficient K appliqué</p>
           <p className="text-sm font-semibold font-mono" style={{ color: "var(--texte)" }}>
-            {pct(profil.taux_marge_vente)}
+            {fmt(profil.coefficient_k_applique, 4)}
           </p>
         </div>
       </div>
@@ -275,13 +275,18 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
               <LigneFiche label="Coût employeur mensuel (€)" values={valeur("cout_employeur_mensuel")} bold />
               <LigneFiche label="Coût annuel (€)" values={valeur("cout_annuel")} bold />
               <LigneFiche
-                label={`DHMO — coût horaire (€/h)`}
-                values={valeur("dhmo")}
+                label="Coût direct horaire (€/h)"
+                values={valeur("cout_direct_horaire")}
                 bold highlight
               />
               <LigneFiche
-                label={`Taux de vente horaire (€/h)`}
-                values={valeur("taux_vente_horaire")}
+                label="Taux de vente via coefficient K (€/h)"
+                values={valeur("taux_vente_horaire_calcule_k")}
+                bold highlight
+              />
+              <LigneFiche
+                label="Forfait jour calculé (€)"
+                values={valeur("forfait_jour_ht_calcule")}
                 bold highlight
               />
             </tbody>
@@ -297,9 +302,9 @@ function BlocSimulations({ profil }: { profil: ProfilHoraire }) {
         >
           <div className="flex gap-6">
             <div>
-              <p className="text-xs mb-0.5" style={{ color: "var(--texte-3)" }}>DHMO moyen</p>
+              <p className="text-xs mb-0.5" style={{ color: "var(--texte-3)" }}>Coût direct moyen</p>
               <p className="text-lg font-bold font-mono" style={{ color: "var(--texte)" }}>
-                {fmt(moyenneDHMO)} €/h
+                {fmt(moyenneCoutDirect)} €/h
               </p>
             </div>
             <div>
@@ -478,7 +483,7 @@ function CarteProfil({
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <span className="text-xl font-bold font-mono" style={{ color: profil.couleur }}>
-              {fmt(profil.taux_horaire_ht)} €/h
+              {fmt(profil.taux_vente_horaire_calcule || profil.taux_horaire_ht)} €/h
             </span>
             {ouvert ? <ChevronDown size={16} style={{ color: "var(--texte-3)" }} /> : <ChevronRight size={16} style={{ color: "var(--texte-3)" }} />}
           </div>
@@ -506,6 +511,20 @@ function CarteProfil({
       {/* Corps accordéon */}
       {ouvert && (
         <div className="px-4 pb-4 pt-1" style={{ borderTop: "1px solid var(--bordure)" }}>
+          <div className="mb-4 grid gap-3 md:grid-cols-5">
+            {[
+              ["Coût direct", `${fmt(profil.cout_direct_horaire)} €/h`],
+              ["Coefficient K", fmt(profil.coefficient_k_applique, 4)],
+              ["Taux vente", `${fmt(profil.taux_vente_horaire_calcule || profil.taux_horaire_ht)} €/h`],
+              ["Forfait jour", `${fmt(profil.forfait_jour_ht_calcule)} €`],
+              ["Poids moyen", fmt(profil.poids_ponderation)],
+            ].map(([label, valeur]) => (
+              <div key={label} className="rounded-lg p-3" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+                <p className="text-xs" style={{ color: "var(--texte-3)" }}>{label}</p>
+                <p className="font-semibold" style={{ color: "var(--texte)" }}>{valeur}</p>
+              </div>
+            ))}
+          </div>
           <BlocSimulations profil={profil} />
         </div>
       )}
@@ -684,6 +703,10 @@ export default function PageTauxHoraires() {
     },
   });
   const parametreSociete = parametresSociete[0];
+  const { data: pilotage } = useQuery<PilotageEconomiqueSociete>({
+    queryKey: ["societe-pilotage-economique"],
+    queryFn: () => api.get<PilotageEconomiqueSociete>("/api/societe/pilotage-economique/"),
+  });
 
   const sauvegarder = useMutation({
     mutationFn: (data: FormProfil) => {
@@ -747,6 +770,23 @@ export default function PageTauxHoraires() {
       {isLoading && (
         <p className="text-sm py-8 text-center" style={{ color: "var(--texte-3)" }}>Chargement…</p>
       )}
+
+      {pilotage ? (
+        <section className="grid gap-3 md:grid-cols-5">
+          {[
+            ["Coefficient K", Number(pilotage.coefficient_k).toLocaleString("fr-FR", { maximumFractionDigits: 2 })],
+            ["Coût direct moyen", `${fmt(pilotage.cout_direct_horaire_moyen_pondere)} €/h`],
+            ["Taux moyen pondéré", `${fmt(pilotage.taux_horaire_moyen_pondere)} €/h`],
+            ["Forfait jour moyen", `${fmt(pilotage.forfait_jour_moyen_ht)} €`],
+            ["Heures / jour", `${fmt(pilotage.heures_facturables_jour)} h`],
+          ].map(([label, valeur]) => (
+            <div key={label} className="rounded-xl p-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+              <p className="text-xs uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>{label}</p>
+              <p className="mt-1 text-lg font-bold" style={{ color: "var(--texte)" }}>{valeur}</p>
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {creer && (
         <FormulaireProfil form={form} setForm={setForm} parametre={parametreSociete}

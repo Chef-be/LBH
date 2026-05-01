@@ -45,6 +45,13 @@ export interface MissionAssistantSociete {
   profil_horaire_defaut_libelle?: string;
   profil_horaire_defaut_taux?: string;
   duree_etude_heures?: string;
+  mode_chiffrage_defaut?: ModeChiffrageDevis;
+  duree_etude_jours?: string;
+  complexite?: "simple" | "standard" | "complexe" | "tres_complexe";
+  coefficient_complexite?: string;
+  phase_mission?: "ESQ" | "APS" | "APD" | "PRO" | "ACT" | "VISA" | "DET" | "AOR" | "OPC" | "autre";
+  nature_livrable?: string;
+  inclusion_recommandee_devis?: boolean;
   livrables: LivrableMissionSociete[];
 }
 
@@ -79,12 +86,15 @@ export interface SuggestionPrestationDevis {
   livrables_codes: string[];
   livrables_labels: string[];
   type_ligne: "horaire" | "forfait" | "frais" | "sous_traitance";
+  mode_chiffrage?: ModeChiffrageDevis;
   quantite: string;
   unite: string;
   nb_heures_suggerees: string;
+  nb_jours_suggerees?: string;
   profil_horaire_id: string;
   profil_horaire_libelle: string;
   taux_horaire_suggere: string;
+  forfait_jour_suggere?: string;
 }
 
 export interface AssistantDevisResponse {
@@ -112,7 +122,10 @@ export interface SimulationSalaire {
   cout_employeur_mensuel: string;
   cout_annuel: string;
   dhmo: string;
+  cout_direct_horaire: string;
   taux_vente_horaire: string;
+  taux_vente_horaire_calcule_k: string;
+  forfait_jour_ht_calcule: string;
   actif: boolean;
   ordre: number;
   date_creation: string;
@@ -135,6 +148,12 @@ export interface ProfilHoraire {
   taux_marge_vente: string;
   taux_horaire_ht_calcule: string | null;
   utiliser_calcul: boolean;
+  cout_direct_horaire: string;
+  taux_vente_horaire_calcule: string;
+  forfait_jour_ht_calcule: string;
+  poids_ponderation: string;
+  inclure_taux_moyen: boolean;
+  coefficient_k_applique: string;
   simulations: SimulationSalaire[];
   nb_simulations: number;
   date_creation: string;
@@ -163,7 +182,16 @@ export interface ParametreSociete {
   taux_charges_patronales: string;
   heures_productives_be: string;
   decomposition_heures_productives: Record<string, number>;
+  heures_facturables_jour: string;
   objectif_marge_nette: string;
+  taux_frais_generaux: string;
+  taux_frais_commerciaux: string;
+  taux_risque_alea: string;
+  taux_imponderables: string;
+  taux_marge_cible: string;
+  mode_arrondi_tarif: "aucun" | "euro" | "cinq_euros" | "dix_euros";
+  pas_arrondi_tarif: string;
+  strategie_tarifaire: "taux_unique" | "taux_par_profil" | "mixte";
   taux_tva_defaut: string;
   date_creation: string;
   date_modification: string;
@@ -172,6 +200,7 @@ export interface ParametreSociete {
 export interface ChargeFixeStructure {
   id: string;
   libelle: string;
+  categorie: "loyer" | "logiciels" | "assurances" | "comptabilite" | "vehicule" | "telephonie" | "materiel" | "documentation" | "frais_bancaires" | "sous_traitance_structurelle" | "commercial" | "autres";
   montant_mensuel: string;
   montant_annuel: string;
   actif: boolean;
@@ -180,10 +209,19 @@ export interface ChargeFixeStructure {
   date_modification: string;
 }
 
+export type ModeChiffrageDevis =
+  | "taux_moyen_be"
+  | "taux_profil"
+  | "forfait_jour_profil"
+  | "forfait_mission"
+  | "frais"
+  | "sous_traitance";
+
 export interface LigneDevis {
   id: string;
   ordre: number;
   type_ligne: "horaire" | "forfait" | "frais" | "sous_traitance";
+  mode_chiffrage: ModeChiffrageDevis | "";
   phase_code: string;
   intitule: string;
   description: string;
@@ -191,11 +229,54 @@ export interface LigneDevis {
   profil_libelle: string | null;
   profil_couleur: string | null;
   nb_heures: string | null;
+  nb_jours: string | null;
   taux_horaire: string | null;
   montant_unitaire_ht: string | null;
   quantite: string;
   unite: string;
   montant_ht: string;
+  cout_direct_horaire_reference: string | null;
+  cout_direct_total_estime: string | null;
+  coefficient_k_applique: string | null;
+  marge_estimee_ht: string | null;
+  taux_marge_estime: string | null;
+  forfait_jour_ht_reference: string | null;
+  source_tarif: string;
+}
+
+export interface PilotageEconomiqueSociete {
+  annee: number;
+  coefficient_k: string;
+  cout_direct_annuel: string;
+  charges_structure_annuelles: string;
+  frais_generaux_annuels?: string;
+  frais_commerciaux_annuels?: string;
+  risques_annuels?: string;
+  imponderables_annuels?: string;
+  cout_complet_annuel: string;
+  ca_cible_annuel: string;
+  ca_cible_mensuel: string;
+  cout_direct_horaire_moyen_pondere: string;
+  taux_horaire_moyen_pondere: string;
+  forfait_jour_moyen_ht: string;
+  heures_facturables_jour: string;
+  seuil_rentabilite_annuel?: string;
+  seuil_rentabilite_mensuel?: string;
+  heures_facturables_annuelles_necessaires?: string;
+  jours_facturables_annuels_necessaires?: string;
+  ca_signe?: string;
+  ca_facture?: string;
+  ca_encaisse?: string;
+  reste_a_produire?: string;
+  montant_en_attente?: string;
+  montant_en_retard?: string;
+  heures_vendues?: string;
+  heures_consommees?: string;
+  ecart_heures_vendues_passees?: string;
+  marge_previsionnelle?: string;
+  marge_reelle?: string;
+  taux_occupation_facturable?: string;
+  details: Record<string, string>;
 }
 
 export interface DevisHonoraires {
@@ -314,6 +395,7 @@ export interface TableauDeBord {
   nb_devis_en_cours: number;
   nb_devis_attente_reponse: number;
   nb_factures_en_retard: number;
+  pilotage_economique: PilotageEconomiqueSociete;
   devis_recents: DevisHonoraires[];
   factures_en_retard: Facture[];
   temps_passes_recents: TempsPasse[];
@@ -339,6 +421,10 @@ export interface TempsPasse {
   libelle_cible: string;
   nb_heures: string;
   taux_horaire: string;
+  taux_vente_horaire: string;
+  cout_direct_horaire: string;
+  montant_vendu_associe: string;
+  marge_estimee: string;
   cout_total: string;
   commentaires: string;
   date_creation: string;

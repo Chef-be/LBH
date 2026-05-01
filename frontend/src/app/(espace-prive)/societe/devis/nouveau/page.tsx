@@ -9,19 +9,23 @@ import { api, ErreurApi } from "@/crochets/useApi";
 import type {
   AssistantDevisResponse,
   MissionSelectionneeDevis,
+  ModeChiffrageDevis,
   ParcoursProjetSociete,
+  PilotageEconomiqueSociete,
   ProfilHoraire,
   ProfilHoraireUtilisateur,
 } from "@/types/societe";
 
 interface LigneForm {
   ordre: number;
-  type_ligne: "horaire" | "forfait" | "frais";
+  type_ligne: "horaire" | "forfait" | "frais" | "sous_traitance";
+  mode_chiffrage: ModeChiffrageDevis;
   phase_code: string;
   intitule: string;
   description: string;
   profil: string;
   nb_heures: string;
+  nb_jours: string;
   taux_horaire: string;
   montant_unitaire_ht: string;
   quantite: string;
@@ -83,11 +87,13 @@ interface DevisForm {
 const LIGNE_VIDE: LigneForm = {
   ordre: 0,
   type_ligne: "forfait",
+  mode_chiffrage: "forfait_mission",
   phase_code: "",
   intitule: "",
   description: "",
   profil: "",
   nb_heures: "8",
+  nb_jours: "1",
   taux_horaire: "0",
   montant_unitaire_ht: "0",
   quantite: "1",
@@ -104,11 +110,39 @@ function dateDansTrenteJours(): string {
   return date.toISOString().split("T")[0];
 }
 
-function calculerMontantLigne(ligne: LigneForm): number {
+function profilLigne(ligne: LigneForm, profils: ProfilHoraire[]): ProfilHoraire | undefined {
+  return profils.find((profil) => profil.id === ligne.profil);
+}
+
+function calculerMontantLigne(ligne: LigneForm, profils: ProfilHoraire[], pilotage?: PilotageEconomiqueSociete): number {
+  const profil = profilLigne(ligne, profils);
+  if (ligne.mode_chiffrage === "taux_moyen_be") {
+    return (parseFloat(ligne.nb_heures) || 0) * (parseFloat(String(pilotage?.taux_horaire_moyen_pondere ?? 0)) || 0);
+  }
+  if (ligne.mode_chiffrage === "taux_profil") {
+    return (parseFloat(ligne.nb_heures) || 0) * (parseFloat(profil?.taux_vente_horaire_calcule || profil?.taux_horaire_ht || ligne.taux_horaire) || 0);
+  }
+  if (ligne.mode_chiffrage === "forfait_jour_profil") {
+    return (parseFloat(ligne.nb_jours) || 0) * (parseFloat(profil?.forfait_jour_ht_calcule || "0") || 0);
+  }
   if (ligne.type_ligne === "horaire") {
     return (parseFloat(ligne.nb_heures) || 0) * (parseFloat(ligne.taux_horaire) || 0);
   }
   return (parseFloat(ligne.quantite) || 0) * (parseFloat(ligne.montant_unitaire_ht) || 0);
+}
+
+function calculerCoutDirectLigne(ligne: LigneForm, profils: ProfilHoraire[], pilotage?: PilotageEconomiqueSociete): number {
+  const profil = profilLigne(ligne, profils);
+  const coutHoraire = ligne.mode_chiffrage === "taux_moyen_be"
+    ? parseFloat(String(pilotage?.cout_direct_horaire_moyen_pondere ?? 0))
+    : parseFloat(profil?.cout_direct_horaire || "0");
+  if (ligne.mode_chiffrage === "forfait_jour_profil") {
+    return (parseFloat(ligne.nb_jours) || 0) * (parseFloat(String(pilotage?.heures_facturables_jour ?? 7)) || 7) * coutHoraire;
+  }
+  if (ligne.mode_chiffrage === "taux_moyen_be" || ligne.mode_chiffrage === "taux_profil") {
+    return (parseFloat(ligne.nb_heures) || 0) * coutHoraire;
+  }
+  return 0;
 }
 
 function libelleNatureOuvrage(valeur: string): string {
@@ -220,6 +254,10 @@ export default function PageNouveauDevis() {
       return Array.isArray(reponse) ? reponse : (reponse.results ?? []);
     },
   });
+  const { data: pilotage } = useQuery<PilotageEconomiqueSociete>({
+    queryKey: ["societe-pilotage-economique"],
+    queryFn: () => api.get<PilotageEconomiqueSociete>("/api/societe/pilotage-economique/"),
+  });
 
   const { data: utilisateurs = [] } = useQuery<UtilisateurOption[]>({
     queryKey: ["societe-devis-utilisateurs"],
@@ -302,26 +340,18 @@ export default function PageNouveauDevis() {
     }
   }, [form.contexte_contractuel, form.sous_type_client, parcours]);
 
-  const totalHT = lignes.reduce((somme, ligne) => somme + calculerMontantLigne(ligne), 0);
+  const totalHT = lignes.reduce((somme, ligne) => somme + calculerMontantLigne(ligne, profils, pilotage), 0);
   const totalTVA = totalHT * (parseFloat(form.taux_tva) || 0);
   const totalTTC = totalHT + totalTVA;
   const analyseRentabilite = useMemo(() => {
-    const coutBe = lignes.reduce((somme, ligne) => {
-      if (ligne.type_ligne !== "horaire") return somme;
-      const profil = profils.find((item) => item.id === ligne.profil);
-      const simulations = profil?.simulations.filter((simulation) => simulation.actif) ?? [];
-      const dhmo = simulations.length
-        ? simulations.reduce((s, simulation) => s + Number(simulation.dhmo), 0) / simulations.length
-        : (Number(ligne.taux_horaire) || 0) * 0.75;
-      return somme + (Number(ligne.nb_heures) || 0) * dhmo;
-    }, 0);
+    const coutBe = lignes.reduce((somme, ligne) => somme + calculerCoutDirectLigne(ligne, profils, pilotage), 0);
     const marge = totalHT - coutBe;
     const tauxMarge = totalHT > 0 ? marge / totalHT : 0;
     const seuilBas = 0.15;
     const seuilHaut = 0.55;
     const statut = tauxMarge < seuilBas ? "sous_evalue" : tauxMarge > seuilHaut ? "surevalue" : "coherent";
     return { coutBe, marge, tauxMarge, statut };
-  }, [lignes, profils, totalHT]);
+  }, [lignes, pilotage, profils, totalHT]);
 
   const mettreAJourFormulaire = <K extends keyof DevisForm>(champ: K, valeur: DevisForm[K]) => {
     setForm((courant) => ({ ...courant, [champ]: valeur }));
@@ -394,7 +424,25 @@ export default function PageNouveauDevis() {
       if (champ === "profil") {
         const profil = profils.find((item) => item.id === valeur);
         if (profil) {
-          suivantes[index].taux_horaire = profil.taux_horaire_ht;
+          suivantes[index].taux_horaire = profil.taux_vente_horaire_calcule || profil.taux_horaire_ht;
+        }
+      }
+      if (champ === "mode_chiffrage") {
+        if (valeur === "taux_moyen_be" || valeur === "taux_profil") {
+          suivantes[index].type_ligne = "horaire";
+          suivantes[index].unite = "h";
+        } else if (valeur === "forfait_jour_profil") {
+          suivantes[index].type_ligne = "forfait";
+          suivantes[index].unite = "j";
+        } else if (valeur === "frais") {
+          suivantes[index].type_ligne = "frais";
+          suivantes[index].unite = "unité";
+        } else if (valeur === "sous_traitance") {
+          suivantes[index].type_ligne = "sous_traitance";
+          suivantes[index].unite = "forfait";
+        } else {
+          suivantes[index].type_ligne = "forfait";
+          suivantes[index].unite = "forfait";
         }
       }
       return suivantes;
@@ -471,11 +519,13 @@ export default function PageNouveauDevis() {
       return {
         ordre: index,
         type_ligne: suggestion?.type_ligne === "horaire" ? "horaire" : "forfait",
+        mode_chiffrage: suggestion?.mode_chiffrage ?? "taux_profil",
         phase_code: suggestion?.phase_code ?? "",
         intitule: suggestion?.intitule ?? mission.missionLabel ?? mission.missionCode,
         description: suggestion?.description ?? "",
         profil: suggestion?.profil_horaire_id ?? "",
         nb_heures: suggestion?.nb_heures_suggerees ?? "8",
+        nb_jours: suggestion?.nb_jours_suggerees ?? "1",
         taux_horaire: suggestion?.taux_horaire_suggere ?? "0",
         montant_unitaire_ht: "0",
         quantite: suggestion?.quantite ?? "1",
@@ -555,13 +605,15 @@ export default function PageNouveauDevis() {
         await api.post(`/api/societe/devis/${devis.id}/lignes/`, {
           ordre: index,
           type_ligne: ligne.type_ligne,
+          mode_chiffrage: ligne.mode_chiffrage,
           phase_code: ligne.phase_code,
           intitule: ligne.intitule || `Ligne ${index + 1}`,
           description: ligne.description,
           profil: ligne.profil || null,
-          nb_heures: ligne.type_ligne === "horaire" ? parseFloat(ligne.nb_heures) : null,
-          taux_horaire: ligne.type_ligne === "horaire" ? parseFloat(ligne.taux_horaire) : null,
-          montant_unitaire_ht: ligne.type_ligne !== "horaire" ? parseFloat(ligne.montant_unitaire_ht) : null,
+          nb_heures: ["taux_moyen_be", "taux_profil"].includes(ligne.mode_chiffrage) ? parseFloat(ligne.nb_heures) : null,
+          nb_jours: ligne.mode_chiffrage === "forfait_jour_profil" ? parseFloat(ligne.nb_jours) : null,
+          taux_horaire: ["taux_moyen_be", "taux_profil"].includes(ligne.mode_chiffrage) ? parseFloat(ligne.taux_horaire) : null,
+          montant_unitaire_ht: ["forfait_mission", "frais", "sous_traitance"].includes(ligne.mode_chiffrage) ? parseFloat(ligne.montant_unitaire_ht) : null,
           quantite: parseFloat(ligne.quantite),
           unite: ligne.unite,
         });
@@ -1057,9 +1109,21 @@ export default function PageNouveauDevis() {
                     <option value="horaire">Horaire</option>
                     <option value="forfait">Forfait</option>
                     <option value="frais">Frais</option>
+                    <option value="sous_traitance">Sous-traitance</option>
                   </select>
                 </div>
-                <div className="col-span-12 md:col-span-7">
+                <div className="col-span-12 md:col-span-3">
+                  <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Mode de chiffrage</label>
+                  <select value={ligne.mode_chiffrage} onChange={(e) => mettreAJourLigne(index, "mode_chiffrage", e.target.value)} className="w-full rounded-lg px-2 py-2 text-xs" style={stylesChamp}>
+                    <option value="taux_moyen_be">Taux moyen BE</option>
+                    <option value="taux_profil">Taux profil</option>
+                    <option value="forfait_jour_profil">Forfait jour profil</option>
+                    <option value="forfait_mission">Forfait mission</option>
+                    <option value="frais">Frais / débours</option>
+                    <option value="sous_traitance">Sous-traitance</option>
+                  </select>
+                </div>
+                <div className="col-span-12 md:col-span-4">
                   <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Désignation</label>
                   <input type="text" value={ligne.intitule} onChange={(e) => mettreAJourLigne(index, "intitule", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
                 </div>
@@ -1076,9 +1140,9 @@ export default function PageNouveauDevis() {
 
               <textarea value={ligne.description} onChange={(e) => mettreAJourLigne(index, "description", e.target.value)} rows={2} className="w-full resize-none rounded-lg px-2 py-2 text-sm" style={stylesChamp} placeholder="Description détaillée de la prestation" />
 
-              {ligne.type_ligne === "horaire" ? (
+              {["taux_moyen_be", "taux_profil", "forfait_jour_profil"].includes(ligne.mode_chiffrage) ? (
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div>
+                  {ligne.mode_chiffrage !== "taux_moyen_be" ? <div>
                     <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Profil</label>
                     <select value={ligne.profil} onChange={(e) => mettreAJourLigne(index, "profil", e.target.value)} className="w-full rounded-lg px-2 py-2 text-xs" style={stylesChamp}>
                       <option value="">Sélectionner</option>
@@ -1086,14 +1150,24 @@ export default function PageNouveauDevis() {
                         <option key={profil.id} value={profil.id}>{profil.libelle}</option>
                       ))}
                     </select>
-                  </div>
-                  <div>
+                  </div> : null}
+                  {ligne.mode_chiffrage !== "forfait_jour_profil" ? <div>
                     <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Heures</label>
                     <input type="number" value={ligne.nb_heures} onChange={(e) => mettreAJourLigne(index, "nb_heures", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
-                  </div>
+                  </div> : null}
+                  {ligne.mode_chiffrage === "forfait_jour_profil" ? <div>
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Jours</label>
+                    <input type="number" value={ligne.nb_jours} onChange={(e) => mettreAJourLigne(index, "nb_jours", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                  </div> : null}
                   <div>
-                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Taux horaire HT</label>
-                    <input type="number" value={ligne.taux_horaire} onChange={(e) => mettreAJourLigne(index, "taux_horaire", e.target.value)} className="w-full rounded-lg px-2 py-2 text-sm" style={stylesChamp} />
+                    <label className="mb-1 block text-xs" style={{ color: "var(--texte-3)" }}>Tarif appliqué</label>
+                    <div className="rounded-lg px-2 py-2 text-sm font-mono" style={stylesChamp}>
+                      {ligne.mode_chiffrage === "taux_moyen_be"
+                        ? `${Number(pilotage?.taux_horaire_moyen_pondere ?? 0).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €/h`
+                        : ligne.mode_chiffrage === "forfait_jour_profil"
+                          ? `${Number(profilLigne(ligne, profils)?.forfait_jour_ht_calcule ?? 0).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €/j`
+                          : `${Number(profilLigne(ligne, profils)?.taux_vente_horaire_calcule ?? ligne.taux_horaire).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €/h`}
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -1112,6 +1186,12 @@ export default function PageNouveauDevis() {
                   </div>
                 </div>
               )}
+              <div className="grid gap-2 rounded-lg p-3 text-xs md:grid-cols-4" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+                <span style={{ color: "var(--texte-3)" }}>Montant HT : <strong style={{ color: "var(--texte)" }}>{calculerMontantLigne(ligne, profils, pilotage).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</strong></span>
+                <span style={{ color: "var(--texte-3)" }}>Coût direct : <strong style={{ color: "var(--texte)" }}>{calculerCoutDirectLigne(ligne, profils, pilotage).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</strong></span>
+                <span style={{ color: "var(--texte-3)" }}>Marge : <strong style={{ color: analyseRentabilite.statut === "sous_evalue" ? "#f59e0b" : "#10b981" }}>{(calculerMontantLigne(ligne, profils, pilotage) - calculerCoutDirectLigne(ligne, profils, pilotage)).toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</strong></span>
+                <span style={{ color: "var(--texte-3)" }}>K : <strong style={{ color: "var(--texte)" }}>{Number(pilotage?.coefficient_k ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}</strong></span>
+              </div>
             </div>
           ))}
         </div>
@@ -1120,6 +1200,14 @@ export default function PageNouveauDevis() {
           <div className="flex justify-between text-sm">
             <span style={{ color: "var(--texte-3)" }}>Total HT</span>
             <span className="font-mono" style={{ color: "var(--texte)" }}>{totalHT.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span style={{ color: "var(--texte-3)" }}>Coût direct estimé</span>
+            <span className="font-mono" style={{ color: "var(--texte-2)" }}>{analyseRentabilite.coutBe.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span style={{ color: "var(--texte-3)" }}>Marge estimée</span>
+            <span className="font-mono" style={{ color: analyseRentabilite.statut === "sous_evalue" ? "#f59e0b" : "#10b981" }}>{analyseRentabilite.marge.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} € ({(analyseRentabilite.tauxMarge * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %)</span>
           </div>
           <div className="flex justify-between text-sm">
             <span style={{ color: "var(--texte-3)" }}>TVA</span>

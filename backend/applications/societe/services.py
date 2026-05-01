@@ -5,7 +5,7 @@ Services métier — Module Société.
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from html import escape
 from typing import Any
 
@@ -23,7 +23,9 @@ def calculer_fiche_salaire(
     taux_sal: Any,
     taux_pat: Any,
     heures_an: Any,
-    taux_marge: Any,
+    taux_marge: Any = 0,
+    coefficient_k: Any = 1,
+    heures_facturables_jour: Any = 7,
 ) -> dict[str, Any]:
     """
     Calcule la fiche de paie analytique depuis le salaire net mensuel.
@@ -31,11 +33,12 @@ def calculer_fiche_salaire(
       Brut = (Net + primes + avantages) / (1 - taux_sal)
       Charges_pat = Brut × taux_pat
       Coût_annuel = (Brut + Charges_pat) × 12
-      DHMO = Coût_annuel / heures_an
-      Taux_vente = DHMO / (1 - taux_marge)
-    """
-    from decimal import Decimal, ROUND_HALF_UP
+      Coût direct horaire = Coût_annuel / heures_an
+      Taux de vente = Coût direct horaire × coefficient K
 
+    Le calcul historique DHMO / (1 - marge) est conservé dans la sortie pour
+    compatibilité, mais il n'est plus la logique principale de vente.
+    """
     def d(v) -> Decimal:
         return Decimal(str(v))
 
@@ -46,6 +49,8 @@ def calculer_fiche_salaire(
     tp = d(taux_pat)
     h = d(heures_an)
     tm = d(taux_marge)
+    k = d(coefficient_k)
+    heures_jour = d(heures_facturables_jour)
 
     base_remuneration = net + pr + av
     brut = (base_remuneration / (1 - ts)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -53,8 +58,14 @@ def calculer_fiche_salaire(
     charges_pat = (brut * tp).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     cout_mensuel = (brut + charges_pat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     cout_annuel = (cout_mensuel * 12).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    dhmo = (cout_annuel / h).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-    taux_vente = (dhmo / (1 - tm)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    cout_direct_horaire = (cout_annuel / h).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if h > 0 else Decimal("0.0000")
+    taux_vente = (cout_direct_horaire * k).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    taux_vente_historique = (
+        (cout_direct_horaire / (1 - tm)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        if tm < 1
+        else Decimal("0.0000")
+    )
+    forfait_jour = (taux_vente * heures_jour).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
         "salaire_net_mensuel": net,
@@ -66,32 +77,289 @@ def calculer_fiche_salaire(
         "cout_employeur_mensuel": cout_mensuel,
         "cout_annuel": cout_annuel,
         "heures_productives_an": h,
-        "dhmo": dhmo,
+        "dhmo": cout_direct_horaire,
+        "cout_direct_horaire": cout_direct_horaire,
         "taux_marge_vente": tm,
         "taux_vente_horaire": taux_vente,
+        "taux_vente_horaire_historique": taux_vente_historique,
+        "taux_vente_horaire_calcule_k": taux_vente,
+        "forfait_jour_ht_calcule": forfait_jour,
+    }
+
+
+def _d(valeur: Any, defaut: str = "0") -> Decimal:
+    if valeur is None or valeur == "":
+        return Decimal(defaut)
+    return Decimal(str(valeur))
+
+
+def _q(valeur: Decimal, precision: str = "0.01") -> Decimal:
+    return valeur.quantize(Decimal(precision), rounding=ROUND_HALF_UP)
+
+
+def parametre_societe_courant(annee: int | None = None):
+    from applications.societe.models import ParametreSociete
+
+    qs = ParametreSociete.objects.all()
+    if annee:
+        parametre = qs.filter(annee=annee).first()
+        if parametre:
+            return parametre
+    return qs.order_by("-annee").first()
+
+
+def arrondir_tarif(valeur: Any, mode: str = "aucun", pas: Any = Decimal("1.00")) -> Decimal:
+    montant = _d(valeur)
+    if mode == "aucun":
+        return _q(montant)
+
+    pas_arrondi = {
+        "euro": Decimal("1.00"),
+        "cinq_euros": Decimal("5.00"),
+        "dix_euros": Decimal("10.00"),
+    }.get(mode, _d(pas, "1.00"))
+    if pas_arrondi <= 0:
+        pas_arrondi = Decimal("1.00")
+    unite = (montant / pas_arrondi).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return _q(unite * pas_arrondi)
+
+
+def calculer_cout_direct_annuel_profils(profils) -> Decimal:
+    total = Decimal("0.00")
+    for profil in profils:
+        simulations = list(profil.simulations.filter(actif=True))
+        if simulations:
+            total += sum((simulation.cout_annuel for simulation in simulations), Decimal("0.00"))
+        elif profil.cout_direct_horaire and profil.heures_productives_an:
+            total += _q(profil.cout_direct_horaire * profil.heures_productives_an)
+    return _q(total)
+
+
+def calculer_coefficient_k_societe(annee: int | None = None) -> dict[str, Any]:
+    from applications.societe.models import ChargeFixeStructure, ProfilHoraire
+
+    parametre = parametre_societe_courant(annee)
+    profils = ProfilHoraire.objects.filter(actif=True).prefetch_related("simulations")
+    cout_direct_annuel = calculer_cout_direct_annuel_profils(profils)
+    charges_structure = _q(
+        sum((charge.montant_annuel for charge in ChargeFixeStructure.objects.filter(actif=True)), Decimal("0.00"))
+    )
+
+    taux_frais_generaux = _d(getattr(parametre, "taux_frais_generaux", 0))
+    taux_frais_commerciaux = _d(getattr(parametre, "taux_frais_commerciaux", 0))
+    taux_risque_alea = _d(getattr(parametre, "taux_risque_alea", 0))
+    taux_imponderables = _d(getattr(parametre, "taux_imponderables", 0))
+    taux_marge = _d(getattr(parametre, "taux_marge_cible", getattr(parametre, "objectif_marge_nette", 0)))
+    if taux_marge >= 1:
+        raise ValueError("Le taux de marge cible doit être inférieur à 100 %.")
+
+    base_frais = cout_direct_annuel + charges_structure
+    frais_generaux = _q(base_frais * taux_frais_generaux)
+    frais_commerciaux = _q(base_frais * taux_frais_commerciaux)
+    risques = _q(base_frais * taux_risque_alea)
+    imponderables = _q(base_frais * taux_imponderables)
+    cout_complet = _q(cout_direct_annuel + charges_structure + frais_generaux + frais_commerciaux + risques + imponderables)
+    ca_cible = _q(cout_complet / (Decimal("1") - taux_marge)) if taux_marge < 1 else Decimal("0.00")
+    coefficient_k = (ca_cible / cout_direct_annuel).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if cout_direct_annuel > 0 else Decimal("1.0000")
+
+    taux = calculer_taux_moyen_pondere(profils=profils, coefficient_k=coefficient_k, parametre=parametre)
+    heures_jour = _d(getattr(parametre, "heures_facturables_jour", 7), "7")
+    heures_necessaires = (charges_structure / taux["taux_horaire_moyen_pondere"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if taux["taux_horaire_moyen_pondere"] > 0 else Decimal("0.00")
+
+    return {
+        "annee": getattr(parametre, "annee", annee) if parametre else annee,
+        "coefficient_k": coefficient_k,
+        "cout_direct_annuel": cout_direct_annuel,
+        "charges_structure_annuelles": charges_structure,
+        "frais_generaux_annuels": frais_generaux,
+        "frais_commerciaux_annuels": frais_commerciaux,
+        "risques_annuels": risques,
+        "imponderables_annuels": imponderables,
+        "cout_complet_annuel": cout_complet,
+        "ca_cible_annuel": ca_cible,
+        "ca_cible_mensuel": _q(ca_cible / Decimal("12")) if ca_cible else Decimal("0.00"),
+        "cout_direct_horaire_moyen_pondere": taux["cout_direct_horaire_moyen_pondere"],
+        "taux_horaire_moyen_pondere": taux["taux_horaire_moyen_pondere"],
+        "forfait_jour_moyen_ht": taux["forfait_jour_moyen_ht"],
+        "heures_facturables_jour": heures_jour,
+        "seuil_rentabilite_annuel": charges_structure,
+        "seuil_rentabilite_mensuel": _q(charges_structure / Decimal("12")) if charges_structure else Decimal("0.00"),
+        "heures_facturables_annuelles_necessaires": heures_necessaires,
+        "jours_facturables_annuels_necessaires": _q(heures_necessaires / heures_jour) if heures_jour > 0 else Decimal("0.00"),
+        "details": {
+            "base_frais": str(base_frais),
+            "taux_frais_generaux": str(taux_frais_generaux),
+            "taux_frais_commerciaux": str(taux_frais_commerciaux),
+            "taux_risque_alea": str(taux_risque_alea),
+            "taux_imponderables": str(taux_imponderables),
+            "taux_marge_cible": str(taux_marge),
+        },
+    }
+
+
+def calculer_taux_moyen_pondere(*, profils, coefficient_k: Any, parametre=None) -> dict[str, Decimal]:
+    k = _d(coefficient_k, "1")
+    heures_jour = _d(getattr(parametre, "heures_facturables_jour", 7), "7")
+    total_pondere = Decimal("0.0000")
+    total_poids = Decimal("0.0000")
+
+    for profil in profils:
+        if not profil.actif or not getattr(profil, "inclure_taux_moyen", True):
+            continue
+        cout_direct = _d(getattr(profil, "cout_direct_horaire", 0))
+        if cout_direct <= 0:
+            simulations = list(profil.simulations.filter(actif=True))
+            if simulations:
+                cout_direct = sum((simulation.cout_direct_horaire for simulation in simulations), Decimal("0.0000")) / len(simulations)
+        if cout_direct <= 0:
+            continue
+        poids = _d(getattr(profil, "poids_ponderation", 1), "1")
+        if poids <= 0:
+            poids = Decimal("1")
+        total_pondere += cout_direct * poids
+        total_poids += poids
+
+    cout_moyen = (total_pondere / total_poids).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if total_poids > 0 else Decimal("0.0000")
+    taux_moyen = _q(cout_moyen * k)
+    forfait_jour = _q(taux_moyen * heures_jour)
+    return {
+        "cout_direct_horaire_moyen_pondere": _q(cout_moyen),
+        "taux_horaire_moyen_pondere": taux_moyen,
+        "forfait_jour_moyen_ht": forfait_jour,
     }
 
 
 def recalculer_taux_profil(profil) -> None:
     """
-    Recalcule taux_horaire_ht_calcule du profil depuis la moyenne des
-    simulations actives. Si utiliser_calcul est True, met également à jour
-    taux_horaire_ht.
+    Recalcule le coût direct et le taux de vente du profil avec le coefficient K.
     """
-    from decimal import Decimal
+    synthese = calculer_coefficient_k_societe()
+    parametre = parametre_societe_courant()
+    coefficient_k = synthese["coefficient_k"]
+    heures_jour = _d(getattr(parametre, "heures_facturables_jour", 7), "7")
+    mode_arrondi = getattr(parametre, "mode_arrondi_tarif", "aucun") if parametre else "aucun"
+    pas_arrondi = getattr(parametre, "pas_arrondi_tarif", Decimal("1.00")) if parametre else Decimal("1.00")
+
     sims = list(profil.simulations.filter(actif=True))
     if sims:
-        moyenne = sum(s.taux_vente_horaire for s in sims) / len(sims)
-        from decimal import ROUND_HALF_UP
-        moyenne = Decimal(str(moyenne)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        cout_direct = (sum((s.cout_direct_horaire for s in sims), Decimal("0.0000")) / len(sims)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
     else:
-        moyenne = None
+        cout_direct = _d(getattr(profil, "cout_direct_horaire", 0))
 
-    champs = {"taux_horaire_ht_calcule": moyenne}
-    if profil.utiliser_calcul and moyenne is not None:
-        champs["taux_horaire_ht"] = moyenne
+    taux_vente = arrondir_tarif(cout_direct * coefficient_k, mode_arrondi, pas_arrondi)
+    forfait_jour = _q(taux_vente * heures_jour)
+    champs = {
+        "cout_direct_horaire": _q(cout_direct),
+        "coefficient_k_applique": coefficient_k,
+        "taux_vente_horaire_calcule": taux_vente,
+        "forfait_jour_ht_calcule": forfait_jour,
+        "taux_horaire_ht_calcule": taux_vente,
+    }
+    if profil.utiliser_calcul and taux_vente is not None:
+        champs["taux_horaire_ht"] = taux_vente
 
     type(profil).objects.filter(pk=profil.pk).update(**champs)
+
+
+def recalculer_tarifs_societe(annee: int | None = None) -> dict[str, Any]:
+    from applications.societe.models import ProfilHoraire, SimulationSalaire
+
+    synthese = calculer_coefficient_k_societe(annee)
+    parametre = parametre_societe_courant(annee)
+    heures_jour = _d(getattr(parametre, "heures_facturables_jour", 7), "7")
+    coefficient_k = synthese["coefficient_k"]
+    for simulation in SimulationSalaire.objects.select_related("profil").filter(actif=True):
+        fiche = calculer_fiche_salaire(
+            salaire_net=simulation.salaire_net_mensuel,
+            primes=simulation.primes_mensuelles,
+            avantages=simulation.avantages_mensuels,
+            taux_sal=simulation.profil.taux_charges_salariales,
+            taux_pat=simulation.profil.taux_charges_patronales,
+            heures_an=simulation.profil.heures_productives_an,
+            taux_marge=simulation.profil.taux_marge_vente,
+            coefficient_k=coefficient_k,
+            heures_facturables_jour=heures_jour,
+        )
+        for champ in ("salaire_brut_estime", "charges_salariales", "charges_patronales", "cout_employeur_mensuel", "cout_annuel", "dhmo", "cout_direct_horaire", "taux_vente_horaire", "taux_vente_horaire_calcule_k", "forfait_jour_ht_calcule"):
+            setattr(simulation, champ, fiche[champ])
+        SimulationSalaire.objects.filter(pk=simulation.pk).update(
+            salaire_brut_estime=simulation.salaire_brut_estime,
+            charges_salariales=simulation.charges_salariales,
+            charges_patronales=simulation.charges_patronales,
+            cout_employeur_mensuel=simulation.cout_employeur_mensuel,
+            cout_annuel=simulation.cout_annuel,
+            dhmo=simulation.dhmo,
+            cout_direct_horaire=simulation.cout_direct_horaire,
+            taux_vente_horaire=simulation.taux_vente_horaire,
+            taux_vente_horaire_calcule_k=simulation.taux_vente_horaire_calcule_k,
+            forfait_jour_ht_calcule=simulation.forfait_jour_ht_calcule,
+        )
+    for profil in ProfilHoraire.objects.filter(actif=True).prefetch_related("simulations"):
+        recalculer_taux_profil(profil)
+    return calculer_coefficient_k_societe(annee)
+
+
+def calculer_ligne_devis(ligne) -> dict[str, Any]:
+    parametre = parametre_societe_courant()
+    synthese = calculer_coefficient_k_societe(getattr(parametre, "annee", None))
+    mode = ligne.mode_chiffrage
+    if not mode:
+        mode = {
+            "horaire": "taux_profil",
+            "forfait": "forfait_mission",
+            "frais": "frais",
+            "sous_traitance": "sous_traitance",
+        }.get(ligne.type_ligne, "forfait_mission")
+
+    nb_heures = _d(ligne.nb_heures)
+    nb_jours = _d(getattr(ligne, "nb_jours", 0))
+    quantite = _d(ligne.quantite, "1")
+    montant_unitaire = _d(ligne.montant_unitaire_ht)
+    cout_direct_horaire = Decimal("0.00")
+    taux_horaire = _d(ligne.taux_horaire)
+    forfait_jour = _d(getattr(ligne, "forfait_jour_ht_reference", 0))
+    source_tarif = ligne.source_tarif or ""
+
+    if mode == "taux_moyen_be":
+        taux_horaire = synthese["taux_horaire_moyen_pondere"]
+        cout_direct_horaire = synthese["cout_direct_horaire_moyen_pondere"]
+        montant_ht = _q(nb_heures * taux_horaire)
+        cout_direct_total = _q(nb_heures * cout_direct_horaire)
+        source_tarif = "taux_moyen_be"
+    elif mode == "taux_profil":
+        profil = ligne.profil
+        taux_horaire = _d(getattr(profil, "taux_horaire_ht", ligne.taux_horaire))
+        cout_direct_horaire = _d(getattr(profil, "cout_direct_horaire", 0))
+        montant_ht = _q(nb_heures * taux_horaire)
+        cout_direct_total = _q(nb_heures * cout_direct_horaire)
+        source_tarif = "profil"
+    elif mode == "forfait_jour_profil":
+        profil = ligne.profil
+        forfait_jour = _d(getattr(profil, "forfait_jour_ht_calcule", 0))
+        cout_direct_horaire = _d(getattr(profil, "cout_direct_horaire", 0))
+        heures_jour = _d(getattr(parametre, "heures_facturables_jour", 7), "7")
+        montant_ht = _q(nb_jours * forfait_jour)
+        cout_direct_total = _q(nb_jours * heures_jour * cout_direct_horaire)
+        source_tarif = "forfait_jour_profil"
+    else:
+        montant_ht = _q(quantite * montant_unitaire)
+        cout_direct_total = _q(_d(getattr(ligne, "cout_direct_total_estime", 0)))
+        source_tarif = mode
+
+    marge = _q(montant_ht - cout_direct_total)
+    taux_marge = (marge / montant_ht).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if montant_ht > 0 else Decimal("0.0000")
+    return {
+        "mode_chiffrage": mode,
+        "taux_horaire": _q(taux_horaire) if taux_horaire else ligne.taux_horaire,
+        "forfait_jour_ht_reference": _q(forfait_jour) if forfait_jour else None,
+        "cout_direct_horaire_reference": _q(cout_direct_horaire) if cout_direct_horaire else None,
+        "cout_direct_total_estime": cout_direct_total,
+        "coefficient_k_applique": synthese["coefficient_k"],
+        "montant_ht": montant_ht,
+        "marge_estimee_ht": marge,
+        "taux_marge_estime": taux_marge,
+        "source_tarif": source_tarif,
+    }
 
 
 def lister_missions_livrables(
@@ -140,6 +408,13 @@ def lister_missions_livrables(
             "profil_horaire_defaut_libelle": mission.profil_horaire_defaut.libelle if mission.profil_horaire_defaut_id else "",
             "profil_horaire_defaut_taux": str(mission.profil_horaire_defaut.taux_horaire_ht) if mission.profil_horaire_defaut_id else "",
             "duree_etude_heures": str(mission.duree_etude_heures),
+            "mode_chiffrage_defaut": mission.mode_chiffrage_defaut,
+            "duree_etude_jours": str(mission.duree_etude_jours),
+            "complexite": mission.complexite,
+            "coefficient_complexite": str(mission.coefficient_complexite),
+            "phase_mission": mission.phase_mission,
+            "nature_livrable": mission.nature_livrable,
+            "inclusion_recommandee_devis": mission.inclusion_recommandee_devis,
             "livrables": livrables,
         })
     return missions
@@ -168,24 +443,30 @@ def construire_suggestions_prestations(missions: list[dict[str, Any]], profil_ho
             "livrables_codes": [livrable["code"] for livrable in livrables],
             "livrables_labels": libelles_livrables,
             "type_ligne": "forfait",
+            "mode_chiffrage": mission.get("mode_chiffrage_defaut") or "forfait_mission",
             "quantite": "1",
             "unite": "forfait",
             "nb_heures_suggerees": "8.00",
+            "nb_jours_suggerees": mission.get("duree_etude_jours") or "0.00",
             "profil_horaire_id": "",
             "profil_horaire_libelle": "",
             "taux_horaire_suggere": "0.00",
+            "forfait_jour_suggere": "0.00",
         }
         if profil_horaire is not None:
             suggestion.update({
                 "type_ligne": "horaire",
+                "mode_chiffrage": mission.get("mode_chiffrage_defaut") or "taux_profil",
                 "unite": "h",
                 "profil_horaire_id": str(profil_horaire.id),
                 "profil_horaire_libelle": profil_horaire.libelle,
                 "taux_horaire_suggere": str(profil_horaire.taux_horaire_ht),
+                "forfait_jour_suggere": str(profil_horaire.forfait_jour_ht_calcule),
             })
         elif mission.get("profil_horaire_defaut_id"):
             suggestion.update({
                 "type_ligne": "horaire",
+                "mode_chiffrage": mission.get("mode_chiffrage_defaut") or "taux_profil",
                 "unite": "h",
                 "profil_horaire_id": mission.get("profil_horaire_defaut_id") or "",
                 "profil_horaire_libelle": mission.get("profil_horaire_defaut_libelle") or "",

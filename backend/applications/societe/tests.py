@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -10,7 +11,8 @@ from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
 from applications.projets.models import LivrableType, MissionClient, Projet, AffectationProjet
 from applications.site_public.models import ConfigurationSite
-from .models import DevisHonoraires, LigneDevis, ProfilHoraire, ProfilHoraireUtilisateur, TempsPasse
+from .models import ChargeFixeStructure, DevisHonoraires, LigneDevis, ParametreSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, TempsPasse
+from .services import calculer_coefficient_k_societe, calculer_fiche_salaire, calculer_ligne_devis, calculer_taux_moyen_pondere, recalculer_taux_profil
 from .views import DevisHonorairesViewSet
 
 
@@ -34,6 +36,8 @@ class ApiSocieteTests(TestCase):
         )
         self.client.force_authenticate(self.utilisateur)
         ConfigurationSite.obtenir()
+        ChargeFixeStructure.objects.all().delete()
+        ParametreSociete.objects.all().delete()
 
         self.profil = ProfilHoraire.objects.create(
             code="CHEF",
@@ -366,3 +370,148 @@ class ApiSocieteTests(TestCase):
         temps = TempsPasse.objects.get(projet=projet)
         self.assertEqual(temps.profil_horaire, profil_secondaire)
         self.assertEqual(str(temps.taux_horaire), "72.00")
+
+    def test_calcul_salaire_produit_le_cout_direct_horaire(self):
+        fiche = calculer_fiche_salaire(
+            salaire_net="2000.00",
+            primes="100.00",
+            avantages="0.00",
+            taux_sal="0.2200",
+            taux_pat="0.4200",
+            heures_an="1600.00",
+            coefficient_k="2.0000",
+            heures_facturables_jour="7.00",
+        )
+
+        self.assertEqual(fiche["salaire_brut_estime"], Decimal("2692.31"))
+        self.assertEqual(fiche["charges_patronales"], Decimal("1130.77"))
+        self.assertEqual(fiche["cout_annuel"], Decimal("45876.96"))
+        self.assertEqual(fiche["cout_direct_horaire"], Decimal("28.6731"))
+        self.assertEqual(fiche["taux_vente_horaire_calcule_k"], Decimal("57.3462"))
+        self.assertEqual(fiche["forfait_jour_ht_calcule"], Decimal("401.42"))
+
+    def test_calcul_coefficient_k_societe_et_taux_moyen(self):
+        ParametreSociete.objects.update_or_create(
+            annee=2026,
+            defaults={
+                "heures_facturables_jour": "7.00",
+                "taux_frais_generaux": "0.1000",
+                "taux_frais_commerciaux": "0.0500",
+                "taux_risque_alea": "0.0300",
+                "taux_imponderables": "0.0200",
+                "taux_marge_cible": "0.2000",
+            },
+        )
+        ChargeFixeStructure.objects.create(libelle="Logiciels", montant_mensuel="1000.00", categorie="logiciels")
+        self.profil.cout_direct_horaire = Decimal("30.00")
+        self.profil.heures_productives_an = Decimal("1600.00")
+        self.profil.save()
+
+        synthese = calculer_coefficient_k_societe(2026)
+
+        self.assertEqual(synthese["cout_direct_annuel"], Decimal("48000.00"))
+        self.assertEqual(synthese["charges_structure_annuelles"], Decimal("12000.00"))
+        self.assertEqual(synthese["cout_complet_annuel"], Decimal("72000.00"))
+        self.assertEqual(synthese["ca_cible_annuel"], Decimal("90000.00"))
+        self.assertEqual(synthese["coefficient_k"], Decimal("1.8750"))
+        self.assertEqual(synthese["taux_horaire_moyen_pondere"], Decimal("56.25"))
+
+    def test_recalcul_taux_profil_applique_k_et_forfait_jour(self):
+        ParametreSociete.objects.update_or_create(annee=2026, defaults={"heures_facturables_jour": "7.00", "taux_marge_cible": "0.2000"})
+        self.profil.cout_direct_horaire = Decimal("40.00")
+        self.profil.heures_productives_an = Decimal("1600.00")
+        self.profil.utiliser_calcul = True
+        self.profil.save()
+
+        recalculer_taux_profil(self.profil)
+
+        self.profil.refresh_from_db()
+        self.assertGreater(self.profil.coefficient_k_applique, Decimal("1.0000"))
+        self.assertEqual(self.profil.taux_horaire_ht, self.profil.taux_vente_horaire_calcule)
+        self.assertEqual(self.profil.forfait_jour_ht_calcule, self.profil.taux_horaire_ht * Decimal("7.00"))
+
+    def test_taux_moyen_pondere_ignore_profils_exclus(self):
+        autre = ProfilHoraire.objects.create(
+            code="JUNIOR",
+            libelle="Junior",
+            taux_horaire_ht="60.00",
+            cout_direct_horaire="20.00",
+            poids_ponderation="3.00",
+        )
+        exclu = ProfilHoraire.objects.create(
+            code="EXCLU",
+            libelle="Exclu",
+            taux_horaire_ht="120.00",
+            cout_direct_horaire="100.00",
+            inclure_taux_moyen=False,
+        )
+        self.profil.cout_direct_horaire = Decimal("40.00")
+        self.profil.poids_ponderation = Decimal("1.00")
+        self.profil.save()
+
+        resultat = calculer_taux_moyen_pondere(
+            profils=[self.profil, autre, exclu],
+            coefficient_k=Decimal("2.0000"),
+        )
+
+        self.assertEqual(resultat["cout_direct_horaire_moyen_pondere"], Decimal("25.00"))
+        self.assertEqual(resultat["taux_horaire_moyen_pondere"], Decimal("50.00"))
+
+    def test_calcul_ligne_devis_modes_et_compatibilite(self):
+        ParametreSociete.objects.update_or_create(annee=2026, defaults={"heures_facturables_jour": "7.00", "taux_marge_cible": "0.2000"})
+        self.profil.cout_direct_horaire = Decimal("30.00")
+        self.profil.taux_horaire_ht = Decimal("75.00")
+        self.profil.taux_vente_horaire_calcule = Decimal("75.00")
+        self.profil.forfait_jour_ht_calcule = Decimal("525.00")
+        self.profil.save()
+        devis = self._creer_devis(reference="DVZ-2026-K01")
+
+        ligne = LigneDevis(
+            devis=devis,
+            type_ligne="horaire",
+            mode_chiffrage="taux_profil",
+            intitule="Production",
+            profil=self.profil,
+            nb_heures=Decimal("10.00"),
+        )
+        valeurs = calculer_ligne_devis(ligne)
+        self.assertEqual(valeurs["montant_ht"], Decimal("750.00"))
+        self.assertEqual(valeurs["cout_direct_total_estime"], Decimal("300.00"))
+        self.assertEqual(valeurs["marge_estimee_ht"], Decimal("450.00"))
+
+        ligne_jour = LigneDevis(
+            devis=devis,
+            type_ligne="forfait",
+            mode_chiffrage="forfait_jour_profil",
+            intitule="Forfait jour",
+            profil=self.profil,
+            nb_jours=Decimal("2.00"),
+        )
+        self.assertEqual(calculer_ligne_devis(ligne_jour)["montant_ht"], Decimal("1050.00"))
+
+        ancienne = LigneDevis(
+            devis=devis,
+            type_ligne="forfait",
+            intitule="Ancien forfait",
+            montant_unitaire_ht=Decimal("1000.00"),
+            quantite=Decimal("1.00"),
+        )
+        self.assertEqual(calculer_ligne_devis(ancienne)["mode_chiffrage"], "forfait_mission")
+
+    def test_api_pilotage_economique_et_recalcul_tarifs(self):
+        ParametreSociete.objects.update_or_create(annee=2026, defaults={"heures_facturables_jour": "7.00", "taux_marge_cible": "0.2000"})
+        SimulationSalaire.objects.create(
+            profil=self.profil,
+            libelle="Base",
+            salaire_net_mensuel="2000.00",
+            actif=True,
+        )
+
+        reponse_get = self.client.get("/api/societe/pilotage-economique/")
+        self.assertEqual(reponse_get.status_code, status.HTTP_200_OK, reponse_get.data)
+        self.assertIn("coefficient_k", reponse_get.data)
+
+        reponse_post = self.client.post("/api/societe/recalculer-tarifs/", {}, format="json")
+        self.assertEqual(reponse_post.status_code, status.HTTP_200_OK, reponse_post.data)
+        self.profil.refresh_from_db()
+        self.assertGreater(self.profil.cout_direct_horaire, Decimal("0.00"))

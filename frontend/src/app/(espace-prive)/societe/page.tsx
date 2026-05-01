@@ -141,6 +141,40 @@ export default function PageTableauDeBordSociete() {
         </Link>
       </div>
 
+      {tdb?.pilotage_economique ? (
+        <section className="rounded-xl p-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              Pilotage économique BE
+            </h2>
+            <Link href="/societe/charges" className="text-xs underline" style={{ color: "var(--texte-3)" }}>
+              Paramétrer
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Coefficient K", Number(tdb.pilotage_economique.coefficient_k ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })],
+              ["Coût direct moyen", `${formaterMontant(tdb.pilotage_economique.cout_direct_horaire_moyen_pondere)}/h`],
+              ["Taux moyen HT", `${formaterMontant(tdb.pilotage_economique.taux_horaire_moyen_pondere)}/h`],
+              ["Forfait jour moyen", formaterMontant(tdb.pilotage_economique.forfait_jour_moyen_ht)],
+              ["CA cible annuel", formaterMontant(tdb.pilotage_economique.ca_cible_annuel)],
+              ["CA signé", formaterMontant(tdb.pilotage_economique.ca_signe)],
+              ["Marge prévisionnelle", formaterMontant(tdb.pilotage_economique.marge_previsionnelle)],
+              ["Marge réelle", formaterMontant(tdb.pilotage_economique.marge_reelle)],
+              ["Heures vendues", formaterHeures(tdb.pilotage_economique.heures_vendues)],
+              ["Heures passées", formaterHeures(tdb.pilotage_economique.heures_consommees)],
+              ["Seuil mensuel", formaterMontant(tdb.pilotage_economique.seuil_rentabilite_mensuel)],
+              ["Reste à produire", formaterMontant(tdb.pilotage_economique.reste_a_produire)],
+            ].map(([label, valeur]) => (
+              <div key={label} className="rounded-lg p-3" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+                <p className="text-xs" style={{ color: "var(--texte-3)" }}>{label}</p>
+                <p className="mt-1 font-semibold" style={{ color: "var(--texte)" }}>{valeur}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {/* Double colonne : devis récents + factures en retard */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Devis récents */}
