@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -11,8 +11,23 @@ from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
 from applications.projets.models import LivrableType, MissionClient, Projet, AffectationProjet
 from applications.site_public.models import ConfigurationSite
-from .models import ChargeFixeStructure, DevisHonoraires, LigneDevis, ParametreSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, TempsPasse
+from .models import (
+    ChargeFixeStructure,
+    DevisHonoraires,
+    LigneDevis,
+    ParametreSociete,
+    ProfilHoraire,
+    ProfilHoraireUtilisateur,
+    SimulationSalaire,
+    TempsPasse,
+    CalendrierTravailSociete,
+    DemandeAbsence,
+    PointageJournalier,
+    ProfilRHSalarie,
+    SoldeAbsenceSalarie,
+)
 from .services import calculer_coefficient_k_societe, calculer_fiche_salaire, calculer_ligne_devis, calculer_taux_moyen_pondere, recalculer_taux_profil
+from .services_assignation import calculer_capacite_salarie, calculer_tableau_bord_rh
 from .views import DevisHonorairesViewSet
 
 
@@ -515,3 +530,173 @@ class ApiSocieteTests(TestCase):
         self.assertEqual(reponse_post.status_code, status.HTTP_200_OK, reponse_post.data)
         self.profil.refresh_from_db()
         self.assertGreater(self.profil.cout_direct_horaire, Decimal("0.00"))
+
+    def test_creation_profil_rh_salarie_et_capacite_sans_absence(self):
+        ProfilRHSalarie.objects.create(
+            utilisateur=self.utilisateur,
+            organisation=self.organisation,
+            profil_horaire_societe=self.profil,
+            heures_hebdomadaires_contractuelles="35.00",
+        )
+        CalendrierTravailSociete.objects.create(
+            organisation=self.organisation,
+            annee=2026,
+            jours_feries=[],
+        )
+
+        capacite = calculer_capacite_salarie(self.utilisateur, "2026-05-04", "2026-05-08")
+
+        self.assertEqual(capacite["heures_theoriques"], Decimal("35.00"))
+        self.assertEqual(capacite["heures_disponibles"], Decimal("35.00"))
+        self.assertEqual(capacite["alertes"], [])
+
+    def test_capacite_reduit_absence_validee_et_formation(self):
+        ProfilRHSalarie.objects.create(utilisateur=self.utilisateur, organisation=self.organisation)
+        conge = DemandeAbsence.objects.create(
+            utilisateur=self.utilisateur,
+            type_absence="conge_paye",
+            date_debut=timezone.datetime(2026, 5, 4).date(),
+            date_fin=timezone.datetime(2026, 5, 4).date(),
+            statut="valide",
+        )
+        formation = DemandeAbsence.objects.create(
+            utilisateur=self.utilisateur,
+            type_absence="formation",
+            date_debut=timezone.datetime(2026, 5, 5).date(),
+            date_fin=timezone.datetime(2026, 5, 5).date(),
+            statut="valide",
+        )
+        for demande in [conge, formation]:
+            reponse = self.client.post(f"/api/societe/absences/{demande.id}/valider/", {}, format="json")
+            self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+
+        capacite = calculer_capacite_salarie(self.utilisateur, "2026-05-04", "2026-05-08")
+
+        self.assertEqual(capacite["heures_absences_validees"], Decimal("7.00"))
+        self.assertEqual(capacite["heures_formation"], Decimal("7.00"))
+        self.assertEqual(capacite["heures_disponibles"], Decimal("21.00"))
+
+    def test_demande_absence_soumise_validee_met_a_jour_solde(self):
+        ProfilRHSalarie.objects.create(utilisateur=self.utilisateur, organisation=self.organisation)
+        reponse_creation = self.client.post(
+            "/api/societe/absences/",
+            {
+                "utilisateur": str(self.utilisateur.id),
+                "type_absence": "conge_paye",
+                "date_debut": "2026-05-04",
+                "date_fin": "2026-05-05",
+                "motif": "Congés",
+            },
+            format="json",
+        )
+        self.assertEqual(reponse_creation.status_code, status.HTTP_201_CREATED, reponse_creation.data)
+        demande_id = reponse_creation.data["id"]
+        self.client.post(f"/api/societe/absences/{demande_id}/soumettre/", {}, format="json")
+        reponse_validation = self.client.post(f"/api/societe/absences/{demande_id}/valider/", {}, format="json")
+
+        self.assertEqual(reponse_validation.status_code, status.HTTP_200_OK, reponse_validation.data)
+        solde = SoldeAbsenceSalarie.objects.get(utilisateur=self.utilisateur, type_absence="conge_paye")
+        self.assertEqual(solde.pris, Decimal("2.00"))
+
+    def test_pointage_arrivee_depart_correction_validation_et_heures(self):
+        reponse_arrivee = self.client.post("/api/societe/pointages/pointer-arrivee/", {}, format="json")
+        self.assertEqual(reponse_arrivee.status_code, status.HTTP_200_OK, reponse_arrivee.data)
+        reponse_depart = self.client.post("/api/societe/pointages/pointer-depart/", {}, format="json")
+        self.assertEqual(reponse_depart.status_code, status.HTTP_200_OK, reponse_depart.data)
+        pointage = PointageJournalier.objects.get(utilisateur=self.utilisateur)
+        pointage.heure_arrivee = time(8, 0)
+        pointage.heure_depart = time(17, 0)
+        pointage.pause_minutes = 60
+        pointage.save()
+
+        reponse_correction = self.client.patch(
+            f"/api/societe/pointages/{pointage.id}/corriger/",
+            {"commentaire_salarie": "Correction horaire", "pause_minutes": 45},
+            format="json",
+        )
+        self.assertEqual(reponse_correction.status_code, status.HTTP_200_OK, reponse_correction.data)
+        reponse_validation = self.client.post(f"/api/societe/pointages/{pointage.id}/valider/", {}, format="json")
+        self.assertEqual(reponse_validation.status_code, status.HTTP_200_OK, reponse_validation.data)
+        pointage.refresh_from_db()
+        self.assertEqual(pointage.statut, "valide")
+        self.assertEqual(pointage.heures_travaillees, Decimal("8.25"))
+
+    def test_tableau_de_bord_rh_et_heures_supplementaires(self):
+        ProfilRHSalarie.objects.create(utilisateur=self.utilisateur, organisation=self.organisation)
+        PointageJournalier.objects.create(
+            utilisateur=self.utilisateur,
+            date=timezone.datetime(2026, 5, 4).date(),
+            heure_arrivee=time(8, 0),
+            heure_depart=time(18, 0),
+            pause_minutes=30,
+            statut="valide",
+        )
+
+        donnees = calculer_tableau_bord_rh("2026-05-04", "2026-05-04", organisation=self.organisation)
+
+        self.assertEqual(donnees["heures_pointees"], Decimal("9.50"))
+        self.assertEqual(donnees["heures_supplementaires"], Decimal("2.50"))
+        self.assertEqual(len(donnees["salaries"]), 1)
+
+    def test_assignation_classe_mieux_un_salarie_disponible_qu_absent(self):
+        ProfilRHSalarie.objects.create(utilisateur=self.utilisateur, organisation=self.organisation, profil_horaire_societe=self.profil)
+        surcharge = Utilisateur.objects.create_user(
+            courriel="surcharge@example.com",
+            password="motdepasse123",
+            prenom="Jean",
+            nom="Surcharge",
+            organisation=self.organisation,
+        )
+        ProfilRHSalarie.objects.create(utilisateur=surcharge, organisation=self.organisation, profil_horaire_societe=self.profil)
+        projet = Projet.objects.create(
+            reference="2026-RH-001",
+            intitule="Projet RH",
+            organisation=self.organisation,
+            responsable=self.utilisateur,
+            cree_par=self.utilisateur,
+        )
+        AffectationProjet.objects.create(
+            projet=projet,
+            utilisateur=surcharge,
+            nature="projet",
+            code_cible="",
+            libelle_cible="Charge lourde",
+            heures_objectif="80.00",
+            heures_restantes_estimees="80.00",
+            date_debut_prevue="2026-05-04",
+            date_fin_prevue="2026-05-08",
+            cree_par=self.utilisateur,
+        )
+
+        reponse = self.client.get(
+            f"/api/societe/assignation-automatique/?projet={projet.id}&date_debut=2026-05-04&date_fin=2026-05-08&heures_objectif=7"
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["suggestions"][0]["utilisateur"], str(self.utilisateur.id))
+        self.assertTrue(reponse.data["suggestions"][1]["alertes"])
+
+    def test_api_tableau_de_bord_rh_et_ancienne_assignation_compatible(self):
+        ProfilRHSalarie.objects.create(utilisateur=self.utilisateur, organisation=self.organisation)
+        projet = Projet.objects.create(
+            reference="2026-RH-002",
+            intitule="Projet compatibilité",
+            organisation=self.organisation,
+            responsable=self.utilisateur,
+            cree_par=self.utilisateur,
+        )
+        reponse_assignation = self.client.post(
+            "/api/societe/assignation-automatique/",
+            {
+                "projet": str(projet.id),
+                "utilisateur": str(self.utilisateur.id),
+                "responsable": True,
+            },
+            format="json",
+        )
+        self.assertEqual(reponse_assignation.status_code, status.HTTP_201_CREATED, reponse_assignation.data)
+        self.assertEqual(AffectationProjet.objects.filter(projet=projet, utilisateur=self.utilisateur).count(), 1)
+
+        reponse_tdb = self.client.get("/api/societe/tableau-de-bord-rh/?date_debut=2026-05-04&date_fin=2026-05-08")
+        self.assertEqual(reponse_tdb.status_code, status.HTTP_200_OK, reponse_tdb.data)
+        self.assertIn("heures_theoriques", reponse_tdb.data)

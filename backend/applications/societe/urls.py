@@ -13,13 +13,24 @@ from .views import (
     MissionClientSocieteViewSet,
     SimulationSalaireViewSet,
     TempsPasseViewSet,
+    ProfilRHSalarieViewSet,
+    CalendrierTravailSocieteViewSet,
+    PointageJournalierViewSet,
+    EvenementPointageViewSet,
+    DemandeAbsenceViewSet,
+    SoldeAbsenceSalarieViewSet,
+    CompteurTempsSalarieViewSet,
     DevisHonorairesViewSet,
     FactureViewSet,
     vue_tableau_de_bord,
+    vue_tableau_de_bord_rh,
     vue_pilotage_economique,
     vue_recalculer_tarifs,
     vue_reference_smic,
     vue_assignation_automatique,
+    vue_simuler_assignation_automatique,
+    vue_capacite_salaries,
+    vue_capacite_salarie,
     vue_validation_devis_client,
     vue_simulations_profil,
     vue_previsualiser_simulation,
@@ -33,15 +44,26 @@ router.register(r"charges-fixes", ChargeFixeStructureViewSet, basename="charge-f
 router.register(r"missions-client", MissionClientSocieteViewSet, basename="mission-client-societe")
 router.register(r"simulations-salaire", SimulationSalaireViewSet, basename="simulation-salaire")
 router.register(r"temps-passes", TempsPasseViewSet, basename="temps-passe")
+router.register(r"profils-rh-salaries", ProfilRHSalarieViewSet, basename="profil-rh-salarie")
+router.register(r"calendriers-travail", CalendrierTravailSocieteViewSet, basename="calendrier-travail-societe")
+router.register(r"pointages", PointageJournalierViewSet, basename="pointage-journalier")
+router.register(r"evenements-pointage", EvenementPointageViewSet, basename="evenement-pointage")
+router.register(r"absences", DemandeAbsenceViewSet, basename="demande-absence")
+router.register(r"soldes-absences", SoldeAbsenceSalarieViewSet, basename="solde-absence-salarie")
+router.register(r"compteurs-temps", CompteurTempsSalarieViewSet, basename="compteur-temps-salarie")
 router.register(r"devis", DevisHonorairesViewSet, basename="devis-honoraires")
 router.register(r"factures", FactureViewSet, basename="facture")
 
 urlpatterns = [
     path("tableau-de-bord/", vue_tableau_de_bord, name="societe-tableau-de-bord"),
+    path("tableau-de-bord-rh/", vue_tableau_de_bord_rh, name="societe-tableau-de-bord-rh"),
     path("pilotage-economique/", vue_pilotage_economique, name="societe-pilotage-economique"),
     path("recalculer-tarifs/", vue_recalculer_tarifs, name="societe-recalculer-tarifs"),
     path("references/smic/", vue_reference_smic, name="societe-reference-smic"),
     path("assignation-automatique/", vue_assignation_automatique, name="societe-assignation-automatique"),
+    path("assignation-automatique/simuler/", vue_simuler_assignation_automatique, name="societe-assignation-automatique-simuler"),
+    path("capacite-salaries/", vue_capacite_salaries, name="societe-capacite-salaries"),
+    path("capacite-salaries/<str:utilisateur_id>/", vue_capacite_salarie, name="societe-capacite-salarie"),
     path(
         "validation-client/devis/<str:jeton>/",
         vue_validation_devis_client,

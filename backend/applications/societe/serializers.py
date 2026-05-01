@@ -15,6 +15,13 @@ from .models import (
     LigneFacture,
     Paiement,
     TempsPasse,
+    ProfilRHSalarie,
+    CalendrierTravailSociete,
+    PointageJournalier,
+    EvenementPointage,
+    DemandeAbsence,
+    SoldeAbsenceSalarie,
+    CompteurTempsSalarie,
 )
 from applications.projets.models import MissionClient
 
@@ -92,6 +99,126 @@ class ProfilHoraireUtilisateurSerializer(serializers.ModelSerializer):
             "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class ProfilRHSalarieSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    profil_horaire_societe_libelle = serializers.CharField(source="profil_horaire_societe.libelle", read_only=True)
+
+    class Meta:
+        model = ProfilRHSalarie
+        fields = [
+            "id", "utilisateur", "utilisateur_nom", "organisation",
+            "type_contrat", "regime_temps_travail",
+            "heures_hebdomadaires_contractuelles", "jours_travailles_semaine",
+            "heure_debut_theorique", "heure_fin_theorique", "pause_midi_minutes",
+            "taux_activite", "droit_rtt_annuel", "droit_conges_payes_annuel",
+            "solde_rtt_initial", "solde_conges_initial", "solde_recuperation_initial",
+            "date_entree", "date_sortie", "actif",
+            "profil_horaire_societe", "profil_horaire_societe_libelle",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "utilisateur_nom", "date_creation", "date_modification"]
+
+
+class CalendrierTravailSocieteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CalendrierTravailSociete
+        fields = [
+            "id", "annee", "organisation", "libelle", "zone",
+            "jours_feries", "jours_non_travailles_exceptionnels", "semaine_type",
+            "actif", "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+
+
+class PointageJournalierSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    valide_par_nom = serializers.CharField(source="valide_par.nom_complet", read_only=True)
+    heures_travaillees = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+
+    class Meta:
+        model = PointageJournalier
+        fields = [
+            "id", "utilisateur", "utilisateur_nom", "date",
+            "heure_arrivee", "heure_depart", "pause_minutes", "source",
+            "statut", "statut_libelle", "commentaire_salarie",
+            "commentaire_validateur", "valide_par", "valide_par_nom",
+            "date_validation", "heures_travaillees",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "valide_par", "date_validation", "heures_travaillees", "date_creation", "date_modification"]
+
+
+class EvenementPointageSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+
+    class Meta:
+        model = EvenementPointage
+        fields = [
+            "id", "utilisateur", "utilisateur_nom", "pointage",
+            "horodatage", "type_evenement", "source", "commentaire", "date_creation",
+        ]
+        read_only_fields = ["id", "date_creation"]
+
+
+class DemandeAbsenceSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+    valide_par_nom = serializers.CharField(source="valide_par.nom_complet", read_only=True)
+    type_absence_libelle = serializers.CharField(source="get_type_absence_display", read_only=True)
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+
+    class Meta:
+        model = DemandeAbsence
+        fields = [
+            "id", "utilisateur", "utilisateur_nom", "type_absence",
+            "type_absence_libelle", "date_debut", "date_fin",
+            "demi_journee_debut", "demi_journee_fin",
+            "nombre_jours_ouvres_calcule", "nombre_heures_calcule",
+            "statut", "statut_libelle", "motif", "justificatif",
+            "commentaire_salarie", "commentaire_validateur",
+            "valide_par", "valide_par_nom", "date_validation",
+            "impacte_solde", "impacte_capacite",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = [
+            "id", "utilisateur_nom", "nombre_jours_ouvres_calcule",
+            "nombre_heures_calcule", "valide_par", "date_validation",
+            "date_creation", "date_modification",
+        ]
+
+
+class SoldeAbsenceSalarieSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+
+    class Meta:
+        model = SoldeAbsenceSalarie
+        fields = [
+            "id", "utilisateur", "utilisateur_nom", "annee", "type_absence",
+            "acquis", "pris", "en_attente_validation", "solde",
+            "report_annee_precedente", "ajuste_manuellement", "commentaire",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "utilisateur_nom", "pris", "en_attente_validation", "solde", "date_creation", "date_modification"]
+
+
+class CompteurTempsSalarieSerializer(serializers.ModelSerializer):
+    utilisateur_nom = serializers.CharField(source="utilisateur.nom_complet", read_only=True)
+
+    class Meta:
+        model = CompteurTempsSalarie
+        fields = [
+            "id", "utilisateur", "utilisateur_nom", "periode_debut", "periode_fin",
+            "heures_theoriques", "heures_pointees", "heures_normales",
+            "heures_supplementaires", "heures_weekend", "heures_jour_ferie",
+            "heures_absence", "heures_formation", "heures_productives",
+            "heures_non_productives", "heures_recuperation_acquises",
+            "heures_recuperation_prises", "solde_recuperation",
+            "statut", "date_calcul", "details_calcul",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_calcul", "date_creation", "date_modification"]
 
 
 class ParametreSocieteSerializer(serializers.ModelSerializer):
@@ -355,18 +482,25 @@ class TempsPasseSerializer(serializers.ModelSerializer):
             "statut_libelle",
             "code_cible",
             "libelle_cible",
+            "pointage_journalier",
+            "est_productif",
+            "categorie_temps",
             "nb_heures",
+            "heures_objectif_associees",
+            "ecart_heures",
             "taux_horaire",
             "taux_vente_horaire",
+            "taux_vente_horaire_reference",
             "cout_direct_horaire",
             "montant_vendu_associe",
             "marge_estimee",
             "cout_total",
+            "cout_total_interne",
             "commentaires",
             "date_creation",
             "date_modification",
         ]
-        read_only_fields = ["id", "cout_total", "date_creation", "date_modification"]
+        read_only_fields = ["id", "ecart_heures", "cout_total", "cout_total_interne", "date_creation", "date_modification"]
 
 
 # ─────────────────────────────────────────────

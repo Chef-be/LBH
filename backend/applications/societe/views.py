@@ -19,7 +19,26 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import ChargeFixeStructure, ParametreSociete, ProfilHoraire, ProfilHoraireUtilisateur, SimulationSalaire, DevisHonoraires, LigneDevis, Facture, LigneFacture, Paiement, TempsPasse
+from .models import (
+    ChargeFixeStructure,
+    ParametreSociete,
+    ProfilHoraire,
+    ProfilHoraireUtilisateur,
+    SimulationSalaire,
+    DevisHonoraires,
+    LigneDevis,
+    Facture,
+    LigneFacture,
+    Paiement,
+    TempsPasse,
+    ProfilRHSalarie,
+    CalendrierTravailSociete,
+    PointageJournalier,
+    EvenementPointage,
+    DemandeAbsence,
+    SoldeAbsenceSalarie,
+    CompteurTempsSalarie,
+)
 from .serializers import (
     ProfilHoraireSerializer,
     ProfilHoraireUtilisateurSerializer,
@@ -33,6 +52,13 @@ from .serializers import (
     PaiementSerializer,
     TempsPasseSerializer,
     MissionClientSocieteSerializer,
+    ProfilRHSalarieSerializer,
+    CalendrierTravailSocieteSerializer,
+    PointageJournalierSerializer,
+    EvenementPointageSerializer,
+    DemandeAbsenceSerializer,
+    SoldeAbsenceSalarieSerializer,
+    CompteurTempsSalarieSerializer,
 )
 from .services import (
     calculer_coefficient_k_societe,
@@ -43,6 +69,17 @@ from .services import (
     lister_missions_livrables,
     recalculer_tarifs_societe,
     rendu_validation_html,
+)
+from .services_assignation import (
+    assigner_automatiquement,
+    calculer_capacite_salarie,
+    calculer_jours_heures_absence,
+    calculer_tableau_bord_rh,
+    pointer_arrivee,
+    pointer_depart,
+    enregistrer_pause,
+    proposer_assignations,
+    recalculer_solde_absence,
 )
 from applications.messagerie.services import MessagerieErreur, envoyer_courriel
 from applications.projets.models import Projet
@@ -248,6 +285,248 @@ class ChargeFixeStructureViewSet(viewsets.ModelViewSet):
     queryset = ChargeFixeStructure.objects.all()
 
 
+class ProfilRHSalarieViewSet(viewsets.ModelViewSet):
+    serializer_class = ProfilRHSalarieSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = ProfilRHSalarie.objects.select_related("utilisateur", "organisation", "profil_horaire_societe")
+        organisation = getattr(self.request.user, "organisation", None)
+        if organisation:
+            qs = qs.filter(Q(organisation=organisation) | Q(utilisateur__organisation=organisation))
+        return qs
+
+
+class CalendrierTravailSocieteViewSet(viewsets.ModelViewSet):
+    serializer_class = CalendrierTravailSocieteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = CalendrierTravailSociete.objects.all()
+        organisation = getattr(self.request.user, "organisation", None)
+        if organisation:
+            qs = qs.filter(Q(organisation=organisation) | Q(organisation__isnull=True))
+        return qs
+
+
+class PointageJournalierViewSet(viewsets.ModelViewSet):
+    serializer_class = PointageJournalierSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = PointageJournalier.objects.select_related("utilisateur", "valide_par")
+        utilisateur = self.request.query_params.get("utilisateur")
+        if utilisateur:
+            qs = qs.filter(utilisateur_id=utilisateur)
+        elif not getattr(self.request.user, "est_super_admin", False):
+            qs = qs.filter(Q(utilisateur=self.request.user) | Q(utilisateur__organisation=getattr(self.request.user, "organisation", None)))
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(utilisateur=serializer.validated_data.get("utilisateur") or self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="pointer-arrivee")
+    def pointer_arrivee(self, request):
+        try:
+            pointage = pointer_arrivee(request.user, request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(pointage).data)
+
+    @action(detail=False, methods=["post"], url_path="pointer-depart")
+    def pointer_depart(self, request):
+        try:
+            pointage = pointer_depart(request.user, request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(pointage).data)
+
+    @action(detail=False, methods=["post"], url_path="debut-pause")
+    def debut_pause(self, request):
+        try:
+            minutes = int(request.data.get("pause_minutes") or request.data.get("minutes") or 0)
+            pointage = enregistrer_pause(request.user, minutes, request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(pointage).data)
+
+    @action(detail=False, methods=["post"], url_path="fin-pause")
+    def fin_pause(self, request):
+        try:
+            minutes = int(request.data.get("pause_minutes") or request.data.get("minutes") or 0)
+            pointage = enregistrer_pause(request.user, minutes, request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(pointage).data)
+
+    @action(detail=True, methods=["patch"], url_path="corriger")
+    def corriger(self, request, pk=None):
+        pointage = self.get_object()
+        commentaire = request.data.get("commentaire_salarie") or request.data.get("commentaire") or ""
+        if not commentaire.strip():
+            return Response({"detail": "Un commentaire est obligatoire pour corriger un pointage."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(pointage, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(statut="corrige", source="correction")
+        EvenementPointage.objects.create(
+            utilisateur=pointage.utilisateur,
+            pointage=pointage,
+            type_evenement="correction",
+            source="correction",
+            commentaire=commentaire,
+        )
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="valider")
+    def valider(self, request, pk=None):
+        pointage = self.get_object()
+        pointage.statut = "valide"
+        pointage.valide_par = request.user
+        pointage.date_validation = timezone.now()
+        pointage.commentaire_validateur = request.data.get("commentaire_validateur", pointage.commentaire_validateur)
+        pointage.save()
+        EvenementPointage.objects.create(
+            utilisateur=pointage.utilisateur,
+            pointage=pointage,
+            type_evenement="validation",
+            source=pointage.source,
+            commentaire=pointage.commentaire_validateur,
+        )
+        return Response(self.get_serializer(pointage).data)
+
+    @action(detail=True, methods=["post"], url_path="rejeter")
+    def rejeter(self, request, pk=None):
+        pointage = self.get_object()
+        pointage.statut = "rejete"
+        pointage.valide_par = request.user
+        pointage.date_validation = timezone.now()
+        pointage.commentaire_validateur = request.data.get("commentaire_validateur", "")
+        pointage.save()
+        EvenementPointage.objects.create(
+            utilisateur=pointage.utilisateur,
+            pointage=pointage,
+            type_evenement="rejet",
+            source=pointage.source,
+            commentaire=pointage.commentaire_validateur,
+        )
+        return Response(self.get_serializer(pointage).data)
+
+
+class EvenementPointageViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = EvenementPointageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = EvenementPointage.objects.select_related("utilisateur", "pointage")
+        if not getattr(self.request.user, "est_super_admin", False):
+            qs = qs.filter(Q(utilisateur=self.request.user) | Q(utilisateur__organisation=getattr(self.request.user, "organisation", None)))
+        return qs
+
+
+class DemandeAbsenceViewSet(viewsets.ModelViewSet):
+    serializer_class = DemandeAbsenceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = DemandeAbsence.objects.select_related("utilisateur", "valide_par")
+        utilisateur = self.request.query_params.get("utilisateur")
+        statut_absence = self.request.query_params.get("statut")
+        if utilisateur:
+            qs = qs.filter(utilisateur_id=utilisateur)
+        elif not getattr(self.request.user, "est_super_admin", False):
+            qs = qs.filter(Q(utilisateur=self.request.user) | Q(utilisateur__organisation=getattr(self.request.user, "organisation", None)))
+        if statut_absence:
+            qs = qs.filter(statut=statut_absence)
+        return qs
+
+    def perform_create(self, serializer):
+        instance = serializer.save(utilisateur=serializer.validated_data.get("utilisateur") or self.request.user)
+        calcul = calculer_jours_heures_absence(instance)
+        instance.nombre_jours_ouvres_calcule = calcul["jours"]
+        instance.nombre_heures_calcule = calcul["heures"]
+        instance.save(update_fields=["nombre_jours_ouvres_calcule", "nombre_heures_calcule", "date_modification"])
+
+    @action(detail=True, methods=["post"], url_path="soumettre")
+    def soumettre(self, request, pk=None):
+        demande = self.get_object()
+        demande.statut = "soumis"
+        calcul = calculer_jours_heures_absence(demande)
+        demande.nombre_jours_ouvres_calcule = calcul["jours"]
+        demande.nombre_heures_calcule = calcul["heures"]
+        demande.save()
+        recalculer_solde_absence(demande.utilisateur, demande.date_debut.year, demande.type_absence)
+        return Response(self.get_serializer(demande).data)
+
+    @action(detail=True, methods=["post"], url_path="valider")
+    def valider(self, request, pk=None):
+        demande = self.get_object()
+        demande.statut = "valide"
+        demande.valide_par = request.user
+        demande.date_validation = timezone.now()
+        demande.commentaire_validateur = request.data.get("commentaire_validateur", demande.commentaire_validateur)
+        calcul = calculer_jours_heures_absence(demande)
+        demande.nombre_jours_ouvres_calcule = calcul["jours"]
+        demande.nombre_heures_calcule = calcul["heures"]
+        demande.save()
+        recalculer_solde_absence(demande.utilisateur, demande.date_debut.year, demande.type_absence)
+        return Response(self.get_serializer(demande).data)
+
+    @action(detail=True, methods=["post"], url_path="refuser")
+    def refuser(self, request, pk=None):
+        demande = self.get_object()
+        demande.statut = "refuse"
+        demande.valide_par = request.user
+        demande.date_validation = timezone.now()
+        demande.commentaire_validateur = request.data.get("commentaire_validateur", "")
+        demande.save()
+        recalculer_solde_absence(demande.utilisateur, demande.date_debut.year, demande.type_absence)
+        return Response(self.get_serializer(demande).data)
+
+    @action(detail=True, methods=["post"], url_path="annuler")
+    def annuler(self, request, pk=None):
+        demande = self.get_object()
+        demande.statut = "annule"
+        demande.save(update_fields=["statut", "date_modification"])
+        recalculer_solde_absence(demande.utilisateur, demande.date_debut.year, demande.type_absence)
+        return Response(self.get_serializer(demande).data)
+
+
+class SoldeAbsenceSalarieViewSet(viewsets.ModelViewSet):
+    serializer_class = SoldeAbsenceSalarieSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = SoldeAbsenceSalarie.objects.select_related("utilisateur")
+        utilisateur = self.request.query_params.get("utilisateur")
+        if utilisateur:
+            qs = qs.filter(utilisateur_id=utilisateur)
+        elif not getattr(self.request.user, "est_super_admin", False):
+            qs = qs.filter(Q(utilisateur=self.request.user) | Q(utilisateur__organisation=getattr(self.request.user, "organisation", None)))
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="recalculer")
+    def recalculer(self, request):
+        annee = int(request.data.get("annee") or timezone.localdate().year)
+        utilisateur_id = request.data.get("utilisateur") or request.user.id
+        utilisateur = get_object_or_404(Utilisateur, pk=utilisateur_id)
+        soldes = [
+            recalculer_solde_absence(utilisateur, annee, type_absence)
+            for type_absence in ["conge_paye", "rtt", "recuperation", "autre"]
+        ]
+        return Response(self.get_serializer(soldes, many=True).data)
+
+
+class CompteurTempsSalarieViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CompteurTempsSalarieSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = CompteurTempsSalarie.objects.select_related("utilisateur")
+        if not getattr(self.request.user, "est_super_admin", False):
+            qs = qs.filter(Q(utilisateur=self.request.user) | Q(utilisateur__organisation=getattr(self.request.user, "organisation", None)))
+        return qs
+
+
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_pilotage_economique(request):
@@ -293,60 +572,38 @@ def vue_assignation_automatique(request):
     if request.method == "GET":
         projet_id = request.query_params.get("projet")
         projet = Projet.objects.filter(pk=projet_id).first() if projet_id else None
-        organisation = (projet.organisation if projet else None) or request.user.organisation
-        utilisateurs = Utilisateur.objects.filter(est_actif=True)
-        if organisation:
-            utilisateurs = utilisateurs.filter(organisation=organisation)
-        utilisateurs = utilisateurs.select_related("profil", "profil_horaire_societe__profil_horaire")
+        if not projet:
+            return Response({"suggestions": []})
 
-        depuis = timezone.localdate() - timedelta(days=30)
-        suggestions = []
-        for utilisateur in utilisateurs:
-            nb_affectations = AffectationProjet.objects.filter(utilisateur=utilisateur).count()
-            heures_30j = (
-                TempsPasse.objects.filter(utilisateur=utilisateur, date_saisie__gte=depuis)
-                .aggregate(total=Sum("nb_heures"))["total"]
-                or Decimal("0")
-            )
-            profil_horaire = getattr(getattr(utilisateur, "profil_horaire_societe", None), "profil_horaire", None)
-            score_charge = max(0, 100 - int(heures_30j) - (nb_affectations * 3))
-            suggestions.append({
-                "utilisateur": str(utilisateur.id),
-                "nom_complet": utilisateur.nom_complet,
-                "fonction": utilisateur.fonction,
-                "profil_droits": utilisateur.profil.libelle if utilisateur.profil else "",
-                "profil_horaire": str(profil_horaire.id) if profil_horaire else "",
-                "profil_horaire_libelle": profil_horaire.libelle if profil_horaire else "",
-                "nb_affectations": nb_affectations,
-                "heures_30j": str(heures_30j),
-                "score": score_charge,
-            })
+        suggestions = proposer_assignations(
+            projet,
+            date_debut=request.query_params.get("date_debut"),
+            date_fin=request.query_params.get("date_fin"),
+            heures_objectif=request.query_params.get("heures_objectif"),
+            priorite=request.query_params.get("priorite") or "normale",
+            profil_recherche=request.query_params.get("profil_recherche") or "",
+        )
 
         return Response({
-            "suggestions": sorted(suggestions, key=lambda item: item["score"], reverse=True),
+            "suggestions": suggestions,
         })
 
     projet = get_object_or_404(Projet, pk=request.data.get("projet"))
     utilisateur = get_object_or_404(Utilisateur, pk=request.data.get("utilisateur"), est_actif=True)
     affectations = request.data.get("affectations") or []
     if not affectations:
-        affectations = [{"nature": "projet", "code_cible": "", "libelle_cible": projet.intitule, "role": "pilotage"}]
+        affectations = [{
+            "nature": "projet",
+            "code_cible": "",
+            "libelle_cible": projet.intitule,
+            "role": "pilotage",
+            "date_debut_prevue": request.data.get("date_debut_prevue"),
+            "date_fin_prevue": request.data.get("date_fin_prevue"),
+            "heures_objectif": request.data.get("heures_objectif") or 0,
+            "priorite": request.data.get("priorite") or "normale",
+        }]
 
-    creees = []
-    for item in affectations:
-        affectation, _ = AffectationProjet.objects.update_or_create(
-            projet=projet,
-            utilisateur=utilisateur,
-            nature=item.get("nature") or "mission",
-            code_cible=item.get("code_cible") or "",
-            defaults={
-                "libelle_cible": item.get("libelle_cible") or "",
-                "role": item.get("role") or "contribution",
-                "commentaires": item.get("commentaires") or "Assignation automatique",
-                "cree_par": request.user,
-            },
-        )
-        creees.append(affectation)
+    creees = assigner_automatiquement(projet, utilisateur, affectations, cree_par=request.user)
 
     if request.data.get("responsable") is True:
         projet.responsable = utilisateur
@@ -362,10 +619,66 @@ def vue_assignation_automatique(request):
                 "code_cible": affectation.code_cible,
                 "libelle_cible": affectation.libelle_cible,
                 "role": affectation.role,
+                "score_assignation": str(affectation.score_assignation or ""),
+                "justification_assignation": affectation.justification_assignation,
             }
             for affectation in creees
         ],
     }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_simuler_assignation_automatique(request):
+    projet = get_object_or_404(Projet, pk=request.data.get("projet"))
+    suggestions = proposer_assignations(
+        projet,
+        date_debut=request.data.get("date_debut"),
+        date_fin=request.data.get("date_fin"),
+        heures_objectif=request.data.get("heures_objectif"),
+        priorite=request.data.get("priorite") or "normale",
+        profil_recherche=request.data.get("profil_recherche") or "",
+    )
+    return Response({"suggestions": suggestions})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_capacite_salaries(request):
+    organisation = getattr(request.user, "organisation", None)
+    utilisateurs = Utilisateur.objects.filter(est_actif=True)
+    if organisation:
+        utilisateurs = utilisateurs.filter(organisation=organisation)
+    donnees = [
+        calculer_capacite_salarie(
+            utilisateur,
+            request.query_params.get("date_debut"),
+            request.query_params.get("date_fin"),
+        )
+        for utilisateur in utilisateurs
+    ]
+    return Response({"results": donnees})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_capacite_salarie(request, utilisateur_id):
+    utilisateur = get_object_or_404(Utilisateur, pk=utilisateur_id, est_actif=True)
+    return Response(calculer_capacite_salarie(
+        utilisateur,
+        request.query_params.get("date_debut"),
+        request.query_params.get("date_fin"),
+    ))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_tableau_de_bord_rh(request):
+    return Response(calculer_tableau_bord_rh(
+        request.query_params.get("date_debut"),
+        request.query_params.get("date_fin"),
+        organisation=getattr(request.user, "organisation", None),
+    ))
 
 
 SOURCE_SMIC_SERVICE_PUBLIC = "https://www.service-public.gouv.fr/particuliers/vosdroits/F2300"

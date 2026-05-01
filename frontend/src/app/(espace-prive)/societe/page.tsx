@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
-import { TableauDeBord, DevisHonoraires, Facture, RentabiliteDossier, RentabiliteSalarie, TempsPasse } from "@/types/societe";
-import { Euro, FileText, Receipt, AlertTriangle, TrendingUp, Clock, Plus, ChevronRight } from "lucide-react";
+import { TableauDeBord, DevisHonoraires, Facture, RentabiliteDossier, RentabiliteSalarie, TempsPasse, TableauDeBordRH } from "@/types/societe";
+import { Euro, FileText, Receipt, AlertTriangle, TrendingUp, Clock, Plus, ChevronRight, Users } from "lucide-react";
 
 function formaterMontant(val: string | number | null | undefined): string {
   if (val == null) return "—";
@@ -83,6 +83,11 @@ export default function PageTableauDeBordSociete() {
   const { data: tdb, isLoading } = useQuery<TableauDeBord>({
     queryKey: ["societe-tdb"],
     queryFn: () => api.get<TableauDeBord>("/api/societe/tableau-de-bord/"),
+    staleTime: 30_000,
+  });
+  const { data: tdbRh } = useQuery<TableauDeBordRH>({
+    queryKey: ["societe-tdb-rh"],
+    queryFn: () => api.get<TableauDeBordRH>("/api/societe/tableau-de-bord-rh/"),
     staleTime: 30_000,
   });
 
@@ -171,6 +176,64 @@ export default function PageTableauDeBordSociete() {
                 <p className="mt-1 font-semibold" style={{ color: "var(--texte)" }}>{valeur}</p>
               </div>
             ))}
+          </div>
+        </section>
+      ) : null}
+
+      {tdbRh ? (
+        <section className="rounded-xl p-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--texte-3)" }}>
+              <Users size={14} className="mr-2 inline" />Production et disponibilité RH
+            </h2>
+            <Link href="/societe/assignation" className="text-xs underline" style={{ color: "var(--texte-3)" }}>
+              Planifier
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Heures théoriques", formaterHeures(tdbRh.heures_theoriques)],
+              ["Heures pointées", formaterHeures(tdbRh.heures_pointees)],
+              ["Heures productives", formaterHeures(tdbRh.heures_productives)],
+              ["Heures non productives", formaterHeures(tdbRh.heures_non_productives)],
+              ["Absences", formaterHeures(tdbRh.heures_absence)],
+              ["Formation", formaterHeures(tdbRh.heures_formation)],
+              ["Heures supplémentaires", formaterHeures(tdbRh.heures_supplementaires)],
+              ["Écart objectif / réel", formaterHeures(tdbRh.ecart_objectif_reel)],
+              ["Charge moyenne", `${(Number(tdbRh.taux_charge_moyen || 0) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} %`],
+              ["Occupation facturable", `${(Number(tdbRh.taux_occupation_facturable || 0) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} %`],
+              ["Absences validées", String(tdbRh.absences_validees ?? 0)],
+              ["Absences en attente", String(tdbRh.absences_en_attente ?? 0)],
+            ].map(([label, valeur]) => (
+              <div key={label} className="rounded-lg p-3" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
+                <p className="text-xs" style={{ color: "var(--texte-3)" }}>{label}</p>
+                <p className="mt-1 font-semibold" style={{ color: "var(--texte)" }}>{valeur}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--bordure)" }}>
+                  {["Salarié", "Profil", "Charge", "Disponible", "Objectif", "Réalisé", "Alertes"].map((titre) => (
+                    <th key={titre} className="px-3 py-2 text-left text-xs uppercase" style={{ color: "var(--texte-3)" }}>{titre}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tdbRh.salaries.slice(0, 6).map((salarie) => (
+                  <tr key={salarie.utilisateur} style={{ borderBottom: "1px solid var(--bordure)" }}>
+                    <td className="px-3 py-2 font-medium" style={{ color: "var(--texte)" }}>{salarie.nom_complet}</td>
+                    <td className="px-3 py-2" style={{ color: "var(--texte-2)" }}>{salarie.profil || "—"}</td>
+                    <td className="px-3 py-2" style={{ color: "var(--texte-2)" }}>{(Number(salarie.taux_charge || 0) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} %</td>
+                    <td className="px-3 py-2" style={{ color: "var(--texte-2)" }}>{formaterHeures(salarie.heures_disponibles)}</td>
+                    <td className="px-3 py-2" style={{ color: "var(--texte-2)" }}>{formaterHeures(salarie.heures_objectivees)}</td>
+                    <td className="px-3 py-2" style={{ color: "var(--texte-2)" }}>{formaterHeures(salarie.heures_realisees)}</td>
+                    <td className="px-3 py-2" style={{ color: salarie.alertes.length ? "#f59e0b" : "#16a34a" }}>{salarie.alertes[0] ?? "OK"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}

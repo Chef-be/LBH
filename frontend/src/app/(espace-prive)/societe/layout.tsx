@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { LayoutDashboard, FileText, Clock, TimerReset, WalletCards, BarChart3, ClipboardList, UserCog } from "lucide-react";
+import { CalendarDays, LayoutDashboard, FileText, Clock, TimerReset, WalletCards, BarChart3, ClipboardList, UserCog } from "lucide-react";
 
 const ONGLETS = [
   { libelle: "Tableau de bord", href: "/societe", icone: LayoutDashboard, exact: true },
@@ -11,6 +11,7 @@ const ONGLETS = [
   { libelle: "Chiffrage", href: "/societe/devis", icone: FileText },
   { libelle: "Missions", href: "/societe/missions", icone: ClipboardList },
   { libelle: "Assignation", href: "/societe/assignation", icone: UserCog },
+  { libelle: "Absences", href: "/societe/absences", icone: CalendarDays },
   { libelle: "Taux horaires", href: "/societe/taux-horaires", icone: Clock },
   { libelle: "Charges société", href: "/societe/charges", icone: WalletCards },
   { libelle: "Temps passés", href: "/societe/temps", icone: TimerReset },

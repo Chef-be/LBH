@@ -253,6 +253,18 @@ class AffectationProjet(models.Model):
         ("planning", "Planning"),
         ("opc", "OPC"),
     ]
+    PRIORITES = [
+        ("basse", "Basse"),
+        ("normale", "Normale"),
+        ("haute", "Haute"),
+        ("urgente", "Urgente"),
+    ]
+    STATUTS_CHARGE = [
+        ("planifiee", "Planifiée"),
+        ("en_cours", "En cours"),
+        ("terminee", "Terminée"),
+        ("suspendue", "Suspendue"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     projet = models.ForeignKey(Projet, on_delete=models.CASCADE, related_name="affectations")
@@ -262,6 +274,17 @@ class AffectationProjet(models.Model):
     libelle_cible = models.CharField(max_length=255, blank=True, default="", verbose_name="Libellé ciblé")
     role = models.CharField(max_length=30, choices=ROLES, default="contribution")
     commentaires = models.TextField(blank=True, default="")
+    date_debut_prevue = models.DateField(null=True, blank=True, verbose_name="Date de début prévue")
+    date_fin_prevue = models.DateField(null=True, blank=True, verbose_name="Date de fin prévue")
+    heures_objectif = models.DecimalField(max_digits=8, decimal_places=2, default=0, verbose_name="Heures objectif")
+    heures_restantes_estimees = models.DecimalField(max_digits=8, decimal_places=2, default=0, verbose_name="Heures restantes estimées")
+    priorite = models.CharField(max_length=20, choices=PRIORITES, default="normale", verbose_name="Priorité")
+    statut_charge = models.CharField(max_length=20, choices=STATUTS_CHARGE, default="planifiee", verbose_name="Statut de charge")
+    score_assignation = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name="Score d'assignation")
+    justification_assignation = models.JSONField(default=dict, blank=True, verbose_name="Justification d'assignation")
+    assignee_automatiquement = models.BooleanField(default=False, verbose_name="Assignée automatiquement")
+    date_assignation = models.DateTimeField(null=True, blank=True, verbose_name="Date d'assignation")
+    niveau_confiance_assignation = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, verbose_name="Niveau de confiance")
     cree_par = models.ForeignKey(
         "comptes.Utilisateur",
         on_delete=models.SET_NULL,

@@ -9,6 +9,22 @@ from django.db import models
 from django.utils import timezone
 
 
+def jours_travailles_standard():
+    return ["lundi", "mardi", "mercredi", "jeudi", "vendredi"]
+
+
+def semaine_type_standard():
+    return {
+        "lundi": True,
+        "mardi": True,
+        "mercredi": True,
+        "jeudi": True,
+        "vendredi": True,
+        "samedi": False,
+        "dimanche": False,
+    }
+
+
 # ─────────────────────────────────────────────
 # Profils horaires
 # ─────────────────────────────────────────────
@@ -224,6 +240,356 @@ class ProfilHoraireUtilisateur(models.Model):
 
     def __str__(self):
         return f"{self.utilisateur.nom_complet} — {self.profil_horaire.libelle}"
+
+
+# ─────────────────────────────────────────────
+# Pilotage RH, pointage et absences
+# ─────────────────────────────────────────────
+
+class ProfilRHSalarie(models.Model):
+    """Paramètres RH utilisés pour calculer la capacité productive d'un salarié."""
+
+    TYPES_CONTRAT = [
+        ("cdi", "CDI"),
+        ("cdd", "CDD"),
+        ("alternance", "Alternance"),
+        ("stage", "Stage"),
+        ("prestation", "Prestation"),
+        ("autre", "Autre"),
+    ]
+    REGIMES_TEMPS = [
+        ("heures", "Heures"),
+        ("forfait_jours", "Forfait jours"),
+        ("temps_partiel", "Temps partiel"),
+        ("autre", "Autre"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.OneToOneField(
+        "comptes.Utilisateur",
+        on_delete=models.CASCADE,
+        related_name="profil_rh_societe",
+        verbose_name="Salarié",
+    )
+    organisation = models.ForeignKey(
+        "organisations.Organisation",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="profils_rh_salaries",
+        verbose_name="Organisation",
+    )
+    profil_horaire_societe = models.ForeignKey(
+        ProfilHoraire,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="profils_rh",
+        verbose_name="Profil horaire société",
+    )
+    type_contrat = models.CharField(max_length=20, choices=TYPES_CONTRAT, default="cdi")
+    regime_temps_travail = models.CharField(max_length=20, choices=REGIMES_TEMPS, default="heures")
+    heures_hebdomadaires_contractuelles = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("35.00"))
+    jours_travailles_semaine = models.JSONField(default=jours_travailles_standard, blank=True)
+    heure_debut_theorique = models.TimeField(null=True, blank=True)
+    heure_fin_theorique = models.TimeField(null=True, blank=True)
+    pause_midi_minutes = models.PositiveSmallIntegerField(default=60)
+    taux_activite = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("1.0000"))
+    droit_rtt_annuel = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
+    droit_conges_payes_annuel = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("25.00"))
+    solde_rtt_initial = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
+    solde_conges_initial = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0.00"))
+    solde_recuperation_initial = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    date_entree = models.DateField(null=True, blank=True)
+    date_sortie = models.DateField(null=True, blank=True)
+    actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_profil_rh_salarie"
+        verbose_name = "Profil RH salarié"
+        verbose_name_plural = "Profils RH salariés"
+        ordering = ["utilisateur__nom", "utilisateur__prenom"]
+
+    def __str__(self):
+        return f"Profil RH — {self.utilisateur.nom_complet}"
+
+
+class CalendrierTravailSociete(models.Model):
+    """Calendrier de travail paramétrable par année et organisation."""
+
+    ZONES = [
+        ("mayotte", "Mayotte"),
+        ("france_metropolitaine", "France métropolitaine"),
+        ("autre", "Autre"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organisation = models.ForeignKey(
+        "organisations.Organisation",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="calendriers_travail_societe",
+    )
+    annee = models.PositiveSmallIntegerField(default=2026)
+    libelle = models.CharField(max_length=160, default="Calendrier société")
+    zone = models.CharField(max_length=40, choices=ZONES, default="mayotte")
+    jours_feries = models.JSONField(default=list, blank=True)
+    jours_non_travailles_exceptionnels = models.JSONField(default=list, blank=True)
+    semaine_type = models.JSONField(default=semaine_type_standard, blank=True)
+    actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_calendrier_travail"
+        verbose_name = "Calendrier de travail société"
+        verbose_name_plural = "Calendriers de travail société"
+        ordering = ["-annee", "libelle"]
+
+    def __str__(self):
+        return f"{self.libelle} {self.annee}"
+
+
+class PointageJournalier(models.Model):
+    """Pointage journalier validable, distinct des temps productifs imputés aux projets."""
+
+    SOURCES = [
+        ("manuel", "Manuel"),
+        ("badgeuse", "Badgeuse"),
+        ("import", "Import"),
+        ("correction", "Correction"),
+    ]
+    STATUTS = [
+        ("brouillon", "Brouillon"),
+        ("soumis", "Soumis"),
+        ("valide", "Validé"),
+        ("rejete", "Rejeté"),
+        ("corrige", "Corrigé"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.CASCADE, related_name="pointages_journaliers")
+    date = models.DateField(default=timezone.localdate)
+    heure_arrivee = models.TimeField(null=True, blank=True)
+    heure_depart = models.TimeField(null=True, blank=True)
+    pause_minutes = models.PositiveSmallIntegerField(default=0)
+    source = models.CharField(max_length=20, choices=SOURCES, default="manuel")
+    statut = models.CharField(max_length=20, choices=STATUTS, default="brouillon")
+    commentaire_salarie = models.TextField(blank=True, default="")
+    commentaire_validateur = models.TextField(blank=True, default="")
+    valide_par = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pointages_valides",
+    )
+    date_validation = models.DateTimeField(null=True, blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_pointage_journalier"
+        verbose_name = "Pointage journalier"
+        verbose_name_plural = "Pointages journaliers"
+        ordering = ["-date", "utilisateur__nom"]
+        constraints = [
+            models.UniqueConstraint(fields=["utilisateur", "date"], name="uniq_pointage_utilisateur_date"),
+        ]
+
+    @property
+    def minutes_travaillees(self):
+        if not self.heure_arrivee or not self.heure_depart:
+            return 0
+        debut = timezone.datetime.combine(self.date, self.heure_arrivee)
+        fin = timezone.datetime.combine(self.date, self.heure_depart)
+        minutes = int((fin - debut).total_seconds() // 60) - int(self.pause_minutes or 0)
+        return max(0, minutes)
+
+    @property
+    def heures_travaillees(self):
+        return (Decimal(self.minutes_travaillees) / Decimal("60")).quantize(Decimal("0.01"))
+
+    def __str__(self):
+        return f"{self.utilisateur.nom_complet} — {self.date}"
+
+
+class EvenementPointage(models.Model):
+    """Journal minimal des événements de pointage, sans géolocalisation par défaut."""
+
+    TYPES = [
+        ("arrivee", "Arrivée"),
+        ("depart", "Départ"),
+        ("debut_pause", "Début pause"),
+        ("fin_pause", "Fin pause"),
+        ("correction", "Correction"),
+        ("validation", "Validation"),
+        ("rejet", "Rejet"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.CASCADE, related_name="evenements_pointage")
+    pointage = models.ForeignKey(PointageJournalier, on_delete=models.CASCADE, null=True, blank=True, related_name="evenements")
+    horodatage = models.DateTimeField(default=timezone.now)
+    type_evenement = models.CharField(max_length=20, choices=TYPES)
+    source = models.CharField(max_length=20, choices=PointageJournalier.SOURCES, default="manuel")
+    adresse_ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default="")
+    commentaire = models.TextField(blank=True, default="")
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "societe_evenement_pointage"
+        verbose_name = "Événement de pointage"
+        verbose_name_plural = "Événements de pointage"
+        ordering = ["-horodatage"]
+
+
+class DemandeAbsence(models.Model):
+    """Demande d'absence ou de formation avec validation responsable."""
+
+    TYPES_ABSENCE = [
+        ("conge_paye", "Congé payé"),
+        ("rtt", "RTT"),
+        ("maladie", "Maladie"),
+        ("formation", "Formation"),
+        ("absence_autorisee", "Absence autorisée"),
+        ("absence_non_remuneree", "Absence non rémunérée"),
+        ("recuperation", "Récupération"),
+        ("evenement_familial", "Événement familial"),
+        ("autre", "Autre"),
+    ]
+    STATUTS = [
+        ("brouillon", "Brouillon"),
+        ("soumis", "Soumis"),
+        ("valide", "Validé"),
+        ("refuse", "Refusé"),
+        ("annule", "Annulé"),
+    ]
+    DEMI_JOURNEES = [
+        ("", "Journée complète"),
+        ("matin", "Matin"),
+        ("apres_midi", "Après-midi"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.CASCADE, related_name="demandes_absence")
+    type_absence = models.CharField(max_length=30, choices=TYPES_ABSENCE)
+    date_debut = models.DateField()
+    date_fin = models.DateField()
+    demi_journee_debut = models.CharField(max_length=20, choices=DEMI_JOURNEES, blank=True, default="")
+    demi_journee_fin = models.CharField(max_length=20, choices=DEMI_JOURNEES, blank=True, default="")
+    nombre_jours_ouvres_calcule = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    nombre_heures_calcule = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    statut = models.CharField(max_length=20, choices=STATUTS, default="brouillon")
+    motif = models.TextField(blank=True, default="")
+    justificatif = models.FileField(upload_to="absences/justificatifs/", null=True, blank=True)
+    commentaire_salarie = models.TextField(blank=True, default="")
+    commentaire_validateur = models.TextField(blank=True, default="")
+    valide_par = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="absences_validees",
+    )
+    date_validation = models.DateTimeField(null=True, blank=True)
+    impacte_solde = models.BooleanField(default=True)
+    impacte_capacite = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_demande_absence"
+        verbose_name = "Demande d'absence"
+        verbose_name_plural = "Demandes d'absence"
+        ordering = ["-date_debut", "-date_creation"]
+
+    def __str__(self):
+        return f"{self.utilisateur.nom_complet} — {self.get_type_absence_display()} du {self.date_debut}"
+
+
+class SoldeAbsenceSalarie(models.Model):
+    """Solde annuel par type d'absence suivi pour un salarié."""
+
+    TYPES_ABSENCE_SOLDE = [
+        ("conge_paye", "Congé payé"),
+        ("rtt", "RTT"),
+        ("recuperation", "Récupération"),
+        ("autre", "Autre"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.CASCADE, related_name="soldes_absence")
+    annee = models.PositiveSmallIntegerField(default=2026)
+    type_absence = models.CharField(max_length=30, choices=TYPES_ABSENCE_SOLDE)
+    acquis = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    pris = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    en_attente_validation = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    solde = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    report_annee_precedente = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    ajuste_manuellement = models.DecimalField(max_digits=7, decimal_places=2, default=Decimal("0.00"))
+    commentaire = models.TextField(blank=True, default="")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_solde_absence_salarie"
+        verbose_name = "Solde d'absence salarié"
+        verbose_name_plural = "Soldes d'absence salariés"
+        ordering = ["-annee", "utilisateur__nom", "type_absence"]
+        constraints = [
+            models.UniqueConstraint(fields=["utilisateur", "annee", "type_absence"], name="uniq_solde_absence_utilisateur_annee_type"),
+        ]
+
+    def recalculer_solde(self):
+        self.solde = (
+            Decimal(self.acquis or 0)
+            + Decimal(self.report_annee_precedente or 0)
+            + Decimal(self.ajuste_manuellement or 0)
+            - Decimal(self.pris or 0)
+        ).quantize(Decimal("0.01"))
+
+
+class CompteurTempsSalarie(models.Model):
+    """Agrégat recalculable de temps par salarié et période."""
+
+    STATUTS = [
+        ("provisoire", "Provisoire"),
+        ("valide", "Validé"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.CASCADE, related_name="compteurs_temps")
+    periode_debut = models.DateField()
+    periode_fin = models.DateField()
+    heures_theoriques = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_pointees = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_normales = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_supplementaires = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_weekend = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_jour_ferie = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_absence = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_formation = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_productives = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_non_productives = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_recuperation_acquises = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    heures_recuperation_prises = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    solde_recuperation = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
+    statut = models.CharField(max_length=20, choices=STATUTS, default="provisoire")
+    date_calcul = models.DateTimeField(default=timezone.now)
+    details_calcul = models.JSONField(default=dict, blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_compteur_temps_salarie"
+        verbose_name = "Compteur de temps salarié"
+        verbose_name_plural = "Compteurs de temps salariés"
+        ordering = ["-periode_debut", "utilisateur__nom"]
 
 
 # ─────────────────────────────────────────────
@@ -768,6 +1134,16 @@ class TempsPasse(models.Model):
         ("brouillon", "Brouillon"),
         ("valide", "Validé"),
     ]
+    CATEGORIES_TEMPS = [
+        ("production", "Production"),
+        ("administratif", "Administratif"),
+        ("commercial", "Commercial"),
+        ("formation", "Formation"),
+        ("veille", "Veille"),
+        ("absence", "Absence"),
+        ("reunion_interne", "Réunion interne"),
+        ("autre", "Autre"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     projet = models.ForeignKey(
@@ -809,13 +1185,27 @@ class TempsPasse(models.Model):
     )
     code_cible = models.CharField(max_length=120, blank=True, default="", verbose_name="Code cible")
     libelle_cible = models.CharField(max_length=255, blank=True, default="", verbose_name="Libellé cible")
+    pointage_journalier = models.ForeignKey(
+        PointageJournalier,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="temps_passes",
+        verbose_name="Pointage journalier",
+    )
+    est_productif = models.BooleanField(default=True, verbose_name="Temps productif")
+    categorie_temps = models.CharField(max_length=30, choices=CATEGORIES_TEMPS, default="production", verbose_name="Catégorie de temps")
     nb_heures = models.DecimalField(max_digits=8, decimal_places=2, verbose_name="Nombre d'heures")
+    heures_objectif_associees = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"), verbose_name="Heures objectif associées")
+    ecart_heures = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"), verbose_name="Écart heures")
     taux_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Taux horaire")
     taux_vente_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Taux de vente horaire")
+    taux_vente_horaire_reference = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Taux de vente horaire de référence")
     cout_direct_horaire = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"), verbose_name="Coût direct horaire")
     montant_vendu_associe = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Montant vendu associé")
     marge_estimee = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Marge estimée")
     cout_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Coût total")
+    cout_total_interne = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"), verbose_name="Coût total interne")
     commentaires = models.TextField(blank=True, verbose_name="Commentaires")
     cree_par = models.ForeignKey(
         "comptes.Utilisateur",
@@ -844,7 +1234,11 @@ class TempsPasse(models.Model):
                 self.taux_vente_horaire = self.profil_horaire.taux_horaire_ht
             if not self.taux_horaire or self.taux_horaire == Decimal("0"):
                 self.taux_horaire = self.cout_direct_horaire
+        if not self.taux_vente_horaire_reference or self.taux_vente_horaire_reference == Decimal("0"):
+            self.taux_vente_horaire_reference = self.taux_vente_horaire
+        self.ecart_heures = (Decimal(self.nb_heures or 0) - Decimal(self.heures_objectif_associees or 0)).quantize(Decimal("0.01"))
         self.cout_total = (self.nb_heures * self.cout_direct_horaire).quantize(Decimal("0.01"))
+        self.cout_total_interne = self.cout_total
         self.montant_vendu_associe = (self.nb_heures * self.taux_vente_horaire).quantize(Decimal("0.01"))
         self.marge_estimee = (self.montant_vendu_associe - self.cout_total).quantize(Decimal("0.01"))
         super().save(*args, **kwargs)

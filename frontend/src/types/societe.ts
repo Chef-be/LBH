@@ -419,16 +419,192 @@ export interface TempsPasse {
   statut_libelle: string;
   code_cible: string;
   libelle_cible: string;
+  pointage_journalier: string | null;
+  est_productif: boolean;
+  categorie_temps: "production" | "administratif" | "commercial" | "formation" | "veille" | "absence" | "reunion_interne" | "autre";
   nb_heures: string;
+  heures_objectif_associees: string;
+  ecart_heures: string;
   taux_horaire: string;
   taux_vente_horaire: string;
+  taux_vente_horaire_reference: string;
   cout_direct_horaire: string;
   montant_vendu_associe: string;
   marge_estimee: string;
   cout_total: string;
+  cout_total_interne: string;
   commentaires: string;
   date_creation: string;
   date_modification: string;
+}
+
+export interface ProfilRHSalarie {
+  id: string;
+  utilisateur: string;
+  utilisateur_nom: string;
+  organisation: string | null;
+  type_contrat: "cdi" | "cdd" | "alternance" | "stage" | "prestation" | "autre";
+  regime_temps_travail: "heures" | "forfait_jours" | "temps_partiel" | "autre";
+  heures_hebdomadaires_contractuelles: string;
+  jours_travailles_semaine: string[] | Record<string, boolean>;
+  heure_debut_theorique: string | null;
+  heure_fin_theorique: string | null;
+  pause_midi_minutes: number;
+  taux_activite: string;
+  droit_rtt_annuel: string;
+  droit_conges_payes_annuel: string;
+  solde_rtt_initial: string;
+  solde_conges_initial: string;
+  solde_recuperation_initial: string;
+  date_entree: string | null;
+  date_sortie: string | null;
+  actif: boolean;
+  profil_horaire_societe: string | null;
+  profil_horaire_societe_libelle: string | null;
+  date_creation: string;
+  date_modification: string;
+}
+
+export interface CalendrierTravailSociete {
+  id: string;
+  annee: number;
+  organisation: string | null;
+  libelle: string;
+  zone: "mayotte" | "france_metropolitaine" | "autre";
+  jours_feries: string[];
+  jours_non_travailles_exceptionnels: string[];
+  semaine_type: Record<string, boolean>;
+  actif: boolean;
+  date_creation: string;
+  date_modification: string;
+}
+
+export interface PointageJournalier {
+  id: string;
+  utilisateur: string;
+  utilisateur_nom: string;
+  date: string;
+  heure_arrivee: string | null;
+  heure_depart: string | null;
+  pause_minutes: number;
+  source: "manuel" | "badgeuse" | "import" | "correction";
+  statut: "brouillon" | "soumis" | "valide" | "rejete" | "corrige";
+  statut_libelle: string;
+  commentaire_salarie: string;
+  commentaire_validateur: string;
+  valide_par: string | null;
+  valide_par_nom: string | null;
+  date_validation: string | null;
+  heures_travaillees: string;
+  date_creation: string;
+  date_modification: string;
+}
+
+export interface DemandeAbsence {
+  id: string;
+  utilisateur: string;
+  utilisateur_nom: string;
+  type_absence: "conge_paye" | "rtt" | "maladie" | "formation" | "absence_autorisee" | "absence_non_remuneree" | "recuperation" | "evenement_familial" | "autre";
+  type_absence_libelle: string;
+  date_debut: string;
+  date_fin: string;
+  demi_journee_debut: "" | "matin" | "apres_midi";
+  demi_journee_fin: "" | "matin" | "apres_midi";
+  nombre_jours_ouvres_calcule: string;
+  nombre_heures_calcule: string;
+  statut: "brouillon" | "soumis" | "valide" | "refuse" | "annule";
+  statut_libelle: string;
+  motif: string;
+  justificatif: string | null;
+  commentaire_salarie: string;
+  commentaire_validateur: string;
+  valide_par: string | null;
+  valide_par_nom: string | null;
+  date_validation: string | null;
+  impacte_solde: boolean;
+  impacte_capacite: boolean;
+  date_creation: string;
+  date_modification: string;
+}
+
+export interface SoldeAbsenceSalarie {
+  id: string;
+  utilisateur: string;
+  utilisateur_nom: string;
+  annee: number;
+  type_absence: "conge_paye" | "rtt" | "recuperation" | "autre";
+  acquis: string;
+  pris: string;
+  en_attente_validation: string;
+  solde: string;
+  report_annee_precedente: string;
+  ajuste_manuellement: string;
+  commentaire: string;
+}
+
+export interface CapaciteSalarie {
+  utilisateur: string;
+  nom_complet: string;
+  profil: string;
+  profil_horaire: string;
+  profil_horaire_libelle: string;
+  date_debut: string;
+  date_fin: string;
+  heures_theoriques: string;
+  heures_absences_validees: string;
+  heures_absences_en_attente: string;
+  heures_formation: string;
+  heures_deja_affectees: string;
+  heures_deja_realisees: string;
+  heures_pointees: string;
+  heures_disponibles: string;
+  taux_charge: string;
+  disponibilite: string;
+  alertes: string[];
+}
+
+export interface SuggestionAssignationAvancee extends CapaciteSalarie {
+  score: string;
+  justification: string;
+  profil_compatible: boolean;
+  continuite_dossier: boolean;
+  niveau_confiance: string;
+}
+
+export interface TableauDeBordRH {
+  periode: {
+    date_debut: string;
+    date_fin: string;
+  };
+  heures_theoriques: string;
+  heures_pointees: string;
+  heures_productives: string;
+  heures_non_productives: string;
+  heures_absence: string;
+  heures_formation: string;
+  heures_supplementaires: string;
+  taux_charge_moyen: string;
+  taux_occupation_facturable: string;
+  ecart_objectif_reel: string;
+  absences_validees: number;
+  absences_en_attente: number;
+  salaries: Array<{
+    utilisateur: string;
+    nom_complet: string;
+    profil: string;
+    heures_theoriques: string;
+    heures_pointees: string;
+    heures_productives: string;
+    heures_non_productives: string;
+    heures_absence: string;
+    heures_formation: string;
+    heures_supplementaires: string;
+    heures_objectivees: string;
+    heures_realisees: string;
+    heures_disponibles: string;
+    taux_charge: string;
+    alertes: string[];
+  }>;
 }
 
 export interface RentabiliteSalarie {
