@@ -7,6 +7,13 @@ from .models import (
     EtudePrix,
     LignePrixEtude,
     AchatEtudePrix,
+    DecisionMoteurPrix,
+    FamilleDecompositionPrix,
+    ParametreMoteurPrix,
+    PlageCoefficientK,
+    PlagePrixFamille,
+    RegleControlePrix,
+    ScenarioDecompositionPrix,
     ConventionCollective,
     RegleConventionnelleProfil,
     VarianteLocaleRegleConventionnelle,
@@ -240,6 +247,90 @@ class AchatEtudePrixSerialiseur(serializers.ModelSerializer):
             "etude": {"required": False, "allow_null": True},
             "ligne_source": {"required": False, "allow_null": True},
         }
+
+
+class AuditPrixEntreeSerialiseur(serializers.Serializer):
+    designation = serializers.CharField(required=False, allow_blank=True)
+    unite = serializers.CharField(required=False, allow_blank=True)
+    quantite = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    prix_unitaire_ht = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    montant_total_ht = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    debourse_sec = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    cout_direct = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    cout_revient = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    prix_vente = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+    coefficient_k = serializers.DecimalField(max_digits=10, decimal_places=4, required=False, allow_null=True)
+    taux_frais_chantier = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, allow_null=True)
+    taux_frais_generaux = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, allow_null=True)
+    taux_aleas = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, allow_null=True)
+    taux_marge = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, allow_null=True)
+    lot = serializers.CharField(required=False, allow_blank=True)
+    famille = serializers.CharField(required=False, allow_blank=True)
+    sous_famille = serializers.CharField(required=False, allow_blank=True)
+    prix_marche_similaires = serializers.ListField(child=serializers.DictField(), required=False)
+    indice_reference = serializers.DecimalField(max_digits=12, decimal_places=4, required=False, allow_null=True)
+    indice_actuel = serializers.DecimalField(max_digits=12, decimal_places=4, required=False, allow_null=True)
+    localite = serializers.CharField(required=False, allow_blank=True)
+    source_document = serializers.CharField(required=False, allow_blank=True)
+    type_document = serializers.CharField(required=False, allow_blank=True)
+    niveau_fiabilite_source = serializers.DecimalField(max_digits=6, decimal_places=4, required=False, allow_null=True)
+    contraintes_connues = serializers.DictField(required=False)
+    hypotheses_autorisees = serializers.BooleanField(required=False, default=True)
+
+
+class DecisionMoteurPrixSerialiseur(serializers.ModelSerializer):
+    utilisateur_nom = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DecisionMoteurPrix
+        fields = [
+            "id", "utilisateur", "utilisateur_nom",
+            "ligne_prix", "etude_prix", "ligne_prix_etude",
+            "type_decision", "proposition_initiale", "valeur_finale",
+            "commentaire", "date_decision",
+        ]
+        read_only_fields = ["id", "utilisateur", "utilisateur_nom", "date_decision"]
+
+    def get_utilisateur_nom(self, obj):
+        if obj.utilisateur:
+            return f"{obj.utilisateur.prenom} {obj.utilisateur.nom}".strip()
+        return None
+
+
+class ParametreMoteurPrixSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = ParametreMoteurPrix
+        fields = "__all__"
+
+
+class FamilleDecompositionPrixSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = FamilleDecompositionPrix
+        fields = "__all__"
+
+
+class RegleControlePrixSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = RegleControlePrix
+        fields = "__all__"
+
+
+class PlageCoefficientKSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = PlageCoefficientK
+        fields = "__all__"
+
+
+class PlagePrixFamilleSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = PlagePrixFamille
+        fields = "__all__"
+
+
+class ScenarioDecompositionPrixSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = ScenarioDecompositionPrix
+        fields = "__all__"
 
 
 class ConventionCollectiveSerialiseur(serializers.ModelSerializer):

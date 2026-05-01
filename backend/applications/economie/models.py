@@ -620,6 +620,199 @@ class AchatEtudePrix(models.Model):
         return self.designation
 
 
+class ParametreMoteurPrix(models.Model):
+    """Paramétrage ajustable des heuristiques du moteur de prix."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=80, unique=True)
+    libelle = models.CharField(max_length=200)
+    seuil_similarite = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.6500"))
+    seuil_ecart_prix_marche = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.2500"))
+    seuil_k_bas = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("1.1000"))
+    seuil_k_haut = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("2.8000"))
+    seuil_marge_faible = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.0500"))
+    seuil_anomalie_montant = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("8.0000"))
+    ponderations_strategies = models.JSONField(default=dict, blank=True)
+    facteur_mayotte = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("1.0000"))
+    mode_marge = models.CharField(
+        max_length=30,
+        choices=[("taux_marque", "Taux de marque"), ("marge_sur_cout", "Marge sur coût")],
+        default="taux_marque",
+    )
+    actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "economie_parametre_moteur_prix"
+        verbose_name = "Paramètre du moteur de prix"
+        verbose_name_plural = "Paramètres du moteur de prix"
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.libelle
+
+
+class FamilleDecompositionPrix(models.Model):
+    """Ratios de décomposition par famille d'ouvrage."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=80, unique=True)
+    libelle = models.CharField(max_length=200)
+    mots_cles = models.JSONField(default=list, blank=True)
+    ratio_main_oeuvre = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.4000"))
+    ratio_materiaux = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.3500"))
+    ratio_materiel = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.1000"))
+    ratio_sous_traitance = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.0000"))
+    ratio_transport = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.0500"))
+    ratio_frais_divers = models.DecimalField(max_digits=6, decimal_places=4, default=decimal.Decimal("0.1000"))
+    actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "economie_famille_decomposition_prix"
+        verbose_name = "Famille de décomposition de prix"
+        verbose_name_plural = "Familles de décomposition de prix"
+        ordering = ["libelle"]
+
+    def __str__(self):
+        return self.libelle
+
+
+class RegleControlePrix(models.Model):
+    """Règle paramétrable de contrôle du prix ou de sa décomposition."""
+
+    TYPES = [
+        ("arithmetique", "Arithmétique"),
+        ("metier", "Métier"),
+        ("statistique", "Statistique"),
+        ("documentaire", "Documentaire"),
+        ("coherence_croisee", "Cohérence croisée"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=80, unique=True)
+    libelle = models.CharField(max_length=200)
+    type_controle = models.CharField(max_length=30, choices=TYPES)
+    niveau = models.CharField(
+        max_length=20,
+        choices=[("info", "Information"), ("alerte", "Alerte"), ("critique", "Critique")],
+        default="alerte",
+    )
+    parametres = models.JSONField(default=dict, blank=True)
+    actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "economie_regle_controle_prix"
+        verbose_name = "Règle de contrôle de prix"
+        verbose_name_plural = "Règles de contrôle de prix"
+        ordering = ["type_controle", "code"]
+
+    def __str__(self):
+        return self.libelle
+
+
+class PlageCoefficientK(models.Model):
+    """Plage attendue de coefficient K par famille ou contexte."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    famille = models.CharField(max_length=120, blank=True, default="")
+    localite = models.CharField(max_length=120, blank=True, default="")
+    k_min = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("1.1000"))
+    k_max = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("2.8000"))
+    commentaire = models.TextField(blank=True)
+    actif = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "economie_plage_coefficient_k"
+        verbose_name = "Plage de coefficient K"
+        verbose_name_plural = "Plages de coefficients K"
+        ordering = ["famille", "localite"]
+
+    def __str__(self):
+        return f"{self.famille or 'Toutes familles'} — K {self.k_min}/{self.k_max}"
+
+
+class PlagePrixFamille(models.Model):
+    """Fourchette de prix par famille, unité et localisation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    famille = models.CharField(max_length=120)
+    unite = models.CharField(max_length=20, blank=True, default="")
+    localite = models.CharField(max_length=120, blank=True, default="")
+    prix_min = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    prix_median = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    prix_max = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    millesime = models.PositiveSmallIntegerField(null=True, blank=True)
+    source = models.CharField(max_length=200, blank=True, default="")
+    actif = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "economie_plage_prix_famille"
+        verbose_name = "Plage de prix par famille"
+        verbose_name_plural = "Plages de prix par famille"
+        ordering = ["famille", "unite", "localite"]
+
+    def __str__(self):
+        return f"{self.famille} — {self.unite or 'unité libre'}"
+
+
+class ScenarioDecompositionPrix(models.Model):
+    """Scénario de décomposition proposé ou validé pour une famille."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=80)
+    libelle = models.CharField(max_length=200)
+    famille = models.CharField(max_length=120, blank=True, default="")
+    coefficient_k = models.DecimalField(max_digits=8, decimal_places=4, default=decimal.Decimal("1.4500"))
+    ratios = models.JSONField(default=dict, blank=True)
+    justification = models.TextField(blank=True)
+    actif = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "economie_scenario_decomposition_prix"
+        verbose_name = "Scénario de décomposition de prix"
+        verbose_name_plural = "Scénarios de décomposition de prix"
+        unique_together = [("code", "famille")]
+        ordering = ["famille", "code"]
+
+    def __str__(self):
+        return self.libelle
+
+
+class DecisionMoteurPrix(models.Model):
+    """Décision humaine sur une proposition du moteur de prix."""
+
+    TYPES_DECISION = [
+        ("accepte", "Acceptée"),
+        ("refuse", "Refusée"),
+        ("modifie", "Modifiée"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey("comptes.Utilisateur", on_delete=models.SET_NULL, null=True, blank=True)
+    ligne_prix = models.ForeignKey("economie.LignePrix", on_delete=models.SET_NULL, null=True, blank=True, related_name="decisions_moteur_prix")
+    etude_prix = models.ForeignKey("economie.EtudePrix", on_delete=models.SET_NULL, null=True, blank=True, related_name="decisions_moteur_prix")
+    ligne_prix_etude = models.ForeignKey("economie.LignePrixEtude", on_delete=models.SET_NULL, null=True, blank=True, related_name="decisions_moteur_prix")
+    type_decision = models.CharField(max_length=20, choices=TYPES_DECISION)
+    proposition_initiale = models.JSONField(default=dict, blank=True)
+    valeur_finale = models.JSONField(default=dict, blank=True)
+    commentaire = models.TextField(blank=True)
+    date_decision = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "economie_decision_moteur_prix"
+        verbose_name = "Décision du moteur de prix"
+        verbose_name_plural = "Décisions du moteur de prix"
+        ordering = ["-date_decision"]
+
+    def __str__(self):
+        return f"{self.get_type_decision_display()} — {self.date_decision:%d/%m/%Y}"
+
+
 class ConventionCollective(models.Model):
     """
     Convention collective paramétrable utilisée pour affiner les hypothèses

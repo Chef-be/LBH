@@ -21,6 +21,7 @@ from .models import (
     EtudePrix,
     LignePrixEtude,
     AchatEtudePrix,
+    DecisionMoteurPrix,
     ConventionCollective,
     ReferenceSocialeLocalisation,
     RegleConventionnelleProfil,
@@ -39,6 +40,8 @@ from .serialiseurs import (
     EtudePrixDetailSerialiseur,
     LignePrixEtudeSerialiseur,
     AchatEtudePrixSerialiseur,
+    AuditPrixEntreeSerialiseur,
+    DecisionMoteurPrixSerialiseur,
     ConventionCollectiveSerialiseur,
     ReferenceSocialeLocalisationSerialiseur,
     RegleConventionnelleProfilSerialiseur,
@@ -1383,6 +1386,63 @@ def vue_simuler_plan_activite(request):
             lignes_simulation.append(ligne)
 
     return Response(simuler_plan_activite({"lignes": lignes_simulation}))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_auditer_prix(request):
+    """Audite un prix avec le moteur adaptatif multi-stratégies."""
+    from .moteur_prix import auditer_prix
+
+    serialiseur = AuditPrixEntreeSerialiseur(data=request.data)
+    serialiseur.is_valid(raise_exception=True)
+    return Response(auditer_prix(serialiseur.validated_data))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_auditer_etude_prix(request, pk):
+    """Audite une étude de prix complète avec le moteur adaptatif."""
+    from .moteur_prix import ContextePrix, auditer_prix
+
+    etude = generics.get_object_or_404(
+        EtudePrix.objects.select_related("ligne_bibliotheque", "projet").prefetch_related("lignes"),
+        pk=pk,
+    )
+    etudes_similaires = EtudePrix.objects.filter(
+        statut__in=["validee", "publiee"],
+        lot_type=etude.lot_type,
+    ).exclude(pk=etude.pk)[:10]
+    contexte = ContextePrix.depuis_ligne_etude(etude)
+    contexte.etudes_prix_similaires = list(etudes_similaires)
+    contexte.prix_marche_similaires = [
+        {"prix_vente_unitaire": ligne.prix_vente_ht, "source": ligne.code or str(ligne.id)}
+        for ligne in etudes_similaires
+        if ligne.prix_vente_ht and ligne.prix_vente_ht > 0
+    ]
+    resultat = auditer_prix(contexte)
+    return Response(resultat)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_decision_moteur_prix(request):
+    """Historise une décision humaine sur une proposition du moteur de prix."""
+    serialiseur = DecisionMoteurPrixSerialiseur(data=request.data, context={"request": request})
+    serialiseur.is_valid(raise_exception=True)
+    decision = serialiseur.save(utilisateur=request.user)
+    return Response(DecisionMoteurPrixSerialiseur(decision).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_liste_decisions_moteur_prix(request):
+    """Liste les décisions récentes prises sur les propositions du moteur de prix."""
+    qs = DecisionMoteurPrix.objects.select_related("utilisateur", "ligne_prix", "etude_prix", "ligne_prix_etude")
+    etude_prix_id = request.query_params.get("etude_prix")
+    if etude_prix_id:
+        qs = qs.filter(etude_prix_id=etude_prix_id)
+    return Response(DecisionMoteurPrixSerialiseur(qs[:100], many=True).data)
 
 
 @api_view(["POST"])

@@ -25,6 +25,7 @@ urlpatterns = [
     path("etudes-de-prix/<uuid:pk>/export/xlsx/", views.vue_exporter_etude_prix_xlsx, name="etude-prix-export-xlsx"),
     path("etudes-de-prix/<uuid:pk>/cadrage/", views.vue_cadrage_etude_prix, name="etude-prix-cadrage"),
     path("etudes-de-prix/<uuid:pk>/comparatif/", views.vue_comparatif_etude_prix, name="etude-prix-comparatif"),
+    path("etudes-de-prix/<uuid:pk>/audit-prix/", views.vue_auditer_etude_prix, name="etude-prix-audit-prix"),
     path("etudes-de-prix/<uuid:pk>/export/comparatif-xlsx/", views.vue_exporter_comparatif_etude_prix_xlsx, name="etude-prix-export-comparatif-xlsx"),
     path("etudes-de-prix/<uuid:pk>/export/achats-xlsx/", views.vue_exporter_achats_etude_prix_xlsx, name="etude-prix-export-achats-xlsx"),
     path("etudes-de-prix/<uuid:pk>/export/note-moa-docx/", views.vue_exporter_note_moa_etude_prix_docx, name="etude-prix-export-note-moa-docx"),
@@ -59,6 +60,9 @@ urlpatterns = [
     path("pilotage-activite/simuler/", views.vue_simuler_plan_activite, name="pilotage-activite-simuler"),
 
     # Décomposition inverse de prix et missions par type de client
+    path("moteur-prix/auditer/", views.vue_auditer_prix, name="moteur-prix-auditer"),
+    path("moteur-prix/decisions/", views.vue_liste_decisions_moteur_prix, name="moteur-prix-decisions-liste"),
+    path("moteur-prix/decisions/enregistrer/", views.vue_decision_moteur_prix, name="moteur-prix-decision"),
     path("decomposer-prix/", views.vue_decomposer_prix_inverse, name="decomposer-prix-inverse"),
     path("missions/", views.vue_missions_par_type_client, name="missions-par-type-client"),
 

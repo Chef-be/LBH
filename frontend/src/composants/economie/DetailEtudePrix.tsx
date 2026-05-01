@@ -180,6 +180,21 @@ interface ComparatifEtudePrix {
   alertes: string[];
 }
 
+interface AuditMoteurPrix {
+  statut: string;
+  niveau_confiance: string;
+  score_confiance: ValeurNumerique;
+  score_coherence: ValeurNumerique;
+  strategie_principale: string;
+  valeurs: Record<string, ValeurNumerique | string | Record<string, unknown> | unknown[]>;
+  hypotheses: { code?: string; libelle: string; source?: string; niveau_confiance?: ValeurNumerique; raison?: string }[];
+  verifications: { type: string; statut: string; message: string }[];
+  alertes: string[];
+  erreurs: string[];
+  corrections_proposees: { champ: string; valeur_actuelle: unknown; valeur_proposee: unknown; raison: string; niveau_risque?: string }[];
+  justification: string;
+}
+
 const STATUTS_CSS: Record<string, string> = {
   brouillon: "badge-neutre",
   en_cours: "badge-info",
@@ -1180,6 +1195,15 @@ export function DetailEtudePrix({ etudeId }: { etudeId: string }) {
     queryKey: ["etude-prix-comparatif", etudeId],
     queryFn: () => api.get<ComparatifEtudePrix>(`/api/economie/etudes-de-prix/${etudeId}/comparatif/`),
   });
+  const {
+    data: auditPrix,
+    refetch: relancerAuditPrix,
+    isFetching: auditPrixEnCours,
+  } = useQuery<AuditMoteurPrix>({
+    queryKey: ["etude-prix-audit-prix", etudeId],
+    queryFn: () => api.get<AuditMoteurPrix>(`/api/economie/etudes-de-prix/${etudeId}/audit-prix/`),
+    enabled: false,
+  });
 
   const rafraichir = async (messageSucces?: string) => {
     await queryClient.invalidateQueries({ queryKey: ["etude-prix", etudeId] });
@@ -1351,6 +1375,15 @@ export function DetailEtudePrix({ etudeId }: { etudeId: string }) {
             <ShoppingCart className="w-3.5 h-3.5" />
             Bon de commande
           </button>
+          <button
+            type="button"
+            className="btn-secondaire text-xs"
+            onClick={() => relancerAuditPrix()}
+            disabled={auditPrixEnCours}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {auditPrixEnCours ? "Audit…" : "Auditer le prix"}
+          </button>
           <button type="button" className="btn-secondaire text-xs" onClick={() => exporterNote("moa")}>
             <FileText className="w-3.5 h-3.5" />
             Note MOA
@@ -1473,6 +1506,111 @@ export function DetailEtudePrix({ etudeId }: { etudeId: string }) {
           </div>
         </div>
       </div>
+
+      {auditPrix && (
+        <div className="carte space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primaire-600" />
+                Audit adaptatif du prix
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">{auditPrix.justification}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 px-3 py-2 text-right">
+              <p className="text-xs text-slate-500">Confiance</p>
+              <p className="font-semibold text-slate-800 capitalize">{auditPrix.niveau_confiance}</p>
+              <p className="font-mono text-xs text-slate-500">{formaterTaux(auditPrix.score_confiance)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs text-slate-500 mb-1">Statut</p>
+              <p className="font-medium text-slate-800">{auditPrix.statut.replaceAll("_", " ")}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs text-slate-500 mb-1">Stratégie retenue</p>
+              <p className="font-medium text-slate-800">{auditPrix.strategie_principale.replaceAll("_", " ")}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs text-slate-500 mb-1">Prix proposé</p>
+              <p className="font-mono text-slate-800">{formaterMontant(auditPrix.valeurs.prix_vente_unitaire as ValeurNumerique)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs text-slate-500 mb-1">Déboursé estimé</p>
+              <p className="font-mono text-slate-800">
+                {formaterMontant((auditPrix.valeurs.debourse_sec || auditPrix.valeurs.debourse_sec_estime) as ValeurNumerique)}
+              </p>
+            </div>
+          </div>
+
+          {auditPrix.erreurs.length > 0 && (
+            <div className="space-y-2">
+              {auditPrix.erreurs.map((erreur) => (
+                <div key={erreur} className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {erreur}
+                </div>
+              ))}
+            </div>
+          )}
+          {auditPrix.alertes.length > 0 && (
+            <div className="space-y-2">
+              {auditPrix.alertes.map((alerte) => (
+                <div key={alerte} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {alerte}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">Hypothèses</h3>
+              <div className="space-y-3">
+                {auditPrix.hypotheses.slice(0, 5).map((hypothese) => (
+                  <div key={`${hypothese.code || hypothese.libelle}-${hypothese.libelle}`} className="text-sm">
+                    <p className="font-medium text-slate-800">{hypothese.libelle}</p>
+                    <p className="text-xs text-slate-500">{hypothese.raison || hypothese.source || "À valider"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">Vérifications</h3>
+              <div className="space-y-2">
+                {auditPrix.verifications.slice(0, 6).map((verification) => (
+                  <div key={`${verification.type}-${verification.message}`} className="text-sm">
+                    <span className={clsx(
+                      "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium mr-2",
+                      verification.statut === "ok" ? "bg-green-100 text-green-700" :
+                        verification.statut === "critique" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
+                    )}>
+                      {verification.statut}
+                    </span>
+                    <span className="text-slate-700">{verification.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">Corrections proposées</h3>
+              {auditPrix.corrections_proposees.length === 0 ? (
+                <p className="text-sm text-slate-500">Aucune correction automatique proposée.</p>
+              ) : (
+                <div className="space-y-3">
+                  {auditPrix.corrections_proposees.map((correction) => (
+                    <div key={`${correction.champ}-${correction.raison}`} className="text-sm">
+                      <p className="font-medium text-slate-800">{correction.champ}</p>
+                      <p className="text-xs text-slate-500">{correction.raison}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {comparatif && (
         <div className="carte space-y-4">

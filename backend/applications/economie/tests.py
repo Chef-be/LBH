@@ -14,6 +14,7 @@ from applications.economie.models import (
     AffectationProfilProjet,
     AchatEtudePrix,
     ConventionCollective,
+    DecisionMoteurPrix,
     EtudeEconomique,
     EtudePrix,
     JournalPhaseEtudeEconomique,
@@ -27,6 +28,178 @@ from applications.economie.models import (
 from applications.metres.models import LigneMetre, Metre
 from applications.organisations.models import Organisation
 from applications.projets.models import Projet
+
+
+class MoteurPrixAdaptatifTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        utilisateur_model = get_user_model()
+        self.organisation = Organisation.objects.create(
+            code="ORG-MOTEUR-PRIX",
+            nom="Organisation moteur prix",
+            type_organisation="bureau_etudes",
+            est_active=True,
+        )
+        self.utilisateur = utilisateur_model.objects.create_user(
+            courriel="moteur-prix@example.com",
+            password="secret-test-123",
+            prenom="Moteur",
+            nom="Prix",
+            organisation=self.organisation,
+            est_staff=True,
+        )
+        self.client.force_authenticate(self.utilisateur)
+
+    def test_prix_unitaire_manquant_depuis_montant_et_quantite(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Fourniture et pose de bordures T2",
+            "unite": "ml",
+            "quantite": "10",
+            "montant_total_ht": "1250",
+        })
+
+        self.assertEqual(resultat["valeurs"]["prix_unitaire_ht"], "125.0000")
+        self.assertTrue(resultat["hypotheses"])
+        self.assertIn(resultat["statut"], ["coherent", "a_verifier"])
+
+    def test_montant_manquant_depuis_prix_unitaire_et_quantite(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Peinture acrylique deux couches",
+            "unite": "m2",
+            "quantite": "40",
+            "prix_unitaire_ht": "18.50",
+        })
+
+        self.assertEqual(resultat["valeurs"]["montant_total_ht"], "740.0000")
+
+    def test_debourse_sec_manquant_depuis_pv_et_k(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Canalisation PVC",
+            "prix_vente": "145",
+            "coefficient_k": "1.45",
+        })
+
+        self.assertEqual(resultat["valeurs"]["debourse_sec"], "100.0000")
+        self.assertIn("decomposition", resultat)
+
+    def test_prix_vente_manquant_depuis_debourse_et_k(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Terrassement en déblais",
+            "debourse_sec": "100",
+            "coefficient_k": "1.60",
+        })
+
+        self.assertEqual(resultat["valeurs"]["prix_vente"], "160.0000")
+
+    def test_plusieurs_strategies_convergentes_augmentent_la_confiance(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Bordure T2 béton",
+            "unite": "ml",
+            "prix_unitaire_ht": "82",
+            "prix_marche_similaires": [
+                {"prix_unitaire_ht": "80"},
+                {"prix_unitaire_ht": "84"},
+                {"prix_unitaire_ht": "83"},
+            ],
+        })
+
+        self.assertGreaterEqual(float(resultat["score_confiance"]), 0.5)
+        self.assertTrue(resultat["strategies_comparees"])
+
+    def test_strategies_divergentes_signalent_une_alerte(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Peinture acrylique",
+            "unite": "m2",
+            "prix_unitaire_ht": "240",
+            "prix_marche_similaires": [
+                {"prix_unitaire_ht": "30"},
+                {"prix_unitaire_ht": "32"},
+                {"prix_unitaire_ht": "28"},
+            ],
+        })
+
+        self.assertTrue(resultat["alertes"] or resultat["erreurs"])
+
+    def test_correction_proposee_sans_application_automatique(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Ouvrage importé",
+            "quantite": "100",
+            "montant_total_ht": "12500",
+            "prix_unitaire_ht": "12500",
+        })
+
+        self.assertTrue(resultat["corrections_proposees"])
+        self.assertEqual(resultat["valeurs"]["prix_unitaire_ht"], "12500")
+
+    def test_hypothese_unite_corrigee(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Canalisation enterrée",
+            "unite": "m2",
+            "prix_unitaire_ht": "120",
+        })
+
+        libelles = [item["libelle"] for item in resultat["hypotheses"]]
+        self.assertIn("Unité proposée", libelles)
+
+    def test_audit_ligne_avec_ds_superieur_pv(self):
+        from applications.economie.moteur_prix import auditer_prix
+
+        resultat = auditer_prix({
+            "designation": "Ligne incohérente",
+            "prix_vente": "80",
+            "debourse_sec": "120",
+        })
+
+        self.assertEqual(resultat["statut"], "incoherent")
+        self.assertTrue(resultat["erreurs"])
+
+    def test_api_audit_prix_retourne_sortie_structuree(self):
+        reponse = self.client.post(
+            "/api/economie/moteur-prix/auditer/",
+            {
+                "designation": "Fourniture et pose de bordures T2",
+                "unite": "ml",
+                "quantite": "10",
+                "montant_total_ht": "1250",
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertIn("niveau_confiance", reponse.data)
+        self.assertEqual(reponse.data["valeurs"]["prix_unitaire_ht"], "125.0000")
+
+    def test_decision_utilisateur_est_historisee(self):
+        reponse = self.client.post(
+            "/api/economie/moteur-prix/decisions/enregistrer/",
+            {
+                "type_decision": "accepte",
+                "proposition_initiale": {"prix_vente_unitaire": "125.00"},
+                "valeur_finale": {"prix_vente_unitaire": "125.00"},
+                "commentaire": "Validation métier.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        self.assertEqual(DecisionMoteurPrix.objects.count(), 1)
+        self.assertEqual(DecisionMoteurPrix.objects.first().utilisateur, self.utilisateur)
 
 
 class PlanificationEtudeEconomiqueTests(TestCase):
