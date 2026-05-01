@@ -318,7 +318,6 @@ export default function PageChargesSociete() {
               { label: "SMIC horaire brut", key: "smic_horaire_brut" },
               { label: "PMSS", key: "pmss", aide: "Plafond mensuel de la sécurité sociale : base de calcul de certaines cotisations sociales." },
               { label: "PASS", key: "pass_annuel", aide: "Plafond annuel de la sécurité sociale : référence annuelle issue du PMSS." },
-              { label: "Zone SMIC", key: "zone_smic" },
             ].map(({ label, key, pct: estPct, aide }) => (
               <label key={key} className="space-y-1">
                 <span className="text-xs font-medium" style={{ color: "var(--texte-3)" }} title={aide}>{label}</span>
@@ -340,6 +339,18 @@ export default function PageChargesSociete() {
                 />
               </label>
             ))}
+            <label className="space-y-1">
+              <span className="text-xs font-medium" style={{ color: "var(--texte-3)" }}>Zone SMIC</span>
+              <select
+                value={formParam.zone_smic}
+                onChange={(e) => setFormParam((p) => ({ ...p, zone_smic: e.target.value }))}
+                className="w-full rounded-lg px-3 py-2 text-sm"
+                style={champ}
+              >
+                <option value="Mayotte">Mayotte</option>
+                <option value="France hors Mayotte">France hors Mayotte</option>
+              </select>
+            </label>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <select value={formParam.strategie_tarifaire} onChange={(e) => setFormParam((p) => ({ ...p, strategie_tarifaire: e.target.value as ParametreSociete["strategie_tarifaire"] }))} className="rounded-lg px-3 py-2 text-sm" style={champ}>
