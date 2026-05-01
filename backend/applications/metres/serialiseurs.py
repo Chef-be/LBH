@@ -243,10 +243,13 @@ class FondPlanSerialiseur(serializers.ModelSerializer):
         if not validated_data.get("intitule"):
             validated_data["intitule"] = "Plan sans titre"
         instance = super().create(validated_data)
-        # Lancer la génération de miniature en tâche asynchrone (évite le timeout)
+        # Lancer la génération d'aperçus en tâche asynchrone (évite le timeout)
+        # et conserver un statut exploitable par l'interface.
         if instance.format_fichier == "dxf":
-            from .taches import tache_generer_miniature_fond_plan
-            tache_generer_miniature_fond_plan.delay(str(instance.id))
+            from .taches import tache_generer_apercus_fond_plan
+            instance.statut_traitement = "rendu_en_cours"
+            instance.save(update_fields=["statut_traitement"])
+            tache_generer_apercus_fond_plan.delay(str(instance.id))
         return instance
 
 

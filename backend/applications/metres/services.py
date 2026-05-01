@@ -398,6 +398,7 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     Les deux couches sont composées (fills sous les lignes).
     """
     import io
+    import logging
     import ezdxf
     import ezdxf.recover
     from ezdxf.addons.drawing import RenderContext, Frontend
@@ -407,6 +408,18 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    # Les plans CAO peuvent contenir des milliers d'entités invisibles.
+    # Le renderer ezdxf logue chaque entité ignorée en INFO, ce qui ralentit fortement
+    # le rendu et noie les journaux sans valeur métier.
+    for nom_logger in (
+        "ezdxf",
+        "ezdxf.addons",
+        "ezdxf.addons.drawing",
+        "ezdxf.addons.drawing.frontend",
+        "frontend",
+    ):
+        logging.getLogger(nom_logger).setLevel(logging.WARNING)
 
     # Configure les répertoires de polices système pour ezdxf (substitution Arial, Times…)
     ezdxf.options.support_dirs = [
@@ -527,6 +540,172 @@ def _rendre_dxf_en_png(chemin_dxf: str, largeur_px: int, hauteur_px: int) -> byt
     return tampon_final.read()
 
 
+def _rendre_dxf_simple_en_png(chemin_dxf: str, largeur_px: int = 1200, hauteur_px: int = 850) -> bytes:
+    """
+    Rend un DXF en image légère directement avec PIL.
+    Ce mode est volontairement simple : il privilégie un fond exploitable pour
+    le métré visuel lorsque le rendu complet ezdxf/matplotlib est trop lourd.
+    """
+    import io
+    import math
+    import ezdxf
+    import ezdxf.recover
+    from PIL import Image, ImageDraw
+
+    try:
+        doc = ezdxf.readfile(chemin_dxf)
+    except Exception:
+        doc, _ = ezdxf.recover.readfile(chemin_dxf)
+
+    ext = _extents_valides(doc)
+    image = Image.new("RGB", (largeur_px, hauteur_px), (255, 255, 255))
+    dessin = ImageDraw.Draw(image)
+
+    if not ext:
+        tampon = io.BytesIO()
+        image.save(tampon, format="PNG", optimize=True)
+        tampon.seek(0)
+        return tampon.read()
+
+    xmin, ymin, xmax, ymax = ext
+    dx = max(xmax - xmin, 1.0)
+    dy = max(ymax - ymin, 1.0)
+    marge = max(dx, dy) * 0.03
+    xmin -= marge
+    ymin -= marge
+    xmax += marge
+    ymax += marge
+    dx = max(xmax - xmin, 1.0)
+    dy = max(ymax - ymin, 1.0)
+
+    marge_px = 20
+    echelle = min((largeur_px - marge_px * 2) / dx, (hauteur_px - marge_px * 2) / dy)
+    contenu_w = dx * echelle
+    contenu_h = dy * echelle
+    decalage_x = (largeur_px - contenu_w) / 2
+    decalage_y = (hauteur_px - contenu_h) / 2
+
+    def vers_px(x: float, y: float) -> tuple[int, int]:
+        px = decalage_x + (x - xmin) * echelle
+        py = decalage_y + (ymax - y) * echelle
+        return int(round(px)), int(round(py))
+
+    def dessiner_polyligne(points: list[tuple[float, float]], ferme: bool = False):
+        if len(points) < 2:
+            return
+        pts = [vers_px(x, y) for x, y in points]
+        if ferme:
+            pts.append(pts[0])
+        dessin.line(pts, fill=(20, 25, 35), width=1)
+
+    def approx_arc(cx: float, cy: float, rayon: float, debut: float, fin: float) -> list[tuple[float, float]]:
+        if fin < debut:
+            fin += 360.0
+        pas = max(12, min(96, int(abs(fin - debut) / 6) + 1))
+        points = []
+        for index in range(pas + 1):
+            angle = math.radians(debut + (fin - debut) * index / pas)
+            points.append((cx + math.cos(angle) * rayon, cy + math.sin(angle) * rayon))
+        return points
+
+    msp = doc.modelspace()
+    entites_dessinees = 0
+    limite_entites = 50000
+    for entite in msp:
+        if entites_dessinees >= limite_entites:
+            break
+        try:
+            if entite.is_alive is False:
+                continue
+            if entite.dxf.hasattr("invisible") and entite.dxf.invisible:
+                continue
+            type_entite = entite.dxftype()
+            if type_entite == "LINE":
+                depart, arrivee = entite.dxf.start, entite.dxf.end
+                dessin.line([vers_px(depart.x, depart.y), vers_px(arrivee.x, arrivee.y)], fill=(20, 25, 35), width=1)
+                entites_dessinees += 1
+            elif type_entite == "LWPOLYLINE":
+                points = [(p[0], p[1]) for p in entite.get_points()]
+                dessiner_polyligne(points, entite.closed)
+                entites_dessinees += 1
+            elif type_entite == "POLYLINE":
+                points = [(v.dxf.location.x, v.dxf.location.y) for v in entite.vertices]
+                dessiner_polyligne(points, entite.is_closed)
+                entites_dessinees += 1
+            elif type_entite == "CIRCLE":
+                centre = entite.dxf.center
+                rayon = entite.dxf.radius
+                x1, y1 = vers_px(centre.x - rayon, centre.y + rayon)
+                x2, y2 = vers_px(centre.x + rayon, centre.y - rayon)
+                dessin.ellipse([x1, y1, x2, y2], outline=(20, 25, 35), width=1)
+                entites_dessinees += 1
+            elif type_entite == "ARC":
+                centre = entite.dxf.center
+                points = approx_arc(
+                    centre.x,
+                    centre.y,
+                    entite.dxf.radius,
+                    float(entite.dxf.start_angle),
+                    float(entite.dxf.end_angle),
+                )
+                dessiner_polyligne(points)
+                entites_dessinees += 1
+        except Exception:
+            continue
+
+    # Quelques points repères restent utiles sur les plans très pauvres en lignes.
+    if entites_dessinees == 0:
+        try:
+            for point in _extraire_points_dxf(chemin_dxf)[:3000]:
+                x = int(round(point[0] * largeur_px))
+                y = int(round(point[1] * hauteur_px))
+                dessin.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(25, 80, 160))
+        except Exception:
+            pass
+
+    tampon = io.BytesIO()
+    image.save(tampon, format="PNG", optimize=True)
+    tampon.seek(0)
+    return tampon.read()
+
+
+def convertir_dxf_en_png_rapide(source, largeur_px: int = 1200, hauteur_px: int = 850) -> bytes:
+    """Convertit un DXF/DWG en PNG léger pour l'affichage immédiat du canvas."""
+    import os
+    import tempfile
+
+    if isinstance(source, str):
+        chemin = source
+        supprimer_temp = False
+        ext = os.path.splitext(source)[1].lower()
+    else:
+        ext = os.path.splitext(source.name)[1].lower()
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            with source.open("rb") as f:
+                tmp.write(f.read())
+            chemin = tmp.name
+        supprimer_temp = True
+
+    chemin_dxf_temp = None
+    try:
+        if _est_dwg_binaire(chemin):
+            chemin_dxf_temp = _convertir_dwg_en_dxf(chemin)
+            return _rendre_dxf_simple_en_png(chemin_dxf_temp, largeur_px, hauteur_px)
+        return _rendre_dxf_simple_en_png(chemin, largeur_px, hauteur_px)
+    finally:
+        if supprimer_temp:
+            try:
+                os.unlink(chemin)
+            except OSError:
+                pass
+        if chemin_dxf_temp:
+            import shutil
+            try:
+                shutil.rmtree(os.path.dirname(chemin_dxf_temp), ignore_errors=True)
+            except OSError:
+                pass
+
+
 def convertir_dxf_en_png(source, largeur_px: int = 2480, hauteur_px: int = 1754) -> bytes:
     """
     Convertit un fichier DXF ou DWG en image PNG.
@@ -622,25 +801,27 @@ def generer_miniature_fond_plan(fond_plan) -> bool:
     # 1. Aperçu rapide (1200px) — disponible rapidement pour le canvas
     apercu_ok = False
     try:
-        apercu_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=1200, hauteur_px=850)
+        apercu_bytes = convertir_dxf_en_png_rapide(fond_plan.fichier, largeur_px=1200, hauteur_px=850)
         apercu_ok = True
     except Exception:
         logger.error("Aperçu CAO échoué pour %s — placeholder affiché.", fond_plan.fichier.name, exc_info=True)
         apercu_bytes = _generer_placeholder_dwg_png()
 
     fond_plan.apercu.save(f"{nom_base}_apercu.png", ContentFile(apercu_bytes), save=True)
+    fond_plan.statut_traitement = "pret"
+    fond_plan.message_traitement = ""
+    fond_plan.largeur_px = 1200
+    fond_plan.hauteur_px = 850
+    fond_plan.save(update_fields=["statut_traitement", "message_traitement", "largeur_px", "hauteur_px"])
     if apercu_ok:
         logger.info("Aperçu CAO généré pour %s", fond_plan.fichier.name)
 
-    # 2. Miniature haute résolution (7016px ≈ A1 à 150 DPI) — pour le zoom
-    try:
-        hd_bytes = convertir_dxf_en_png(fond_plan.fichier, largeur_px=7016, hauteur_px=4961)
-    except Exception:
-        logger.error("Miniature HD CAO échouée pour %s — repli sur l'aperçu.", fond_plan.fichier.name, exc_info=True)
-        hd_bytes = apercu_bytes
-
+    # 2. Pour un DXF, on réutilise l'aperçu comme image de travail.
+    # L'accroche et la précision viennent de la géométrie vectorielle ; conserver
+    # la même image évite un décalage d'échelle entre aperçu et HD.
+    hd_bytes = apercu_bytes
     fond_plan.miniature.save(f"{nom_base}_miniature.png", ContentFile(hd_bytes), save=True)
-    logger.info("Miniature HD CAO générée pour %s", fond_plan.fichier.name)
+    logger.info("Image de travail CAO générée pour %s", fond_plan.fichier.name)
     return True
 
 
