@@ -384,10 +384,21 @@ export default function PageChargesSociete() {
           <div className="mt-6 rounded-xl p-4" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Décomposition des heures productives BE/an</p>
+                <p className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Décomposition des heures productives par an</p>
                 <p className="text-xs" style={{ color: "var(--texte-3)" }}>Le total calculé alimente automatiquement les profils horaires.</p>
               </div>
-              <p className="text-2xl font-bold font-mono" style={{ color: "var(--c-base)" }}>{heuresProductives.toLocaleString("fr-FR")} h</p>
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <p className="text-2xl font-bold font-mono" style={{ color: "var(--c-base)" }}>{heuresProductives.toLocaleString("fr-FR")} h</p>
+                <button
+                  type="button"
+                  onClick={() => sauverParametre.mutate()}
+                  disabled={sauverParametre.isPending}
+                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ background: "var(--c-base)" }}
+                >
+                  <Save size={13} /> Enregistrer
+                </button>
+              </div>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {([
