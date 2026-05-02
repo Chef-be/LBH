@@ -21,6 +21,7 @@ from rest_framework.response import Response
 
 from .models import (
     ChargeFixeStructure,
+    AffaireCommerciale,
     ParametreSociete,
     ProfilHoraire,
     ProfilHoraireUtilisateur,
@@ -30,6 +31,8 @@ from .models import (
     Facture,
     LigneFacture,
     Paiement,
+    LivraisonLivrable,
+    RelanceAutomatique,
     TempsPasse,
     ProfilRHSalarie,
     CalendrierTravailSociete,
@@ -50,6 +53,9 @@ from .serializers import (
     FactureListeSerializer, FactureDetailSerializer,
     LigneFactureSerializer,
     PaiementSerializer,
+    AffaireCommercialeSerializer,
+    LivraisonLivrableSerializer,
+    RelanceAutomatiqueSerializer,
     TempsPasseSerializer,
     MissionClientSocieteSerializer,
     ProfilRHSalarieSerializer,
@@ -69,6 +75,22 @@ from .services import (
     lister_missions_livrables,
     recalculer_tarifs_societe,
     rendu_validation_html,
+)
+from .services_commercial import (
+    accepter_devis_public,
+    calculer_interets_moratoires,
+    confirmer_paiement_manuel,
+    creer_lien_paiement,
+    creer_projet_depuis_affaire,
+    generer_reference_affaire,
+    preparer_facture_chorus,
+    preparer_lien_public_devis,
+    preparer_livraison,
+    refuser_devis_public,
+    retrouver_devis_par_token_public,
+    statut_chorus_manuel,
+    synchroniser_affaire_depuis_devis,
+    valider_manuellement_affaire,
 )
 from .services_assignation import (
     assigner_automatiquement,
@@ -126,6 +148,10 @@ def _generer_reference_facture():
     else:
         num = 1
     return f"{prefix}{num:03d}"
+
+
+def _est_super_admin(utilisateur) -> bool:
+    return bool(getattr(utilisateur, "est_super_admin", False) or getattr(utilisateur, "is_superuser", False))
 
 
 def _type_projet_depuis_devis(devis: DevisHonoraires) -> str:
@@ -902,6 +928,59 @@ class TempsPasseViewSet(viewsets.ModelViewSet):
 
 
 # ─────────────────────────────────────────────
+# Affaires commerciales
+# ─────────────────────────────────────────────
+
+class AffaireCommercialeViewSet(viewsets.ModelViewSet):
+    serializer_class = AffaireCommercialeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = AffaireCommerciale.objects.select_related("client", "devis_principal", "projet_lie", "cree_par")
+        statut = self.request.query_params.get("statut")
+        if statut:
+            qs = qs.filter(statut=statut)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(
+            reference=self.request.data.get("reference") or generer_reference_affaire(),
+            cree_par=self.request.user,
+        )
+
+    @action(detail=True, methods=["post"], url_path="valider-manuellement")
+    def valider_manuellement(self, request, pk=None):
+        affaire = self.get_object()
+        try:
+            affaire = valider_manuellement_affaire(affaire, request.user, request.data.get("motif") or "")
+        except PermissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(AffaireCommercialeSerializer(affaire).data)
+
+    @action(detail=True, methods=["post"], url_path="creer-projet")
+    def creer_projet(self, request, pk=None):
+        affaire = self.get_object()
+        try:
+            projet = creer_projet_depuis_affaire(
+                affaire,
+                request.user,
+                autoriser_second_projet=_est_super_admin(request.user) and bool(request.data.get("autoriser_second_projet")),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "detail": "Le projet a été créé depuis l'affaire commerciale.",
+                "projet": ProjetDetailSerialiseur(projet, context={"request": request}).data,
+                "affaire": AffaireCommercialeSerializer(affaire).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ─────────────────────────────────────────────
 # Devis d'honoraires
 # ─────────────────────────────────────────────
 
@@ -909,7 +988,7 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = DevisHonoraires.objects.select_related("projet", "cree_par").prefetch_related("lignes")
+        qs = DevisHonoraires.objects.select_related("affaire", "projet", "cree_par").prefetch_related("lignes")
         statut = self.request.query_params.get("statut")
         projet_id = self.request.query_params.get("projet")
         if statut:
@@ -925,7 +1004,12 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         ref = self.request.data.get("reference") or _generer_reference_devis()
-        serializer.save(cree_par=self.request.user, reference=ref)
+        devis = serializer.save(cree_par=self.request.user, reference=ref)
+        if devis.affaire_id:
+            affaire = devis.affaire
+            affaire.devis_principal = devis
+            affaire.statut = "devis_a_preparer"
+            affaire.save(update_fields=["devis_principal", "statut", "date_modification"])
 
     @action(detail=False, methods=["get"])
     def assistant(self, request):
@@ -989,6 +1073,7 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
             devis.date_refus = date.today()
         devis.statut = nouveau_statut
         devis.save(update_fields=champs_a_mettre_a_jour)
+        synchroniser_affaire_depuis_devis(devis)
         return Response(DevisHonorairesDetailSerializer(devis).data)
 
     @action(detail=True, methods=["get"], url_path="export-pdf")
@@ -1011,18 +1096,13 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        expiration_jours = int(request.data.get("expiration_jours") or 14)
+        expiration_defaut = devis.affaire.delai_validite_devis_jours if devis.affaire_id else 14
+        expiration_jours = int(request.data.get("expiration_jours") or expiration_defaut)
         now = timezone.now()
-        devis.jeton_validation_client = generer_jeton_validation()
-        devis.date_expiration_validation = now + timedelta(days=expiration_jours)
+        token_public = preparer_lien_public_devis(devis, expiration_jours=expiration_jours)
         devis.date_envoi_client = now
         devis.statut = "envoye"
-
-        validation_path = reverse(
-            "societe-validation-devis-client",
-            kwargs={"jeton": devis.jeton_validation_client},
-        )
-        validation_url = request.build_absolute_uri(validation_path)
+        validation_url = request.build_absolute_uri(f"/devis/validation/{token_public}")
         pdf = generer_pdf_devis(
             devis,
             validation_url=validation_url,
@@ -1069,12 +1149,11 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
             )
 
         devis.save(update_fields=[
-            "jeton_validation_client",
-            "date_expiration_validation",
             "date_envoi_client",
             "statut",
             "date_modification",
         ])
+        synchroniser_affaire_depuis_devis(devis)
         return Response({
             "detail": "Le devis a été envoyé au client.",
             "validation_url": validation_url,
@@ -1089,6 +1168,21 @@ class DevisHonorairesViewSet(viewsets.ModelViewSet):
                 {"detail": "Un projet est déjà rattaché à ce devis.", "projet_id": str(devis.projet_id)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if devis.affaire_id:
+            try:
+                projet = creer_projet_depuis_affaire(devis.affaire, request.user)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            devis.refresh_from_db()
+            return Response(
+                {
+                    "detail": "Le projet a été créé à partir de l'affaire validée.",
+                    "projet": ProjetDetailSerialiseur(projet, context={"request": request}).data,
+                    "devis": DevisHonorairesDetailSerializer(devis).data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
         if devis.statut != "accepte":
             return Response(
                 {"detail": "Le devis doit être accepté avant de créer un projet."},
@@ -1303,7 +1397,7 @@ class FactureViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = Facture.objects.select_related("projet", "devis", "cree_par").prefetch_related("lignes", "paiements")
+        qs = Facture.objects.select_related("affaire", "projet", "devis", "cree_par").prefetch_related("lignes", "paiements")
         statut = self.request.query_params.get("statut")
         projet_id = self.request.query_params.get("projet")
         en_retard = self.request.query_params.get("en_retard")
@@ -1325,7 +1419,10 @@ class FactureViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         ref = self.request.data.get("reference") or _generer_reference_facture()
-        serializer.save(cree_par=self.request.user, reference=ref)
+        facture = serializer.save(cree_par=self.request.user, reference=ref)
+        if facture.devis_id and not facture.affaire_id:
+            facture.affaire = facture.devis.affaire
+            facture.save(update_fields=["affaire", "date_modification"])
 
     @action(detail=True, methods=["post"])
     def changer_statut(self, request, pk=None):
@@ -1342,10 +1439,97 @@ class FactureViewSet(viewsets.ModelViewSet):
     def enregistrer_paiement(self, request, pk=None):
         """Enregistre un paiement sur la facture."""
         facture = self.get_object()
-        serializer = PaiementSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        paiement = serializer.save(facture=facture, enregistre_par=request.user)
+        paiement = confirmer_paiement_manuel(
+            facture,
+            request.user,
+            montant=Decimal(str(request.data.get("montant") or facture.montant_restant)),
+            mode=request.data.get("mode") or "virement",
+            reference=request.data.get("reference") or "",
+        )
         return Response(PaiementSerializer(paiement).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="paiement/virement")
+    def paiement_virement(self, request, pk=None):
+        facture = self.get_object()
+        paiement = confirmer_paiement_manuel(
+            facture,
+            request.user,
+            montant=Decimal(str(request.data.get("montant") or facture.montant_restant)),
+            mode="virement",
+            reference=request.data.get("reference_virement") or request.data.get("reference") or "",
+        )
+        return Response(PaiementSerializer(paiement).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="paiement/carte/creer-lien")
+    def paiement_carte_lien(self, request, pk=None):
+        facture = self.get_object()
+        return Response(creer_lien_paiement(facture))
+
+    @action(detail=True, methods=["post"], url_path="chorus/preparer")
+    def chorus_preparer(self, request, pk=None):
+        return Response(preparer_facture_chorus(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="chorus/deposer")
+    def chorus_deposer(self, request, pk=None):
+        facture = statut_chorus_manuel(
+            self.get_object(),
+            "deposee",
+            request.data.get("numero_depot") or request.data.get("chorus_numero_depot") or "",
+        )
+        return Response(FactureDetailSerializer(facture).data)
+
+    @action(detail=True, methods=["post"], url_path="chorus/synchroniser")
+    def chorus_synchroniser(self, request, pk=None):
+        return Response(preparer_facture_chorus(self.get_object()))
+
+    @action(detail=True, methods=["patch"], url_path="chorus/statut-manuel")
+    def chorus_statut_manuel(self, request, pk=None):
+        facture = statut_chorus_manuel(
+            self.get_object(),
+            request.data.get("statut") or request.data.get("chorus_statut") or "deposee",
+            request.data.get("numero_depot") or request.data.get("chorus_numero_depot") or "",
+        )
+        return Response(FactureDetailSerializer(facture).data)
+
+    @action(detail=True, methods=["post"], url_path="appliquer-interets")
+    def appliquer_interets(self, request, pk=None):
+        facture = self.get_object()
+        resultat = calculer_interets_moratoires(
+            facture,
+            taux_annuel=Decimal(str(request.data.get("taux_annuel") or "0")),
+            indemnite=Decimal(str(request.data.get("indemnite") or "0")),
+        )
+        if resultat["statut"] == "interets_a_appliquer":
+            facture.interets_moratoires_appliques = True
+            facture.montant_interets_moratoires = resultat["montant"]
+            facture.save(update_fields=["interets_moratoires_appliques", "montant_interets_moratoires", "date_modification"])
+        return Response(resultat)
+
+    @action(detail=True, methods=["post"], url_path="livraisons/preparer")
+    def livraisons_preparer(self, request, pk=None):
+        facture = self.get_object()
+        try:
+            livraisons = preparer_livraison(
+                facture,
+                request.data.get("livrables") or facture.livrables_liberables or [],
+                request.data.get("email") or facture.client_email,
+                request.data.get("condition_livraison") or "paiement_recu",
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(LivraisonLivrableSerializer(livraisons, many=True).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="livraisons/envoyer")
+    def livraisons_envoyer(self, request, pk=None):
+        facture = self.get_object()
+        livraisons = facture.livraisons.all()
+        now = timezone.now()
+        for livraison in livraisons:
+            if livraison.statut == "disponible":
+                livraison.statut = "envoye"
+                livraison.date_envoi = now
+                livraison.save(update_fields=["statut", "date_envoi", "date_modification"])
+        return Response(LivraisonLivrableSerializer(livraisons, many=True).data)
 
     @action(detail=True, methods=["get", "post"], url_path="lignes")
     def lignes(self, request, pk=None):
@@ -1393,6 +1577,28 @@ class FactureViewSet(viewsets.ModelViewSet):
         facture.save(update_fields=["montant_paye"])
         facture.mettre_a_jour_statut()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PaiementViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PaiementSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Paiement.objects.select_related("facture", "affaire", "projet", "enregistre_par").order_by("-date_creation")
+
+
+class LivraisonLivrableViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = LivraisonLivrableSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return LivraisonLivrable.objects.select_related("projet", "affaire", "facture", "document")
+
+
+class RelanceAutomatiqueViewSet(viewsets.ModelViewSet):
+    queryset = RelanceAutomatique.objects.all()
+    serializer_class = RelanceAutomatiqueSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
 
 # ─────────────────────────────────────────────
@@ -1564,6 +1770,50 @@ def vue_previsualiser_simulation(request, profil_pk):
     except Exception as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({k: str(v) for k, v in fiche.items()})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def vue_public_devis(request, token):
+    try:
+        devis = retrouver_devis_par_token_public(token)
+    except DevisHonoraires.DoesNotExist:
+        return Response({"detail": "Lien de devis invalide."}, status=status.HTTP_404_NOT_FOUND)
+    if devis.lien_public_expiration and devis.lien_public_expiration < timezone.now():
+        devis.statut = "expire"
+        devis.save(update_fields=["statut", "date_modification"])
+        return Response({"detail": "Le lien de devis a expiré."}, status=status.HTTP_410_GONE)
+    if devis.statut == "envoye":
+        devis.statut = "consulte"
+        devis.date_consultation = timezone.now()
+        devis.save(update_fields=["statut", "date_consultation", "date_modification"])
+    return Response(DevisHonorairesDetailSerializer(devis).data)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def vue_public_devis_accepter(request, token):
+    try:
+        devis = retrouver_devis_par_token_public(token)
+        devis = accepter_devis_public(devis, request.data or {}, request=request)
+    except DevisHonoraires.DoesNotExist:
+        return Response({"detail": "Lien de devis invalide."}, status=status.HTTP_404_NOT_FOUND)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"detail": "Le devis a été accepté.", "devis": DevisHonorairesDetailSerializer(devis).data})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def vue_public_devis_refuser(request, token):
+    try:
+        devis = retrouver_devis_par_token_public(token)
+        devis = refuser_devis_public(devis, request.data.get("motif_refus") or request.data.get("motif") or "")
+    except DevisHonoraires.DoesNotExist:
+        return Response({"detail": "Lien de devis invalide."}, status=status.HTTP_404_NOT_FOUND)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"detail": "Le devis a été refusé.", "devis": DevisHonorairesDetailSerializer(devis).data})
 
 
 @api_view(["GET"])

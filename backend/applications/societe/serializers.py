@@ -5,6 +5,7 @@ Sérialiseurs — Module Pilotage Société
 from rest_framework import serializers
 from .models import (
     ChargeFixeStructure,
+    AffaireCommerciale,
     ParametreSociete,
     ProfilHoraire,
     ProfilHoraireUtilisateur,
@@ -14,6 +15,8 @@ from .models import (
     Facture,
     LigneFacture,
     Paiement,
+    LivraisonLivrable,
+    RelanceAutomatique,
     TempsPasse,
     ProfilRHSalarie,
     CalendrierTravailSociete,
@@ -357,17 +360,23 @@ class DevisHonorairesListeSerializer(serializers.ModelSerializer):
     projet_intitule = serializers.CharField(source="projet.intitule", read_only=True)
     statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
     validation_client_active = serializers.BooleanField(read_only=True)
+    affaire_reference = serializers.CharField(source="affaire.reference", read_only=True)
+    projet_creable = serializers.SerializerMethodField()
 
     class Meta:
         model = DevisHonoraires
         fields = [
             "id", "reference", "intitule", "statut", "statut_libelle",
+            "affaire", "affaire_reference",
             "famille_client", "sous_type_client", "nature_ouvrage",
             "client_nom", "date_emission", "date_validite",
             "date_envoi_client", "date_validation_client", "validation_client_active",
             "montant_ht", "montant_ttc",
-            "projet", "projet_reference", "projet_intitule",
+            "projet", "projet_reference", "projet_intitule", "projet_creable",
         ]
+
+    def get_projet_creable(self, obj):
+        return obj.statut == "accepte" or bool(obj.affaire and obj.affaire.validation_manuelle_admin)
 
 
 class DevisHonorairesDetailSerializer(serializers.ModelSerializer):
@@ -378,20 +387,26 @@ class DevisHonorairesDetailSerializer(serializers.ModelSerializer):
     statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
     nb_factures = serializers.SerializerMethodField()
     validation_client_active = serializers.BooleanField(read_only=True)
+    affaire_reference = serializers.CharField(source="affaire.reference", read_only=True)
+    projet_creable = serializers.SerializerMethodField()
 
     class Meta:
         model = DevisHonoraires
         fields = [
             "id", "reference", "intitule", "statut", "statut_libelle",
-            "projet", "projet_reference", "projet_intitule",
+            "affaire", "affaire_reference",
+            "projet", "projet_reference", "projet_intitule", "projet_creable",
             "famille_client", "sous_type_client", "contexte_contractuel",
             "nature_ouvrage", "nature_marche", "role_lbh",
             "contexte_projet_saisie", "missions_selectionnees",
             "client_nom", "client_contact", "client_email",
             "client_telephone", "client_adresse",
             "date_emission", "date_validite", "date_acceptation", "date_refus",
+            "date_consultation", "motif_refus",
             "date_envoi_client", "date_validation_client", "date_expiration_validation",
+            "lien_public_expiration",
             "mode_validation", "validation_client_active",
+            "nom_signataire", "email_signataire", "fonction_signataire", "case_conditions_acceptees",
             "taux_tva", "acompte_pct", "delai_paiement_jours",
             "montant_ht", "montant_tva", "montant_ttc",
             "objet", "conditions_particulieres", "notes_internes",
@@ -407,6 +422,39 @@ class DevisHonorairesDetailSerializer(serializers.ModelSerializer):
 
     def get_nb_factures(self, obj):
         return obj.factures.count()
+
+    def get_projet_creable(self, obj):
+        return obj.statut == "accepte" or bool(obj.affaire and obj.affaire.validation_manuelle_admin)
+
+
+class AffaireCommercialeSerializer(serializers.ModelSerializer):
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+    client_nom = serializers.CharField(source="client.nom", read_only=True)
+    devis_principal_reference = serializers.CharField(source="devis_principal.reference", read_only=True)
+    projet_reference = serializers.CharField(source="projet_lie.reference", read_only=True)
+    projet_creable = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AffaireCommerciale
+        fields = [
+            "id", "reference", "intitule", "client", "client_nom",
+            "contact_client", "contact_email", "type_client",
+            "statut", "statut_libelle", "origine", "description",
+            "montant_estime_ht", "montant_estime_ttc", "devise",
+            "cadre_juridique", "mode_commande", "mode_facturation",
+            "mode_paiement_prevu", "delai_validite_devis_jours",
+            "date_derniere_relance", "date_acceptation", "date_refus", "motif_refus",
+            "validation_manuelle_admin", "validation_manuelle_date",
+            "validation_manuelle_motif", "projet_lie", "projet_reference",
+            "devis_principal", "devis_principal_reference", "projet_creable",
+            "donnees_metier", "historique", "date_creation", "date_modification",
+        ]
+        read_only_fields = [
+            "id", "reference", "validation_manuelle_admin", "validation_manuelle_date",
+            "validation_manuelle_motif", "projet_lie", "projet_reference",
+            "devis_principal_reference", "projet_creable", "historique",
+            "date_creation", "date_modification",
+        ]
 
 
 # ─────────────────────────────────────────────
@@ -448,12 +496,42 @@ class PaiementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paiement
         fields = [
-            "id", "date_paiement", "montant", "mode", "mode_libelle",
-            "reference", "notes",
+            "id", "facture", "affaire", "projet",
+            "date_paiement", "montant", "devise", "mode", "mode_libelle",
+            "statut", "reference", "reference_transaction", "reference_banque",
+            "prestataire", "date_initiation", "date_confirmation",
+            "metadata", "rapprochement_bancaire", "notes",
             "enregistre_par", "enregistre_par_nom",
             "date_creation",
         ]
         read_only_fields = ["id", "enregistre_par", "date_creation"]
+
+
+class LivraisonLivrableSerializer(serializers.ModelSerializer):
+    projet_reference = serializers.CharField(source="projet.reference", read_only=True)
+    facture_reference = serializers.CharField(source="facture.reference", read_only=True)
+
+    class Meta:
+        model = LivraisonLivrable
+        fields = [
+            "id", "projet", "projet_reference", "affaire", "facture", "facture_reference",
+            "livrable_code", "document", "statut", "condition_livraison",
+            "expiration", "date_envoi", "date_premier_telechargement",
+            "nombre_telechargements", "email_destinataire",
+            "validation_admin_motif", "historique", "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "historique", "date_creation", "date_modification"]
+
+
+class RelanceAutomatiqueSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RelanceAutomatique
+        fields = [
+            "id", "type", "cible_type", "cible_id", "niveau", "statut",
+            "date_prevue", "date_envoi", "email_destinataire", "objet",
+            "corps", "piece_jointe", "historique", "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "historique", "date_creation", "date_modification"]
 
 
 class TempsPasseSerializer(serializers.ModelSerializer):
@@ -518,6 +596,7 @@ class FactureListeSerializer(serializers.ModelSerializer):
         model = Facture
         fields = [
             "id", "reference", "intitule", "statut", "statut_libelle",
+            "affaire", "type_facture", "mode_paiement", "chorus_statut",
             "client_nom", "date_emission", "date_echeance",
             "montant_ht", "montant_ttc", "montant_paye", "montant_restant",
             "est_en_retard",
@@ -540,14 +619,21 @@ class FactureDetailSerializer(serializers.ModelSerializer):
         model = Facture
         fields = [
             "id", "reference", "intitule", "statut", "statut_libelle",
+            "affaire", "type_facture",
             "devis", "devis_reference",
             "projet", "projet_reference", "projet_intitule",
             "client_nom", "client_contact", "client_email", "client_adresse",
-            "date_emission", "date_echeance",
+            "date_emission", "date_echeance", "date_envoi", "date_paiement",
             "date_relance_1", "date_relance_2", "date_relance_3",
             "taux_tva", "penalites_retard_pct",
             "montant_ht", "montant_tva", "montant_ttc",
             "montant_paye", "montant_restant", "est_en_retard",
+            "mode_paiement", "iban_destination", "bic_destination",
+            "reference_virement", "lien_paiement",
+            "chorus_flux_id", "chorus_numero_depot", "chorus_statut",
+            "chorus_derniere_synchro", "interets_moratoires_appliques",
+            "montant_interets_moratoires", "nombre_relances",
+            "date_derniere_relance", "livrables_liberables",
             "notes", "notes_internes",
             "lignes", "paiements",
             "date_creation", "date_modification",

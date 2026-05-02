@@ -283,11 +283,14 @@ export interface DevisHonoraires {
   id: string;
   reference: string;
   intitule: string;
-  statut: "brouillon" | "envoye" | "accepte" | "refuse" | "expire" | "annule";
+  statut: "brouillon" | "pret" | "envoye" | "consulte" | "accepte" | "refuse" | "expire" | "annule" | "remplace";
   statut_libelle: string;
+  affaire?: string | null;
+  affaire_reference?: string | null;
   projet: string | null;
   projet_reference: string | null;
   projet_intitule: string | null;
+  projet_creable?: boolean;
   famille_client: string;
   sous_type_client: string;
   contexte_contractuel: string;
@@ -308,8 +311,15 @@ export interface DevisHonoraires {
   date_envoi_client: string | null;
   date_validation_client: string | null;
   date_expiration_validation: string | null;
+  date_consultation?: string | null;
+  lien_public_expiration?: string | null;
+  motif_refus?: string;
   mode_validation: "" | "manuel" | "client";
   validation_client_active: boolean;
+  nom_signataire?: string;
+  email_signataire?: string;
+  fonction_signataire?: string;
+  case_conditions_acceptees?: boolean;
   taux_tva: string;
   acompte_pct: string;
   delai_paiement_jours: number;
@@ -321,6 +331,50 @@ export interface DevisHonoraires {
   notes_internes: string;
   lignes: LigneDevis[];
   nb_factures: number;
+  date_creation: string;
+  date_modification: string;
+}
+
+export interface AffaireCommerciale {
+  id: string;
+  reference: string;
+  intitule: string;
+  client: string | null;
+  client_nom: string | null;
+  contact_client: string;
+  contact_email: string;
+  type_client: string;
+  statut:
+    | "brouillon"
+    | "devis_a_preparer"
+    | "devis_envoye"
+    | "devis_accepte"
+    | "devis_refuse"
+    | "affaire_validee"
+    | "affaire_perdue"
+    | "projet_cree"
+    | "archivee";
+  statut_libelle: string;
+  origine: string;
+  description: string;
+  montant_estime_ht: string;
+  montant_estime_ttc: string;
+  devise: string;
+  cadre_juridique: string;
+  mode_commande: string;
+  mode_facturation: string;
+  mode_paiement_prevu: string;
+  delai_validite_devis_jours: number;
+  validation_manuelle_admin: boolean;
+  validation_manuelle_date: string | null;
+  validation_manuelle_motif: string;
+  projet_lie: string | null;
+  projet_reference: string | null;
+  devis_principal: string | null;
+  devis_principal_reference: string | null;
+  projet_creable: boolean;
+  donnees_metier: Record<string, unknown>;
+  historique: unknown[];
   date_creation: string;
   date_modification: string;
 }
@@ -338,11 +392,19 @@ export interface LigneFacture {
 
 export interface Paiement {
   id: string;
+  facture?: string;
+  affaire?: string | null;
+  projet?: string | null;
   date_paiement: string;
   montant: string;
+  devise?: string;
   mode: string;
   mode_libelle: string;
+  statut?: string;
   reference: string;
+  reference_transaction?: string;
+  reference_banque?: string;
+  prestataire?: string;
   notes: string;
   enregistre_par: string | null;
   enregistre_par_nom: string | null;
@@ -353,8 +415,10 @@ export interface Facture {
   id: string;
   reference: string;
   intitule: string;
-  statut: "brouillon" | "emise" | "en_retard" | "partiellement_payee" | "payee" | "annulee" | "avoir";
+  statut: "brouillon" | "emise" | "envoyee" | "deposee_chorus" | "en_attente_paiement" | "en_retard" | "partiellement_payee" | "payee" | "relancee" | "contentieux" | "annulee" | "avoir" | "proforma";
   statut_libelle: string;
+  affaire?: string | null;
+  type_facture?: string;
   devis: string | null;
   devis_reference: string | null;
   projet: string | null;
@@ -366,6 +430,8 @@ export interface Facture {
   client_adresse: string;
   date_emission: string;
   date_echeance: string;
+  date_envoi?: string | null;
+  date_paiement?: string | null;
   date_relance_1: string | null;
   date_relance_2: string | null;
   date_relance_3: string | null;
@@ -376,6 +442,16 @@ export interface Facture {
   montant_ttc: string;
   montant_paye: string;
   montant_restant: string;
+  mode_paiement?: "virement" | "carte" | "chorus_pro" | "mixte";
+  iban_destination?: string;
+  bic_destination?: string;
+  reference_virement?: string;
+  lien_paiement?: string;
+  chorus_numero_depot?: string;
+  chorus_statut?: string;
+  chorus_derniere_synchro?: string | null;
+  montant_interets_moratoires?: string;
+  nombre_relances?: number;
   est_en_retard: boolean;
   notes: string;
   notes_internes: string;

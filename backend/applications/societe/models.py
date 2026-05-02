@@ -683,6 +683,124 @@ class ChargeFixeStructure(models.Model):
 
 
 # ─────────────────────────────────────────────
+# Cycle commercial affaire → devis → projet
+# ─────────────────────────────────────────────
+
+class AffaireCommerciale(models.Model):
+    """Opportunité commerciale pilotant le devis, la validation et la création du projet."""
+
+    STATUTS = [
+        ("brouillon", "Brouillon"),
+        ("devis_a_preparer", "Devis à préparer"),
+        ("devis_envoye", "Devis envoyé"),
+        ("devis_accepte", "Devis accepté"),
+        ("devis_refuse", "Devis refusé"),
+        ("affaire_validee", "Affaire validée"),
+        ("affaire_perdue", "Affaire perdue"),
+        ("projet_cree", "Projet créé"),
+        ("archivee", "Archivée"),
+    ]
+    ORIGINES = [
+        ("manuel", "Manuel"),
+        ("formulaire", "Formulaire"),
+        ("import", "Import"),
+        ("recommandation", "Recommandation"),
+        ("autre", "Autre"),
+    ]
+    CADRES_JURIDIQUES = [
+        ("marche_public", "Marché public"),
+        ("marche_prive", "Marché privé"),
+        ("mixte", "Mixte"),
+        ("hors_marche", "Hors marché / conseil"),
+    ]
+    MODES_COMMANDE = [
+        ("consultation_directe", "Consultation directe"),
+        ("appel_offres", "Appel d'offres"),
+        ("accord_cadre", "Accord-cadre"),
+        ("marche_subsequent", "Marché subséquent"),
+        ("amo", "AMO / conseil"),
+        ("sous_traitance", "Sous-traitance"),
+        ("cotraitance", "Co-traitance"),
+        ("audit", "Audit / expertise"),
+    ]
+    MODES_FACTURATION = [
+        ("forfait", "Forfait"),
+        ("temps_passe", "Temps passé"),
+        ("echeancier", "Échéancier"),
+        ("avancement", "Avancement"),
+        ("mixte", "Mixte"),
+    ]
+    MODES_PAIEMENT = [
+        ("virement", "Virement"),
+        ("carte", "Carte bancaire"),
+        ("chorus_pro", "Chorus Pro"),
+        ("mixte", "Mixte"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reference = models.CharField(max_length=40, unique=True, verbose_name="Référence affaire")
+    intitule = models.CharField(max_length=300, verbose_name="Intitulé")
+    client = models.ForeignKey(
+        "organisations.Organisation", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="affaires_commerciales", verbose_name="Client",
+    )
+    contact_client = models.CharField(max_length=200, blank=True, verbose_name="Contact client")
+    contact_email = models.EmailField(blank=True, verbose_name="Email contact")
+    type_client = models.CharField(max_length=60, blank=True, verbose_name="Type client")
+    statut = models.CharField(max_length=30, choices=STATUTS, default="brouillon")
+    origine = models.CharField(max_length=30, choices=ORIGINES, default="manuel")
+    description = models.TextField(blank=True)
+    montant_estime_ht = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    montant_estime_ttc = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    devise = models.CharField(max_length=3, default="EUR")
+    cadre_juridique = models.CharField(max_length=30, choices=CADRES_JURIDIQUES, default="marche_prive")
+    mode_commande = models.CharField(max_length=30, choices=MODES_COMMANDE, default="consultation_directe")
+    mode_facturation = models.CharField(max_length=30, choices=MODES_FACTURATION, default="forfait")
+    mode_paiement_prevu = models.CharField(max_length=30, choices=MODES_PAIEMENT, default="virement")
+    delai_validite_devis_jours = models.PositiveSmallIntegerField(default=30)
+    date_derniere_relance = models.DateTimeField(null=True, blank=True)
+    date_acceptation = models.DateTimeField(null=True, blank=True)
+    date_refus = models.DateTimeField(null=True, blank=True)
+    motif_refus = models.TextField(blank=True)
+    validation_manuelle_admin = models.BooleanField(default=False)
+    validation_manuelle_par = models.ForeignKey(
+        "comptes.Utilisateur", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="affaires_validees_manuellement",
+    )
+    validation_manuelle_date = models.DateTimeField(null=True, blank=True)
+    validation_manuelle_motif = models.TextField(blank=True)
+    projet_lie = models.OneToOneField(
+        "projets.Projet", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="affaire_commerciale",
+    )
+    devis_principal = models.ForeignKey(
+        "societe.DevisHonoraires", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="affaires_principales",
+    )
+    donnees_metier = models.JSONField(default=dict, blank=True)
+    historique = models.JSONField(default=list, blank=True)
+    cree_par = models.ForeignKey(
+        "comptes.Utilisateur", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="affaires_creees",
+    )
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_affaire_commerciale"
+        verbose_name = "Affaire commerciale"
+        verbose_name_plural = "Affaires commerciales"
+        ordering = ["-date_modification"]
+
+    def __str__(self):
+        return f"{self.reference} — {self.intitule}"
+
+    @property
+    def projet_creable(self):
+        return self.statut in {"devis_accepte", "affaire_validee"} or self.validation_manuelle_admin
+
+
+# ─────────────────────────────────────────────
 # Devis d'honoraires
 # ─────────────────────────────────────────────
 
@@ -694,11 +812,14 @@ class DevisHonoraires(models.Model):
 
     STATUTS = [
         ("brouillon", "Brouillon"),
+        ("pret", "Prêt"),
         ("envoye", "Envoyé"),
+        ("consulte", "Consulté"),
         ("accepte", "Accepté"),
         ("refuse", "Refusé"),
         ("expire", "Expiré"),
         ("annule", "Annulé"),
+        ("remplace", "Remplacé"),
     ]
 
     MODES_VALIDATION = [
@@ -721,6 +842,10 @@ class DevisHonoraires(models.Model):
     projet = models.ForeignKey(
         "projets.Projet", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="devis_honoraires", verbose_name="Projet lié"
+    )
+    affaire = models.ForeignKey(
+        AffaireCommerciale, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="devis", verbose_name="Affaire commerciale",
     )
     intitule = models.CharField(max_length=300, verbose_name="Intitulé de la mission")
     statut = models.CharField(max_length=20, choices=STATUTS, default="brouillon")
@@ -751,6 +876,18 @@ class DevisHonoraires(models.Model):
     jeton_validation_client = models.CharField(
         max_length=64, unique=True, null=True, blank=True, verbose_name="Jeton validation client",
     )
+    lien_public_token_hash = models.CharField(max_length=128, blank=True, db_index=True)
+    lien_public_expiration = models.DateTimeField(null=True, blank=True)
+    date_consultation = models.DateTimeField(null=True, blank=True)
+    motif_refus = models.TextField(blank=True)
+    ip_acceptation = models.GenericIPAddressField(null=True, blank=True)
+    user_agent_acceptation = models.TextField(blank=True)
+    nom_signataire = models.CharField(max_length=200, blank=True)
+    email_signataire = models.EmailField(blank=True)
+    fonction_signataire = models.CharField(max_length=200, blank=True)
+    case_conditions_acceptees = models.BooleanField(default=False)
+    signature_electronique_simple = models.JSONField(default=dict, blank=True)
+    historique_commercial = models.JSONField(default=list, blank=True)
     mode_validation = models.CharField(
         max_length=10, choices=MODES_VALIDATION, blank=True, default="", verbose_name="Mode de validation",
     )
@@ -942,11 +1079,30 @@ class Facture(models.Model):
     STATUTS = [
         ("brouillon", "Brouillon"),
         ("emise", "Émise"),
+        ("envoyee", "Envoyée"),
+        ("deposee_chorus", "Déposée Chorus Pro"),
+        ("en_attente_paiement", "En attente de paiement"),
         ("en_retard", "En retard"),
         ("partiellement_payee", "Partiellement payée"),
         ("payee", "Payée"),
+        ("relancee", "Relancée"),
+        ("contentieux", "Contentieux"),
         ("annulee", "Annulée"),
         ("avoir", "Avoir"),
+        ("proforma", "Proforma"),
+    ]
+    TYPES_FACTURE = [
+        ("acompte", "Acompte"),
+        ("situation", "Situation d'avancement"),
+        ("solde", "Solde"),
+        ("avoir", "Avoir"),
+        ("proforma", "Proforma"),
+    ]
+    MODES_PAIEMENT = [
+        ("virement", "Virement"),
+        ("carte", "Carte bancaire"),
+        ("chorus_pro", "Chorus Pro"),
+        ("mixte", "Mixte"),
     ]
 
     TAUX_TVA = [
@@ -962,11 +1118,16 @@ class Facture(models.Model):
         DevisHonoraires, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="factures", verbose_name="Devis d'origine"
     )
+    affaire = models.ForeignKey(
+        AffaireCommerciale, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="factures", verbose_name="Affaire commerciale",
+    )
     projet = models.ForeignKey(
         "projets.Projet", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="factures", verbose_name="Projet lié"
     )
     intitule = models.CharField(max_length=300, verbose_name="Intitulé")
+    type_facture = models.CharField(max_length=20, choices=TYPES_FACTURE, default="situation")
     statut = models.CharField(max_length=25, choices=STATUTS, default="brouillon")
 
     # Client (copié depuis le devis ou saisi manuellement)
@@ -978,6 +1139,8 @@ class Facture(models.Model):
     # Dates
     date_emission = models.DateField(default=timezone.now, verbose_name="Date d'émission")
     date_echeance = models.DateField(verbose_name="Date d'échéance")
+    date_envoi = models.DateTimeField(null=True, blank=True)
+    date_paiement = models.DateTimeField(null=True, blank=True)
 
     # Jalons de relance (renseignés automatiquement)
     date_relance_1 = models.DateField(null=True, blank=True, verbose_name="1re relance")
@@ -998,6 +1161,21 @@ class Facture(models.Model):
     montant_tva = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     montant_ttc = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     montant_paye = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    mode_paiement = models.CharField(max_length=20, choices=MODES_PAIEMENT, default="virement")
+    iban_destination = models.CharField(max_length=60, blank=True)
+    bic_destination = models.CharField(max_length=30, blank=True)
+    reference_virement = models.CharField(max_length=100, blank=True)
+    lien_paiement = models.URLField(blank=True)
+    chorus_flux_id = models.CharField(max_length=120, blank=True)
+    chorus_numero_depot = models.CharField(max_length=120, blank=True)
+    chorus_statut = models.CharField(max_length=40, blank=True, default="a_deposer")
+    chorus_derniere_synchro = models.DateTimeField(null=True, blank=True)
+    interets_moratoires_appliques = models.BooleanField(default=False)
+    montant_interets_moratoires = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    nombre_relances = models.PositiveSmallIntegerField(default=0)
+    date_derniere_relance = models.DateTimeField(null=True, blank=True)
+    livrables_liberables = models.JSONField(default=list, blank=True)
+    historique_commercial = models.JSONField(default=list, blank=True)
 
     notes = models.TextField(blank=True, verbose_name="Notes / mentions légales")
     notes_internes = models.TextField(blank=True)
@@ -1090,19 +1268,48 @@ class Paiement(models.Model):
         ("cheque", "Chèque"),
         ("especes", "Espèces"),
         ("carte", "Carte bancaire"),
+        ("chorus_pro", "Chorus Pro"),
+        ("manuel", "Manuel"),
         ("prelevement", "Prélèvement automatique"),
         ("autre", "Autre"),
+    ]
+    STATUTS = [
+        ("initie", "Initié"),
+        ("en_attente", "En attente"),
+        ("confirme", "Confirmé"),
+        ("echoue", "Échoué"),
+        ("annule", "Annulé"),
+        ("rembourse", "Remboursé"),
+    ]
+    PRESTATAIRES = [
+        ("stripe", "Stripe"),
+        ("payplug", "PayPlug"),
+        ("payline", "Payline"),
+        ("banque", "Banque"),
+        ("chorus_pro", "Chorus Pro"),
+        ("manuel", "Manuel"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     facture = models.ForeignKey(Facture, on_delete=models.CASCADE, related_name="paiements")
+    affaire = models.ForeignKey(AffaireCommerciale, on_delete=models.SET_NULL, null=True, blank=True, related_name="paiements")
+    projet = models.ForeignKey("projets.Projet", on_delete=models.SET_NULL, null=True, blank=True, related_name="paiements_societe")
     date_paiement = models.DateField(verbose_name="Date de paiement")
     montant = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="Montant encaissé TTC")
+    devise = models.CharField(max_length=3, default="EUR")
     mode = models.CharField(max_length=20, choices=MODES, default="virement")
+    statut = models.CharField(max_length=20, choices=STATUTS, default="confirme")
     reference = models.CharField(
         max_length=100, blank=True, verbose_name="Référence",
         help_text="Numéro de virement, chèque, etc."
     )
+    reference_transaction = models.CharField(max_length=200, blank=True)
+    reference_banque = models.CharField(max_length=200, blank=True)
+    prestataire = models.CharField(max_length=30, choices=PRESTATAIRES, default="manuel")
+    date_initiation = models.DateTimeField(null=True, blank=True)
+    date_confirmation = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    rapprochement_bancaire = models.JSONField(default=dict, blank=True)
     notes = models.TextField(blank=True)
     enregistre_par = models.ForeignKey(
         "comptes.Utilisateur", on_delete=models.PROTECT, null=True
@@ -1119,12 +1326,104 @@ class Paiement(models.Model):
         return f"{self.facture.reference} — {self.montant} € le {self.date_paiement}"
 
     def save(self, *args, **kwargs):
+        if not self.affaire_id and self.facture_id:
+            self.affaire = self.facture.affaire
+        if not self.projet_id and self.facture_id:
+            self.projet = self.facture.projet
         super().save(*args, **kwargs)
         # Recalculer le montant payé sur la facture
-        total_paye = sum(p.montant for p in self.facture.paiements.all())
+        total_paye = sum(p.montant for p in self.facture.paiements.filter(statut="confirme"))
         self.facture.montant_paye = total_paye
-        self.facture.save(update_fields=["montant_paye"])
+        if self.facture.montant_restant <= 0:
+            self.facture.date_paiement = timezone.now()
+            self.facture.save(update_fields=["montant_paye", "date_paiement"])
+        else:
+            self.facture.save(update_fields=["montant_paye"])
         self.facture.mettre_a_jour_statut()
+
+
+class LivraisonLivrable(models.Model):
+    """Lien sécurisé de livraison de livrables conditionné au paiement ou à Chorus Pro."""
+
+    STATUTS = [
+        ("bloque", "Bloqué"),
+        ("disponible", "Disponible"),
+        ("envoye", "Envoyé"),
+        ("telecharge", "Téléchargé"),
+        ("expire", "Expiré"),
+    ]
+    CONDITIONS = [
+        ("paiement_recu", "Paiement reçu"),
+        ("facture_deposee_chorus", "Facture déposée Chorus Pro"),
+        ("validation_admin", "Validation admin"),
+        ("gratuit", "Gratuit"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    projet = models.ForeignKey("projets.Projet", on_delete=models.CASCADE, related_name="livraisons_commerciales")
+    affaire = models.ForeignKey(AffaireCommerciale, on_delete=models.SET_NULL, null=True, blank=True, related_name="livraisons")
+    facture = models.ForeignKey(Facture, on_delete=models.SET_NULL, null=True, blank=True, related_name="livraisons")
+    livrable_code = models.CharField(max_length=120, blank=True)
+    document = models.ForeignKey("documents.Document", on_delete=models.SET_NULL, null=True, blank=True, related_name="livraisons_commerciales")
+    statut = models.CharField(max_length=20, choices=STATUTS, default="bloque")
+    condition_livraison = models.CharField(max_length=30, choices=CONDITIONS, default="paiement_recu")
+    lien_token_hash = models.CharField(max_length=128, blank=True, db_index=True)
+    expiration = models.DateTimeField(null=True, blank=True)
+    date_envoi = models.DateTimeField(null=True, blank=True)
+    date_premier_telechargement = models.DateTimeField(null=True, blank=True)
+    nombre_telechargements = models.PositiveIntegerField(default=0)
+    email_destinataire = models.EmailField(blank=True)
+    validation_admin_motif = models.TextField(blank=True)
+    historique = models.JSONField(default=list, blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_livraison_livrable"
+        ordering = ["-date_creation"]
+
+
+class RelanceAutomatique(models.Model):
+    """Trace et planification des relances devis, factures et paiements."""
+
+    TYPES = [
+        ("devis_en_attente", "Devis en attente"),
+        ("facture_impayee", "Facture impayée"),
+        ("facture_retard", "Facture en retard"),
+        ("paiement_echoue", "Paiement échoué"),
+    ]
+    NIVEAUX = [
+        ("relance_1", "Relance 1"),
+        ("relance_2", "Relance 2"),
+        ("relance_3", "Relance 3"),
+        ("mise_en_demeure", "Mise en demeure"),
+    ]
+    STATUTS = [
+        ("planifiee", "Planifiée"),
+        ("envoyee", "Envoyée"),
+        ("echouee", "Échouée"),
+        ("annulee", "Annulée"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    type = models.CharField(max_length=30, choices=TYPES)
+    cible_type = models.CharField(max_length=60)
+    cible_id = models.CharField(max_length=80)
+    niveau = models.CharField(max_length=30, choices=NIVEAUX, default="relance_1")
+    statut = models.CharField(max_length=20, choices=STATUTS, default="planifiee")
+    date_prevue = models.DateTimeField()
+    date_envoi = models.DateTimeField(null=True, blank=True)
+    email_destinataire = models.EmailField(blank=True)
+    objet = models.CharField(max_length=250, blank=True)
+    corps = models.TextField(blank=True)
+    piece_jointe = models.FileField(upload_to="societe/relances/%Y/%m/", null=True, blank=True)
+    historique = models.JSONField(default=list, blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "societe_relance_automatique"
+        ordering = ["date_prevue"]
 
 
 class TempsPasse(models.Model):

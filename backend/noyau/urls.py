@@ -10,6 +10,7 @@ from django.conf.urls.static import static
 from health_check.views import HealthCheckView
 
 from applications.site_public.views import vue_configuration
+from applications.societe import views as vues_societe
 
 # URL admin personnalisée (définie dans les paramètres, jamais /admin/ en production)
 _url_admin = getattr(settings, "ADMIN_URL", "administration-technique/")
@@ -21,6 +22,11 @@ urlpatterns = [
     # Alias historique de configuration publique
     path("api/config", vue_configuration, name="config-legacy"),
     path("api/config/", vue_configuration, name="config-legacy-slash"),
+
+    # API publique sécurisée — validation client des devis
+    path("api/public/devis/<str:token>/", vues_societe.vue_public_devis, name="public-devis-detail"),
+    path("api/public/devis/<str:token>/accepter/", vues_societe.vue_public_devis_accepter, name="public-devis-accepter"),
+    path("api/public/devis/<str:token>/refuser/", vues_societe.vue_public_devis_refuser, name="public-devis-refuser"),
 
     # API — Authentification et comptes
     path("api/auth/", include("applications.comptes.urls")),

@@ -89,6 +89,7 @@ class ApiProjetsTests(TestCase):
                     "niveau_definition": "apd_pro",
                     "pieces_a_rediger": ["cctp", "dpgf"],
                 },
+                "autorisation_creation_directe": True,
             },
             format="json",
         )
@@ -249,6 +250,7 @@ class ApiProjetsTests(TestCase):
                     "indice_reference": "BT01",
                     "periodicite_revision": "mensuelle",
                 },
+                "autorisation_creation_directe": True,
             },
             format="json",
         )
@@ -287,6 +289,7 @@ class ApiProjetsTests(TestCase):
                 "statut": "en_cours",
                 "organisation": str(self.organisation.id),
                 "preanalyse_sources_id": str(preanalyse.id),
+                "autorisation_creation_directe": True,
             },
             format="json",
         )

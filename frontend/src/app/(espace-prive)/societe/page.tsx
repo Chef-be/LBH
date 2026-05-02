@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
 import { TableauDeBord, DevisHonoraires, Facture, RentabiliteDossier, RentabiliteSalarie, TempsPasse, TableauDeBordRH } from "@/types/societe";
 import { Euro, FileText, Receipt, AlertTriangle, TrendingUp, Clock, Plus, ChevronRight, Users } from "lucide-react";
+import { ModalNouvelleAffaire } from "@/composants/societe/ModalNouvelleAffaire";
 
 function formaterMontant(val: string | number | null | undefined): string {
   if (val == null) return "—";
@@ -80,6 +82,7 @@ function TuileKpi({
 }
 
 export default function PageTableauDeBordSociete() {
+  const [modalAffaireOuverte, setModalAffaireOuverte] = useState(false);
   const { data: tdb, isLoading } = useQuery<TableauDeBord>({
     queryKey: ["societe-tdb"],
     queryFn: () => api.get<TableauDeBord>("/api/societe/tableau-de-bord/"),
@@ -137,14 +140,20 @@ export default function PageTableauDeBordSociete() {
 
       {/* Actions rapides */}
       <div className="flex flex-wrap gap-3">
-        <Link
-          href="/societe/devis/nouveau"
+        <button
+          type="button"
+          onClick={() => setModalAffaireOuverte(true)}
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition hover:opacity-90"
           style={{ background: "var(--c-base)" }}
         >
           <Plus size={14} /> Nouvelle affaire
-        </Link>
+        </button>
       </div>
+
+      <ModalNouvelleAffaire
+        ouvert={modalAffaireOuverte}
+        onFermer={() => setModalAffaireOuverte(false)}
+      />
 
       {tdb?.pilotage_economique ? (
         <section className="rounded-xl p-5" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>

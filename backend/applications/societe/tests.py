@@ -12,10 +12,13 @@ from applications.organisations.models import Organisation
 from applications.projets.models import LivrableType, MissionClient, Projet, AffectationProjet
 from applications.site_public.models import ConfigurationSite
 from .models import (
+    AffaireCommerciale,
     ChargeFixeStructure,
     DevisHonoraires,
+    Facture,
     LigneDevis,
     ParametreSociete,
+    Paiement,
     ProfilHoraire,
     ProfilHoraireUtilisateur,
     SimulationSalaire,
@@ -28,6 +31,7 @@ from .models import (
 )
 from .services import calculer_coefficient_k_societe, calculer_fiche_salaire, calculer_ligne_devis, calculer_taux_moyen_pondere, recalculer_taux_profil
 from .services_assignation import calculer_capacite_salarie, calculer_tableau_bord_rh
+from .services_commercial import preparer_lien_public_devis
 from .views import DevisHonorairesViewSet
 
 
@@ -127,6 +131,22 @@ class ApiSocieteTests(TestCase):
         devis.recalculer_totaux()
         return devis
 
+    def _creer_affaire(self, **kwargs):
+        numero = AffaireCommerciale.objects.count() + 1
+        return AffaireCommerciale.objects.create(
+            reference=kwargs.pop("reference", f"AF-2026-{numero:03d}"),
+            intitule=kwargs.pop("intitule", "Affaire commerciale"),
+            contact_client=kwargs.pop("contact_client", "Mme Test"),
+            contact_email=kwargs.pop("contact_email", "client@example.com"),
+            type_client=kwargs.pop("type_client", "maitrise_ouvrage"),
+            cadre_juridique=kwargs.pop("cadre_juridique", "marche_public"),
+            mode_commande=kwargs.pop("mode_commande", "consultation_directe"),
+            montant_estime_ht=kwargs.pop("montant_estime_ht", Decimal("1140.00")),
+            montant_estime_ttc=kwargs.pop("montant_estime_ttc", Decimal("1368.00")),
+            cree_par=self.utilisateur,
+            **kwargs,
+        )
+
     def test_assistant_reutilise_les_missions_et_livrables_du_wizard_projet(self):
         request = self.factory.get(
             "/api/societe/devis/assistant/",
@@ -185,7 +205,8 @@ class ApiSocieteTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         devis.refresh_from_db()
         self.assertEqual(devis.statut, "envoye")
-        self.assertIsNotNone(devis.jeton_validation_client)
+        self.assertTrue(devis.lien_public_token_hash)
+        self.assertIsNone(devis.jeton_validation_client)
         self.assertIsNotNone(devis.date_envoi_client)
         self.assertTrue(mock_envoyer.called)
 
@@ -220,6 +241,177 @@ class ApiSocieteTests(TestCase):
             projet.qualification_wizard["statuts_livrables"]["cctp-lot"],
             "a_faire",
         )
+
+    def test_creer_affaire_commerciale_depuis_api(self):
+        response = self.client.post(
+            "/api/societe/affaires/",
+            {
+                "intitule": "Revue économique PRO",
+                "contact_client": "Mme Client",
+                "contact_email": "client@example.com",
+                "type_client": "maitrise_ouvrage",
+                "cadre_juridique": "marche_public",
+                "mode_commande": "consultation_directe",
+                "montant_estime_ht": "2500.00",
+                "montant_estime_ttc": "3000.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        affaire = AffaireCommerciale.objects.get(id=response.data["id"])
+        self.assertTrue(affaire.reference.startswith("AF-"))
+        self.assertEqual(affaire.statut, "brouillon")
+
+    def test_lien_public_devis_est_stocke_hashe(self):
+        affaire = self._creer_affaire()
+        devis = self._creer_devis(affaire=affaire)
+        token = preparer_lien_public_devis(devis, expiration_jours=5)
+
+        devis.refresh_from_db()
+        self.assertEqual(devis.statut, "envoye")
+        self.assertTrue(devis.lien_public_token_hash)
+        self.assertNotEqual(devis.lien_public_token_hash, token)
+        self.assertEqual(affaire.devis_principal_id, devis.id)
+
+    def test_acceptation_publique_devis_valide_affaire_et_permet_projet(self):
+        affaire = self._creer_affaire(statut="devis_envoye")
+        devis = self._creer_devis(affaire=affaire, statut="envoye")
+        token = preparer_lien_public_devis(devis, expiration_jours=5)
+
+        client_public = APIClient()
+        response = client_public.post(
+            f"/api/public/devis/{token}/accepter/",
+            {
+                "nom_signataire": "Mme Client",
+                "email_signataire": "client@example.com",
+                "fonction_signataire": "Directrice",
+                "case_conditions_acceptees": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        devis.refresh_from_db()
+        affaire.refresh_from_db()
+        self.assertEqual(devis.statut, "accepte")
+        self.assertEqual(affaire.statut, "devis_accepte")
+        self.assertTrue(affaire.projet_creable)
+
+        creation = self.client.post(f"/api/societe/affaires/{affaire.id}/creer-projet/", {}, format="json")
+        self.assertEqual(creation.status_code, status.HTTP_201_CREATED, creation.data)
+        affaire.refresh_from_db()
+        self.assertEqual(affaire.statut, "projet_cree")
+        self.assertIsNotNone(affaire.projet_lie_id)
+
+    def test_refus_public_devis_bloque_creation_projet(self):
+        affaire = self._creer_affaire(statut="devis_envoye")
+        devis = self._creer_devis(affaire=affaire, statut="envoye")
+        token = preparer_lien_public_devis(devis, expiration_jours=5)
+
+        client_public = APIClient()
+        response = client_public.post(
+            f"/api/public/devis/{token}/refuser/",
+            {"motif_refus": "Budget non retenu"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        affaire.refresh_from_db()
+        devis.refresh_from_db()
+        self.assertEqual(devis.statut, "refuse")
+        self.assertEqual(affaire.statut, "affaire_perdue")
+
+        creation = self.client.post(f"/api/societe/affaires/{affaire.id}/creer-projet/", {}, format="json")
+        self.assertEqual(creation.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_validation_manuelle_super_admin_avec_motif_permet_creation_projet(self):
+        affaire = self._creer_affaire(statut="affaire_perdue")
+        devis = self._creer_devis(affaire=affaire, statut="refuse")
+        affaire.devis_principal = devis
+        affaire.save(update_fields=["devis_principal"])
+
+        response = self.client.post(
+            f"/api/societe/affaires/{affaire.id}/valider-manuellement/",
+            {"motif": "Bon de commande reçu hors portail client."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        affaire.refresh_from_db()
+        self.assertTrue(affaire.validation_manuelle_admin)
+        self.assertEqual(affaire.statut, "affaire_validee")
+
+        creation = self.client.post(f"/api/societe/affaires/{affaire.id}/creer-projet/", {}, format="json")
+        self.assertEqual(creation.status_code, status.HTTP_201_CREATED, creation.data)
+
+    def test_creation_directe_projet_est_bloquee(self):
+        response = self.client.post(
+            "/api/projets/",
+            {"reference": "2026-BLOC", "intitule": "Projet direct bloqué"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("affaire commerciale validée", str(response.data))
+
+    def test_paiement_virement_confirme_facture(self):
+        affaire = self._creer_affaire(statut="devis_accepte")
+        devis = self._creer_devis(affaire=affaire, statut="accepte")
+        facture = Facture.objects.create(
+            reference="FAC-2026-001",
+            devis=devis,
+            affaire=affaire,
+            intitule="Facture acompte",
+            statut="emise",
+            client_nom=devis.client_nom,
+            client_email=devis.client_email,
+            date_echeance=timezone.localdate() + timedelta(days=30),
+            montant_ht=Decimal("100.00"),
+            montant_tva=Decimal("20.00"),
+            montant_ttc=Decimal("120.00"),
+            cree_par=self.utilisateur,
+        )
+
+        response = self.client.post(
+            f"/api/societe/factures/{facture.id}/paiement/virement/",
+            {"montant": "120.00", "reference": "VIR-123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        facture.refresh_from_db()
+        self.assertEqual(facture.statut, "payee")
+        self.assertEqual(Paiement.objects.filter(facture=facture, statut="confirme").count(), 1)
+
+    def test_chorus_pro_manuel_enregistre_numero_depot(self):
+        affaire = self._creer_affaire(statut="devis_accepte")
+        devis = self._creer_devis(affaire=affaire, statut="accepte")
+        facture = Facture.objects.create(
+            reference="FAC-2026-002",
+            devis=devis,
+            affaire=affaire,
+            intitule="Facture Chorus",
+            client_nom=devis.client_nom,
+            client_email=devis.client_email,
+            date_echeance=timezone.localdate() + timedelta(days=30),
+            montant_ht=Decimal("100.00"),
+            montant_tva=Decimal("20.00"),
+            montant_ttc=Decimal("120.00"),
+            mode_paiement="chorus_pro",
+            cree_par=self.utilisateur,
+        )
+
+        response = self.client.patch(
+            f"/api/societe/factures/{facture.id}/chorus/statut-manuel/",
+            {"chorus_statut": "deposee", "chorus_numero_depot": "CHORUS-123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        facture.refresh_from_db()
+        self.assertEqual(facture.chorus_statut, "deposee")
+        self.assertEqual(facture.chorus_numero_depot, "CHORUS-123")
 
     def test_enregistrer_temps_passe_et_remonter_dans_tableau_de_bord(self):
         devis = self._creer_devis(statut="accepte")

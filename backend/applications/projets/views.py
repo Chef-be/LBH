@@ -94,6 +94,13 @@ class VueListeProjets(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serialiseur):
+        qualification = self.request.data.get("qualification_wizard") or {}
+        source_affaire = qualification.get("source_affaire_id") or self.request.data.get("affaire_commerciale_id")
+        autorisation_admin = self.request.data.get("autorisation_creation_directe")
+        if not source_affaire and not (self.request.user.est_super_admin and autorisation_admin):
+            raise ValidationError({
+                "detail": "La création directe d'un projet est bloquée. Créez d'abord une affaire commerciale validée depuis Pilotage société.",
+            })
         projet = serialiseur.save(
             responsable=self.request.user,
             cree_par=self.request.user,

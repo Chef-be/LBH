@@ -21,7 +21,11 @@ from .views import (
     SoldeAbsenceSalarieViewSet,
     CompteurTempsSalarieViewSet,
     DevisHonorairesViewSet,
+    AffaireCommercialeViewSet,
     FactureViewSet,
+    PaiementViewSet,
+    LivraisonLivrableViewSet,
+    RelanceAutomatiqueViewSet,
     vue_tableau_de_bord,
     vue_tableau_de_bord_rh,
     vue_pilotage_economique,
@@ -32,6 +36,9 @@ from .views import (
     vue_capacite_salaries,
     vue_capacite_salarie,
     vue_validation_devis_client,
+    vue_public_devis,
+    vue_public_devis_accepter,
+    vue_public_devis_refuser,
     vue_simulations_profil,
     vue_previsualiser_simulation,
 )
@@ -52,7 +59,11 @@ router.register(r"absences", DemandeAbsenceViewSet, basename="demande-absence")
 router.register(r"soldes-absences", SoldeAbsenceSalarieViewSet, basename="solde-absence-salarie")
 router.register(r"compteurs-temps", CompteurTempsSalarieViewSet, basename="compteur-temps-salarie")
 router.register(r"devis", DevisHonorairesViewSet, basename="devis-honoraires")
+router.register(r"affaires", AffaireCommercialeViewSet, basename="affaire-commerciale")
 router.register(r"factures", FactureViewSet, basename="facture")
+router.register(r"paiements", PaiementViewSet, basename="paiement")
+router.register(r"livraisons", LivraisonLivrableViewSet, basename="livraison-livrable")
+router.register(r"relances", RelanceAutomatiqueViewSet, basename="relance-automatique")
 
 urlpatterns = [
     path("tableau-de-bord/", vue_tableau_de_bord, name="societe-tableau-de-bord"),

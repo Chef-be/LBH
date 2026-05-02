@@ -1,27 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Plus } from "lucide-react";
-import { WizardModalProjet } from "./wizard-modal/WizardModalProjet";
+import Link from "next/link";
+import { Briefcase } from "lucide-react";
 
 export function BoutonNouveauProjet() {
-  const [modalOuvert, setModalOuvert] = useState(false);
-
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setModalOuvert(true)}
-        className="btn-primaire"
-      >
-        <Plus size={16} />
-        Nouveau projet
-      </button>
-
-      <WizardModalProjet
-        ouvert={modalOuvert}
-        onFermer={() => setModalOuvert(false)}
-      />
-    </>
+    <Link href="/societe" className="btn-primaire">
+      <Briefcase size={16} />
+      Créer depuis une affaire validée
+    </Link>
   );
 }

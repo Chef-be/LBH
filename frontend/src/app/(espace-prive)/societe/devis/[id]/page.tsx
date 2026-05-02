@@ -43,11 +43,14 @@ function telechargerBlob(blob: Blob, nomFichier: string) {
 
 const STATUTS_CONFIG: Record<string, { couleur: string; label: string }> = {
   brouillon: { couleur: "var(--texte-3)", label: "Brouillon" },
+  pret: { couleur: "#38bdf8", label: "Prêt" },
   envoye: { couleur: "#f59e0b", label: "Envoyé" },
+  consulte: { couleur: "#8b5cf6", label: "Consulté" },
   accepte: { couleur: "#10b981", label: "Accepté" },
   refuse: { couleur: "#ef4444", label: "Refusé" },
   expire: { couleur: "#6b7280", label: "Expiré" },
   annule: { couleur: "#6b7280", label: "Annulé" },
+  remplace: { couleur: "#6b7280", label: "Remplacé" },
 };
 
 export default function PageDevisDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -157,7 +160,7 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
               </Link>
             </>
           )}
-          {devis.statut === "envoye" && (
+          {(devis.statut === "envoye" || devis.statut === "consulte") && (
             <>
               <button
                 type="button"
@@ -179,7 +182,7 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
               </button>
             </>
           )}
-          {devis.statut === "accepte" && (
+          {(devis.statut === "accepte" || devis.projet_creable) && (
             <>
               {!devis.projet && (
                 <button
@@ -189,7 +192,7 @@ export default function PageDevisDetail({ params }: { params: Promise<{ id: stri
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
                   style={{ background: "#0f766e" }}
                 >
-                  <Briefcase size={13} /> {creerProjet.isPending ? "Création…" : "Créer l'affaire"}
+                  <Briefcase size={13} /> {creerProjet.isPending ? "Création…" : "Créer le projet"}
                 </button>
               )}
               <button
