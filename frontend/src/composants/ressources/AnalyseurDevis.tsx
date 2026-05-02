@@ -9,7 +9,7 @@ import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
 import {
   Upload, FileText, CheckCircle2, AlertCircle, Clock,
   RefreshCw, BookOpen, ChevronDown, ChevronRight,
-  X, Sparkles, Send,
+  X, Sparkles, Send, Eye, TableProperties, AlertTriangle,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -33,19 +33,40 @@ interface DevisAnalyse {
   date_emission: string | null;
   indice_base_code: string;
   indice_base_valeur: number | null;
-  statut: "en_attente" | "en_cours" | "termine" | "erreur";
+  statut: "en_attente" | "en_cours" | "termine" | "a_verifier" | "erreur";
   erreur_detail: string;
   capitalise: boolean;
   lignes_count: number;
+  nb_lignes_detectees: number;
+  nb_lignes_rejetees: number;
+  nb_lignes_a_verifier: number;
+  score_qualite_extraction: number | string;
+  methode_extraction: string;
+  message_analyse: string;
+  texte_extrait_apercu: string;
+  donnees_extraction: Record<string, unknown>;
   date_creation: string;
 }
 
 interface LignePrixMarche {
   id: string;
+  ordre: number;
+  numero: string;
   designation: string;
+  designation_originale: string;
   unite: string;
+  quantite: number | null;
   prix_ht_original: number;
   prix_ht_actualise: number | null;
+  montant_ht: number | null;
+  montant_recalcule_ht: number | null;
+  ecart_montant_ht: number | null;
+  type_ligne: string;
+  statut_controle: "ok" | "alerte" | "erreur" | "ignoree" | "corrigee";
+  score_confiance: number | string;
+  corrections_proposees: string[];
+  donnees_import: Record<string, unknown>;
+  decision_import: string;
   corps_etat: string;
   corps_etat_libelle: string;
   debourse_sec_estime: number | null;
@@ -56,6 +77,17 @@ interface LignePrixMarche {
   est_ligne_commune: boolean;
   nb_occurrences: number;
   ligne_bibliotheque: string | null;
+}
+
+interface DiagnosticExtraction {
+  message_analyse: string;
+  methode_extraction: string;
+  nb_lignes_detectees: number;
+  nb_lignes_rejetees: number;
+  nb_lignes_a_verifier: number;
+  score_qualite_extraction: number | string;
+  texte_extrait_apercu: string;
+  donnees_extraction: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +112,7 @@ const STATUT_CONFIG = {
   en_attente: { label: "En attente", icone: Clock, classe: "text-slate-500 bg-slate-100" },
   en_cours: { label: "Analyse en cours…", icone: RefreshCw, classe: "text-blue-600 bg-blue-50" },
   termine: { label: "Terminé", icone: CheckCircle2, classe: "text-green-600 bg-green-50" },
+  a_verifier: { label: "À vérifier", icone: AlertTriangle, classe: "text-orange-700 bg-orange-50" },
   erreur: { label: "Erreur", icone: AlertCircle, classe: "text-red-600 bg-red-50" },
 };
 
@@ -113,7 +146,11 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
         {deplie ? <ChevronDown className="h-4 w-4 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />}
         <div className="flex-1 min-w-0">
           <p className="font-medium text-slate-800 text-sm truncate">{ligne.designation}</p>
-          <p className="text-xs text-slate-400 mt-0.5">{ligne.corps_etat_libelle || "Corps d'état non identifié"} · {ligne.unite}</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {ligne.numero && <span className="mr-1">{ligne.numero}</span>}
+            {ligne.corps_etat_libelle || "Corps d'état non identifié"} · {ligne.unite}
+            {ligne.quantite != null && <span> · Qté {Number(ligne.quantite).toLocaleString("fr-FR")}</span>}
+          </p>
         </div>
         <div className="flex items-center gap-4 flex-shrink-0">
           {ligne.est_ligne_commune && (
@@ -128,6 +165,9 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
           )}
           <div className="text-right">
             <p className="font-mono font-bold text-slate-800 text-sm">{formaterMontant(ligne.prix_ht_original)}</p>
+            {ligne.montant_ht != null && (
+              <p className="text-xs text-slate-400 font-mono">Total {formaterMontant(ligne.montant_ht)}</p>
+            )}
             {ligne.prix_ht_actualise && ligne.prix_ht_actualise !== ligne.prix_ht_original && (
               <p className="text-xs text-indigo-600 font-mono">→ {formaterMontant(ligne.prix_ht_actualise)} actualisé</p>
             )}
@@ -142,6 +182,17 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
 
       {deplie && (
         <div className="border-t border-slate-100 px-4 py-4 bg-slate-50 space-y-3">
+          {ligne.statut_controle !== "ok" && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
+              Ligne à vérifier
+              {ligne.ecart_montant_ht != null && ligne.ecart_montant_ht > 0 && (
+                <span> · écart calculé {formaterMontant(ligne.ecart_montant_ht)}</span>
+              )}
+              {ligne.corrections_proposees.length > 0 && (
+                <span> · {ligne.corrections_proposees.join(" ")}</span>
+              )}
+            </div>
+          )}
           {ds > 0 && (
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
@@ -212,6 +263,215 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
   );
 }
 
+function ModalMappingDocumentPrix({
+  devis,
+  modeInitial,
+  onFermer,
+}: {
+  devis: DevisAnalyse;
+  modeInitial: "texte" | "mapping";
+  onFermer: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const notifications = useNotifications();
+  const [mode, setMode] = useState<"texte" | "mapping">(modeInitial);
+  const [texteMapping, setTexteMapping] = useState("");
+  const [premiereLigne, setPremiereLigne] = useState(1);
+  const [colonnes, setColonnes] = useState({
+    numero: 0,
+    designation: 1,
+    unite: 2,
+    quantite: 3,
+    prix_unitaire_ht: 4,
+    montant_ht: 5,
+  });
+  const [importEnCours, setImportEnCours] = useState(false);
+
+  const { data: diagnostic, isLoading } = useQuery<DiagnosticExtraction>({
+    queryKey: ["devis-texte-extrait", devis.id],
+    queryFn: () => api.get(`/api/ressources/devis/${devis.id}/texte-extrait/`),
+  });
+
+  const separer = (ligne: string) => ligne
+    .split(/\t|;|,/)
+    .map((cellule) => cellule.trim())
+    .filter(Boolean);
+
+  const lignesSource = texteMapping
+    .split(/\r?\n/)
+    .slice(Math.max(0, premiereLigne - 1))
+    .map(separer)
+    .filter((cellules) => cellules.length >= 3);
+
+  const lireCellule = (cellules: string[], index: number) => cellules[index] ?? "";
+  const apercu = lignesSource.slice(0, 10).map((cellules, index) => ({
+    ordre: index + 1,
+    numero: lireCellule(cellules, colonnes.numero),
+    designation: lireCellule(cellules, colonnes.designation),
+    unite: lireCellule(cellules, colonnes.unite),
+    quantite: lireCellule(cellules, colonnes.quantite),
+    prix_unitaire_ht: lireCellule(cellules, colonnes.prix_unitaire_ht),
+    montant_ht: lireCellule(cellules, colonnes.montant_ht),
+  })).filter((ligne) => ligne.designation && ligne.unite);
+
+  const importerMapping = async () => {
+    const lignes = lignesSource.map((cellules, index) => ({
+      ordre: index + 1,
+      numero: lireCellule(cellules, colonnes.numero),
+      designation: lireCellule(cellules, colonnes.designation),
+      unite: lireCellule(cellules, colonnes.unite),
+      quantite: lireCellule(cellules, colonnes.quantite),
+      prix_unitaire_ht: lireCellule(cellules, colonnes.prix_unitaire_ht),
+      montant_ht: lireCellule(cellules, colonnes.montant_ht),
+    })).filter((ligne) => ligne.designation && ligne.unite);
+
+    if (lignes.length === 0) {
+      notifications.erreur("Aucune ligne exploitable dans le mapping manuel.");
+      return;
+    }
+
+    setImportEnCours(true);
+    try {
+      const resultat = await api.post<{ lignes_importees: number; erreurs: string[] }>(
+        `/api/ressources/devis/${devis.id}/mapping-manuel/`,
+        { lignes }
+      );
+      queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
+      queryClient.invalidateQueries({ queryKey: ["devis-lignes", devis.id] });
+      notifications.succes(`${resultat.lignes_importees} ligne(s) importée(s) par mapping manuel.`);
+      onFermer();
+    } catch (e) {
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Import manuel impossible.");
+    } finally {
+      setImportEnCours(false);
+    }
+  };
+
+  const optionsColonnes = Array.from({ length: 10 }, (_, index) => index);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Diagnostic d’extraction</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{devis.nom_original}</p>
+          </div>
+          <button type="button" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" onClick={onFermer} aria-label="Fermer">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex border-b border-slate-100 px-6 pt-3">
+          <button type="button" className={clsx("px-3 py-2 text-sm font-medium border-b-2", mode === "texte" ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500")} onClick={() => setMode("texte")}>
+            Texte extrait
+          </button>
+          <button type="button" className={clsx("px-3 py-2 text-sm font-medium border-b-2", mode === "mapping" ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500")} onClick={() => setMode("mapping")}>
+            Mapping manuel
+          </button>
+        </div>
+
+        <div className="max-h-[68vh] overflow-y-auto px-6 py-5">
+          {isLoading ? (
+            <div className="py-12 text-center text-sm text-slate-400">Chargement du diagnostic…</div>
+          ) : mode === "texte" ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-3 text-sm">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-400">Méthode utilisée</p>
+                  <p className="font-medium text-slate-800 mt-1">{diagnostic?.methode_extraction || "Non renseignée"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-400">Lignes candidates</p>
+                  <p className="font-mono font-bold text-slate-800 mt-1">{diagnostic?.nb_lignes_detectees ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-400">Lignes rejetées</p>
+                  <p className="font-mono font-bold text-slate-800 mt-1">{diagnostic?.nb_lignes_rejetees ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-400">À vérifier</p>
+                  <p className="font-mono font-bold text-slate-800 mt-1">{diagnostic?.nb_lignes_a_verifier ?? 0}</p>
+                </div>
+              </div>
+              {(diagnostic?.message_analyse || devis.message_analyse || devis.erreur_detail) && (
+                <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+                  {diagnostic?.message_analyse || devis.message_analyse || devis.erreur_detail}
+                </div>
+              )}
+              <pre className="min-h-72 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-950 p-4 text-xs leading-relaxed text-slate-100">
+                {diagnostic?.texte_extrait_apercu || "Aucun aperçu texte disponible."}
+              </pre>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <textarea
+                className="champ-saisie min-h-40 font-mono text-xs"
+                placeholder="Collez ici les lignes du tableau, séparées par tabulations, points-virgules ou virgules."
+                value={texteMapping}
+                onChange={(e) => setTexteMapping(e.target.value)}
+              />
+              <div className="grid grid-cols-7 gap-3 items-end">
+                <div>
+                  <label className="etiquette-champ">1ère ligne</label>
+                  <input className="champ-saisie" type="number" min={1} value={premiereLigne} onChange={(e) => setPremiereLigne(Number(e.target.value) || 1)} />
+                </div>
+                {Object.entries(colonnes).map(([champ, valeur]) => (
+                  <div key={champ}>
+                    <label className="etiquette-champ">{champ.replace("_ht", "").replace(/_/g, " ")}</label>
+                    <select
+                      className="champ-saisie"
+                      value={valeur}
+                      onChange={(e) => setColonnes((c) => ({ ...c, [champ]: Number(e.target.value) }))}
+                    >
+                      {optionsColonnes.map((option) => <option key={option} value={option}>Col. {option + 1}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">Prévisualisation avant import</div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-white text-slate-400">
+                      <tr>
+                        {["N°", "Désignation", "U", "Quantité", "PU", "Montant"].map((titre) => <th key={titre} className="px-3 py-2 text-left font-medium">{titre}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {apercu.length === 0 ? (
+                        <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Aucune ligne en prévisualisation.</td></tr>
+                      ) : apercu.map((ligne) => (
+                        <tr key={ligne.ordre}>
+                          <td className="px-3 py-2">{ligne.numero}</td>
+                          <td className="px-3 py-2 min-w-80">{ligne.designation}</td>
+                          <td className="px-3 py-2">{ligne.unite}</td>
+                          <td className="px-3 py-2 font-mono">{ligne.quantite}</td>
+                          <td className="px-3 py-2 font-mono">{ligne.prix_unitaire_ht}</td>
+                          <td className="px-3 py-2 font-mono">{ligne.montant_ht}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+          <button type="button" className="btn-secondaire" onClick={onFermer}>Fermer</button>
+          {mode === "mapping" && (
+            <button type="button" className="btn-primaire" onClick={importerMapping} disabled={importEnCours}>
+              {importEnCours ? "Import en cours…" : "Importer le mapping"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Composant carte devis
 // ---------------------------------------------------------------------------
@@ -229,11 +489,14 @@ function CarteDevis({
   const Icone = config.icone;
   const [deplie, setDeplie] = useState(false);
   const [capitalEnCours, setCapitalEnCours] = useState(false);
+  const [modalDiagnostic, setModalDiagnostic] = useState<"texte" | "mapping" | null>(null);
+  const aucuneLigne = devis.lignes_count === 0 && (devis.statut === "termine" || devis.statut === "a_verifier");
+  const messageDiagnostic = devis.message_analyse || devis.erreur_detail;
 
   const { data: lignesData } = useQuery<LignePrixMarche[]>({
     queryKey: ["devis-lignes", devis.id],
     queryFn: () => api.get(`/api/ressources/devis/${devis.id}/lignes/`),
-    enabled: deplie && devis.statut === "termine",
+    enabled: deplie && (devis.statut === "termine" || devis.statut === "a_verifier"),
   });
   const lignes: LignePrixMarche[] = Array.isArray(lignesData) ? lignesData : ((lignesData as unknown as { results?: LignePrixMarche[] })?.results ?? []);
 
@@ -279,11 +542,11 @@ function CarteDevis({
           <Icone className="h-3 w-3" />
           {config.label}
         </span>
-        {devis.statut === "termine" && (
+        {(devis.statut === "termine" || devis.statut === "a_verifier") && (
           <span className="text-xs text-slate-500">{devis.lignes_count} ligne(s)</span>
         )}
         <div className="flex items-center gap-2 ml-auto">
-          {devis.statut === "termine" && !devis.capitalise && (
+          {devis.statut === "termine" && devis.lignes_count > 0 && !devis.capitalise && (
             <button type="button" className="btn-primaire text-xs" onClick={capitaliser} disabled={capitalEnCours}>
               <BookOpen className="h-3.5 w-3.5" />
               {capitalEnCours ? "En cours…" : "Capitaliser"}
@@ -294,12 +557,12 @@ function CarteDevis({
               <CheckCircle2 className="h-3 w-3" /> Capitalisé
             </span>
           )}
-          {devis.statut === "erreur" && (
+          {(devis.statut === "erreur" || devis.statut === "a_verifier") && (
             <button type="button" className="btn-secondaire text-xs" onClick={relancer}>
               <RefreshCw className="h-3 w-3" /> Relancer
             </button>
           )}
-          {devis.statut === "termine" && devis.lignes_count > 0 && (
+          {(devis.statut === "termine" || devis.statut === "a_verifier") && devis.lignes_count > 0 && (
             <button type="button" className="btn-secondaire text-xs" onClick={() => setDeplie(!deplie)}>
               {deplie ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
               Lignes
@@ -321,6 +584,45 @@ function CarteDevis({
         </div>
       )}
 
+      {(devis.statut === "a_verifier" || aucuneLigne) && (
+        <div className="border-t border-orange-100 bg-orange-50 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-orange-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-orange-900">Aucune ligne détectée — vérifier l’analyse</p>
+              <p className="mt-1 text-sm text-orange-800">
+                {messageDiagnostic || "Aucune ligne de prix n’a été détectée automatiquement. Le document doit être vérifié ou mappé manuellement."}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" className="btn-secondaire text-xs bg-white" onClick={relancer}>
+                  <RefreshCw className="h-3.5 w-3.5" /> Relancer l’analyse
+                </button>
+                <button type="button" className="btn-secondaire text-xs bg-white" onClick={() => setModalDiagnostic("mapping")}>
+                  <TableProperties className="h-3.5 w-3.5" /> Mapping manuel
+                </button>
+                <button type="button" className="btn-secondaire text-xs bg-white" onClick={() => setModalDiagnostic("texte")}>
+                  <Eye className="h-3.5 w-3.5" /> Voir le texte extrait
+                </button>
+              </div>
+            </div>
+            <div className="hidden sm:grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded-lg bg-white px-3 py-2 border border-orange-100">
+                <p className="text-orange-500">Méthode</p>
+                <p className="font-medium text-orange-900">{devis.methode_extraction || "—"}</p>
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 border border-orange-100">
+                <p className="text-orange-500">Rejets</p>
+                <p className="font-mono font-bold text-orange-900">{devis.nb_lignes_rejetees || 0}</p>
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 border border-orange-100">
+                <p className="text-orange-500">Score</p>
+                <p className="font-mono font-bold text-orange-900">{Number(devis.score_qualite_extraction || 0).toFixed(0)}%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deplie && lignes.length > 0 && (
         <div className="border-t border-slate-100 px-5 py-4 space-y-2 bg-slate-50">
           <div className="flex items-center justify-between mb-3">
@@ -333,6 +635,14 @@ function CarteDevis({
             <LigneSDP key={ligne.id} ligne={ligne} />
           ))}
         </div>
+      )}
+
+      {modalDiagnostic && (
+        <ModalMappingDocumentPrix
+          devis={devis}
+          modeInitial={modalDiagnostic}
+          onFermer={() => setModalDiagnostic(null)}
+        />
       )}
     </div>
   );

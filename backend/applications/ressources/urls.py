@@ -17,6 +17,8 @@ urlpatterns = [
     path("devis/<uuid:pk>/", views.VueDetailDevis.as_view(), name="ressources-devis-detail"),
     path("devis/<uuid:pk>/relancer/", views.vue_relancer_analyse, name="ressources-devis-relancer"),
     path("devis/<uuid:pk>/lignes/", views.vue_lignes_devis, name="ressources-devis-lignes"),
+    path("devis/<uuid:pk>/texte-extrait/", views.vue_texte_extrait_devis, name="ressources-devis-texte-extrait"),
+    path("devis/<uuid:pk>/mapping-manuel/", views.vue_mapping_manuel_devis, name="ressources-devis-mapping-manuel"),
     path("devis/<uuid:pk>/capitaliser/", views.vue_capitaliser_devis, name="ressources-devis-capitaliser"),
     path("devis/vider-expires/", views.vue_vider_devis_expires, name="ressources-devis-vider-expires"),
 

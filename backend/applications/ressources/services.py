@@ -20,6 +20,11 @@ from typing import Optional
 import requests
 from django.db import transaction
 from django.utils import timezone
+from .moteur_import_prix import (
+    detecter_type_document,
+    reconstruire_lignes_depuis_tableaux,
+    reconstruire_lignes_depuis_texte,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -290,89 +295,13 @@ def parser_lignes_devis_depuis_texte(texte_brut: str) -> list[dict]:
     1. Chercher des lignes avec au moins un montant HT lisible (≥ 1 €)
     2. Extraire désignation, unité, quantité, prix unitaire, montant
     """
-    lignes_extraites = []
-
-    # Patterns de lignes de devis typiques
-    # Format : DESIGNATION  UNITE  QUANTITE  PU_HT  MONTANT_HT
-    # Ou : DESIGNATION  PU_HT  (si devis simplifié)
-    _re_ligne_complete = re.compile(
-        r"^(.{5,120}?)\s{2,}"          # désignation (au moins 5 car, séparée par ≥2 espaces)
-        r"(m[l²³23]?|u\.?|ens\.?|forf\.?|kg|t|h|j)\s+"  # unité
-        r"([\d\s]+[.,]\d+)\s+"         # quantité
-        r"([\d\s]+[.,]\d+)\s+"         # prix unitaire HT
-        r"([\d\s]+[.,]\d+)\s*$",       # montant HT
-        re.IGNORECASE,
+    lignes, diagnostic = reconstruire_lignes_depuis_texte(texte_brut)
+    logger.info(
+        "Parser devis adaptatif : %d ligne(s), %d rejet(s)",
+        len(lignes),
+        diagnostic.get("nb_lignes_rejetees", 0),
     )
-
-    _re_ligne_simple = re.compile(
-        r"^(.{10,200}?)\s{2,}"         # désignation (≥10 car, séparée par ≥2 espaces)
-        r"([\d\s]{1,12}[.,]\d{2})\s*$",  # montant ou PU en fin de ligne
-        re.IGNORECASE,
-    )
-
-    # Lignes avec motif montant explicite (chercher des montants ≥ 10 €)
-    _re_montant_fin = re.compile(
-        r"^(.{10,200}?)\s{2,}([\d ]{1,10}[,.]\d{2})\s*$"
-    )
-
-    for ligne in texte_brut.splitlines():
-        ligne = ligne.strip()
-        if not ligne or len(ligne) < 10:
-            continue
-        # Ignorer les lignes d'en-tête typiques
-        if re.match(r"^(désignation|libellé|description|article|total|sous-total|tva|ttc|ht|page)", ligne, re.IGNORECASE):
-            continue
-
-        # Tenter la reconnaissance de ligne complète
-        m = _re_ligne_complete.match(ligne)
-        if m:
-            designation = m.group(1).strip()
-            unite = m.group(2).strip()
-            quantite = _to_decimal_safe(m.group(3))
-            prix_u = _to_decimal_safe(m.group(4))
-            montant = _to_decimal_safe(m.group(5))
-            if prix_u and prix_u >= Decimal("1") and designation:
-                lignes_extraites.append({
-                    "designation": designation,
-                    "unite": unite,
-                    "quantite": float(quantite or 1),
-                    "prix_unitaire": float(prix_u),
-                    "montant": float(montant or (prix_u * (quantite or 1))),
-                })
-                continue
-
-        # Tenter la reconnaissance de ligne simplifiée (désig + montant en fin)
-        m2 = _re_montant_fin.match(ligne)
-        if m2:
-            designation = m2.group(1).strip()
-            montant = _to_decimal_safe(m2.group(2))
-            if montant and montant >= Decimal("10") and designation and len(designation) >= 10:
-                # Chercher une unité dans la désignation
-                unite = ""
-                u_m = _RE_UNITE.search(designation)
-                if u_m:
-                    unite = u_m.group(0)
-                    designation = designation[:u_m.start()].strip()
-                lignes_extraites.append({
-                    "designation": designation,
-                    "unite": unite,
-                    "quantite": 1.0,
-                    "prix_unitaire": float(montant),
-                    "montant": float(montant),
-                })
-                continue
-
-    # Dédoublonnage par désignation normalisée
-    vus = set()
-    lignes_dedup = []
-    for l in lignes_extraites:
-        cle = normaliser_designation(l["designation"])[:60]
-        if cle not in vus:
-            vus.add(cle)
-            lignes_dedup.append(l)
-
-    logger.info("Parser devis : %d lignes trouvées dans le texte brut", len(lignes_dedup))
-    return lignes_dedup
+    return lignes
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +318,13 @@ def analyser_devis(devis_analyse) -> list[dict]:
     from .models import LignePrixMarche
 
     texte_brut = ""
+    tableaux = []
+    diagnostic = {
+        "methode": "service_pdf",
+        "nb_lignes_candidates": 0,
+        "nb_lignes_rejetees": 0,
+        "raisons_rejets": [],
+    }
 
     try:
         with devis_analyse.fichier.open("rb") as f:
@@ -400,6 +336,7 @@ def analyser_devis(devis_analyse) -> list[dict]:
             resp.raise_for_status()
             data = resp.json()
             texte_brut = data.get("texte_brut", "")
+            tableaux = data.get("tableaux") or []
             logger.info(
                 "Service PDF : %d caractères extraits, %d tableaux, %d images",
                 len(texte_brut),
@@ -413,17 +350,24 @@ def analyser_devis(devis_analyse) -> list[dict]:
     except Exception as exc:
         logger.error("Erreur service PDF : %s", exc)
 
-    # Parser le texte brut
-    lignes_brutes = parser_lignes_devis_depuis_texte(texte_brut) if texte_brut else []
+    if tableaux:
+        lignes_brutes, diagnostic_tableaux = reconstruire_lignes_depuis_tableaux(tableaux)
+        diagnostic.update(diagnostic_tableaux)
+    else:
+        lignes_brutes, diagnostic_texte = reconstruire_lignes_depuis_texte(texte_brut) if texte_brut else ([], diagnostic)
+        diagnostic.update(diagnostic_texte)
+
+    if not lignes_brutes and texte_brut:
+        lignes_brutes, diagnostic_texte = reconstruire_lignes_depuis_texte(texte_brut)
+        diagnostic.update(diagnostic_texte)
 
     # Récupérer l'indice courant pour actualisation
     indice_actuel = indice_bt_courant(devis_analyse.indice_base_code or "BT01")
     indice_base = devis_analyse.indice_base_valeur
 
     lignes_extraites = []
-    seuil = seuil_similarite()
-
     with transaction.atomic():
+        LignePrixMarche.objects.filter(devis_source=devis_analyse).delete()
         for ligne in lignes_brutes:
             designation = str(ligne.get("designation", "")).strip()
             if not designation:
@@ -457,47 +401,53 @@ def analyser_devis(devis_analyse) -> list[dict]:
                 prix_actualise = actualiser_prix(prix_ht, indice_base, indice_actuel)
 
             designation_norm = normaliser_designation(designation)
-            ligne_existante = trouver_ligne_similaire(designation_norm, code_lot, seuil)
-
-            if ligne_existante:
-                n = ligne_existante.nb_occurrences
-                nouveau_prix = ((ligne_existante.prix_ht_original * n + prix_ht) / (n + 1)).quantize(Decimal("0.0001"))
-                ligne_existante.prix_ht_original = nouveau_prix
-                ligne_existante.nb_occurrences = n + 1
-                ligne_existante.est_ligne_commune = True
-                if prix_actualise and indice_base:
-                    ligne_existante.prix_ht_actualise = actualiser_prix(nouveau_prix, indice_base, indice_actuel)
-                ligne_existante.save()
-                ligne_marche = ligne_existante
-                est_fusion = True
-            else:
-                ligne_marche = LignePrixMarche.objects.create(
-                    devis_source=devis_analyse,
-                    designation=designation,
-                    designation_normalisee=designation_norm,
-                    unite=unite,
-                    prix_ht_original=prix_ht,
-                    prix_ht_actualise=prix_actualise,
-                    date_indice_actualisation=timezone.now().date() if prix_actualise else None,
-                    indice_code=devis_analyse.indice_base_code or "BT01",
-                    indice_valeur_base=indice_base,
-                    indice_valeur_actuelle=indice_actuel,
-                    localite=devis_analyse.localite or "",
-                    corps_etat=code_lot,
-                    corps_etat_libelle=libelle_lot,
-                    debourse_sec_estime=sdp.get("debourse_sec"),
-                    kpv_estime=sdp.get("kpv"),
-                    pct_mo_estime=sdp.get("pct_mo"),
-                    pct_materiaux_estime=sdp.get("pct_materiaux"),
-                    pct_materiel_estime=sdp.get("pct_materiel"),
-                )
-                est_fusion = False
+            ligne_proche = trouver_ligne_similaire(designation_norm, code_lot, seuil_similarite())
+            ligne_marche = LignePrixMarche.objects.create(
+                devis_source=devis_analyse,
+                ordre=int(ligne.get("ordre") or 0),
+                numero=str(ligne.get("numero") or ""),
+                designation=designation,
+                designation_originale=str(ligne.get("designation_originale") or designation),
+                designation_normalisee=designation_norm,
+                unite=unite,
+                quantite=quantite,
+                prix_ht_original=prix_ht,
+                montant_ht=montant_ht if montant_ht > 0 else None,
+                montant_recalcule_ht=ligne.get("montant_recalcule"),
+                ecart_montant_ht=ligne.get("ecart_montant"),
+                type_ligne=str(ligne.get("type_ligne") or "article"),
+                statut_controle=str(ligne.get("statut_controle") or "ok"),
+                score_confiance=ligne.get("score_confiance") or Decimal("0.80"),
+                corrections_proposees=ligne.get("corrections_proposees") or [],
+                donnees_import={
+                    "ligne_prix_marche_proche": str(ligne_proche.id) if ligne_proche else "",
+                    "score_similarite": similarite_cosinus(designation_norm, ligne_proche.designation_normalisee) if ligne_proche else 0,
+                    "methode_extraction": diagnostic.get("methode"),
+                },
+                decision_import="a_decider",
+                prix_ht_actualise=prix_actualise,
+                date_indice_actualisation=timezone.now().date() if prix_actualise else None,
+                indice_code=devis_analyse.indice_base_code or "BT01",
+                indice_valeur_base=indice_base,
+                indice_valeur_actuelle=indice_actuel,
+                localite=devis_analyse.localite or "",
+                corps_etat=code_lot,
+                corps_etat_libelle=libelle_lot,
+                debourse_sec_estime=sdp.get("debourse_sec"),
+                kpv_estime=sdp.get("kpv"),
+                pct_mo_estime=sdp.get("pct_mo"),
+                pct_materiaux_estime=sdp.get("pct_materiaux"),
+                pct_materiel_estime=sdp.get("pct_materiel"),
+            )
+            est_fusion = False
 
             lignes_extraites.append({
                 "id": str(ligne_marche.id),
+                "numero": ligne_marche.numero,
                 "designation": designation,
                 "unite": unite,
                 "quantite": float(quantite),
+                "montant_ht": float(montant_ht) if montant_ht else None,
                 "prix_ht_original": float(prix_ht),
                 "prix_ht_actualise": float(prix_actualise) if prix_actualise else None,
                 "corps_etat": code_lot,
@@ -505,6 +455,34 @@ def analyser_devis(devis_analyse) -> list[dict]:
                 "sdp": {k: float(v) for k, v in sdp.items() if isinstance(v, Decimal)},
                 "est_fusion": est_fusion,
             })
+
+        nb_verifier = LignePrixMarche.objects.filter(devis_source=devis_analyse, statut_controle__in=["alerte", "erreur"]).count()
+        nb_detectees = len(lignes_extraites)
+        devis_analyse.nb_lignes_detectees = nb_detectees
+        devis_analyse.nb_lignes_rejetees = int(diagnostic.get("nb_lignes_rejetees") or 0)
+        devis_analyse.nb_lignes_a_verifier = nb_verifier
+        devis_analyse.methode_extraction = str(diagnostic.get("methode") or "texte_adaptatif")
+        devis_analyse.texte_extrait_apercu = texte_brut[:12000]
+        devis_analyse.donnees_extraction = {
+            **diagnostic,
+            "type_document_detecte": detecter_type_document(texte_brut, devis_analyse.nom_original),
+        }
+        devis_analyse.score_qualite_extraction = Decimal("0") if nb_detectees == 0 else min(
+            Decimal("100"),
+            Decimal("70") + Decimal(min(nb_detectees, 20)),
+        )
+        if nb_detectees:
+            devis_analyse.message_analyse = f"{nb_detectees} ligne(s) de prix détectée(s)."
+        else:
+            devis_analyse.message_analyse = (
+                "Aucune ligne de prix n’a été détectée automatiquement. "
+                "Le document doit être vérifié ou mappé manuellement."
+            )
+        devis_analyse.save(update_fields=[
+            "nb_lignes_detectees", "nb_lignes_rejetees", "nb_lignes_a_verifier",
+            "score_qualite_extraction", "methode_extraction", "message_analyse",
+            "texte_extrait_apercu", "donnees_extraction", "date_modification",
+        ])
 
     return lignes_extraites
 
@@ -728,14 +706,23 @@ def capitaliser_ligne_en_bibliotheque(ligne_marche) -> "LignePrixBibliotheque":
         ligne_bib, creee = LignePrixBibliotheque.objects.update_or_create(
             designation_courte=ligne_marche.designation[:200],
             defaults={
+                "code": ligne_marche.numero or f"MAR-{str(ligne_marche.id)[:8]}",
                 "unite": ligne_marche.unite or "U",
                 "prix_vente_unitaire": prix_ref,
                 "debourse_sec_unitaire": sdp["debourse_sec"],
+                "temps_main_oeuvre": Decimal("0"),
+                "cout_horaire_mo": Decimal("0"),
                 "cout_matieres": sdp["montant_materiaux"],
                 "cout_materiel": sdp["montant_materiel"],
-                "cout_main_oeuvre": sdp["montant_mo"],
+                "cout_consommables": Decimal("0"),
+                "cout_sous_traitance": Decimal("0"),
+                "cout_transport": Decimal("0"),
                 "cout_frais_divers": sdp["montant_divers"],
                 "famille": ligne_marche.corps_etat_libelle or "",
+                "designation_longue": ligne_marche.designation,
+                "source_ds": "estimation_inverse",
+                "ds_justifie_par_sdp": False,
+                "message_controle_sdp_ds": "DS estimé depuis un prix marché importé.",
                 "source": f"Prix marché — {ligne_marche.localite or 'France'}",
                 "lot_cctp_reference": lot,
             },

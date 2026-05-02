@@ -19,7 +19,11 @@ class LignePrixMarcheSerialiseur(serializers.ModelSerializer):
         model = LignePrixMarche
         fields = [
             "id", "devis_source", "designation", "designation_normalisee",
-            "unite", "prix_ht_original", "prix_ht_actualise",
+            "ordre", "numero", "designation_originale",
+            "unite", "quantite", "prix_ht_original", "prix_ht_actualise",
+            "montant_ht", "montant_recalcule_ht", "ecart_montant_ht",
+            "type_ligne", "statut_controle", "score_confiance",
+            "corrections_proposees", "donnees_import", "decision_import",
             "date_indice_actualisation", "indice_code", "indice_valeur_base",
             "indice_valeur_actuelle", "localite",
             "corps_etat", "corps_etat_libelle",
@@ -52,9 +56,18 @@ class DevisAnalyseSerialiseur(serializers.ModelSerializer):
             "indice_base_code", "indice_base_valeur",
             "statut", "erreur_detail", "date_suppression_programmee",
             "capitalise", "lignes_count",
+            "nb_lignes_detectees", "nb_lignes_rejetees", "nb_lignes_a_verifier",
+            "score_qualite_extraction", "methode_extraction", "message_analyse",
+            "texte_extrait_apercu", "donnees_extraction",
             "date_creation", "date_modification",
         ]
-        read_only_fields = ["id", "nom_original", "statut", "erreur_detail", "capitalise", "date_creation", "date_modification"]
+        read_only_fields = [
+            "id", "nom_original", "statut", "erreur_detail", "capitalise",
+            "nb_lignes_detectees", "nb_lignes_rejetees", "nb_lignes_a_verifier",
+            "score_qualite_extraction", "methode_extraction", "message_analyse",
+            "texte_extrait_apercu", "donnees_extraction",
+            "date_creation", "date_modification",
+        ]
 
     def get_lignes_count(self, obj) -> int:
         return obj.lignes.count()

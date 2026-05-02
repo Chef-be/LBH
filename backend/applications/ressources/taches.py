@@ -24,9 +24,22 @@ def tache_analyser_devis(self, devis_id: str) -> dict:
 
     try:
         lignes = analyser_devis(devis)
+        nb_lignes = len(lignes)
+        if nb_lignes == 0:
+            message = (
+                "Aucune ligne de prix n’a été détectée automatiquement. "
+                "Le document doit être vérifié ou mappé manuellement."
+            )
+            devis.statut = "a_verifier"
+            devis.erreur_detail = message
+            devis.message_analyse = message
+            devis.save(update_fields=["statut", "erreur_detail", "message_analyse"])
+            return {"lignes_extraites": 0, "statut": "a_verifier"}
+
         devis.statut = "termine"
-        devis.save(update_fields=["statut"])
-        return {"lignes_extraites": len(lignes)}
+        devis.erreur_detail = ""
+        devis.save(update_fields=["statut", "erreur_detail"])
+        return {"lignes_extraites": nb_lignes, "statut": "termine"}
     except Exception as exc:
         logger.exception("Erreur analyse devis %s : %s", devis_id, exc)
         devis.statut = "erreur"

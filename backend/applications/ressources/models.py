@@ -88,6 +88,7 @@ class DevisAnalyse(models.Model):
         ("en_attente", "En attente"),
         ("en_cours", "Analyse en cours"),
         ("termine", "Terminé"),
+        ("a_verifier", "À vérifier"),
         ("erreur", "Erreur"),
     ]
 
@@ -110,6 +111,14 @@ class DevisAnalyse(models.Model):
     )
     statut = models.CharField(max_length=20, choices=STATUTS, default="en_attente", verbose_name="Statut")
     erreur_detail = models.TextField(blank=True, verbose_name="Détail de l'erreur")
+    nb_lignes_detectees = models.PositiveIntegerField(default=0)
+    nb_lignes_rejetees = models.PositiveIntegerField(default=0)
+    nb_lignes_a_verifier = models.PositiveIntegerField(default=0)
+    score_qualite_extraction = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    methode_extraction = models.CharField(max_length=80, blank=True)
+    message_analyse = models.TextField(blank=True)
+    texte_extrait_apercu = models.TextField(blank=True)
+    donnees_extraction = models.JSONField(default=dict, blank=True)
     date_suppression_programmee = models.DateField(
         null=True, blank=True,
         verbose_name="Suppression programmée le",
@@ -147,14 +156,57 @@ class LignePrixMarche(models.Model):
         related_name="lignes",
         verbose_name="Devis source",
     )
+    ordre = models.PositiveIntegerField(default=0)
+    numero = models.CharField(max_length=80, blank=True)
     designation = models.CharField(max_length=500, verbose_name="Désignation")
+    designation_originale = models.TextField(blank=True)
     designation_normalisee = models.CharField(
         max_length=500, blank=True,
         verbose_name="Désignation normalisée",
         help_text="Version nettoyée pour la détection de similarité.",
     )
     unite = models.CharField(max_length=20, blank=True, verbose_name="Unité")
+    quantite = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
     prix_ht_original = models.DecimalField(max_digits=12, decimal_places=4, verbose_name="Prix HT original (€)")
+    montant_ht = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    montant_recalcule_ht = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    ecart_montant_ht = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    type_ligne = models.CharField(
+        max_length=30,
+        choices=[
+            ("article", "Article"),
+            ("titre", "Titre"),
+            ("sous_total", "Sous-total"),
+            ("total", "Total"),
+            ("commentaire", "Commentaire"),
+        ],
+        default="article",
+    )
+    statut_controle = models.CharField(
+        max_length=30,
+        choices=[
+            ("ok", "OK"),
+            ("alerte", "Alerte"),
+            ("erreur", "Erreur"),
+            ("ignoree", "Ignorée"),
+            ("corrigee", "Corrigée"),
+        ],
+        default="ok",
+    )
+    score_confiance = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    corrections_proposees = models.JSONField(default=list, blank=True)
+    donnees_import = models.JSONField(default=dict, blank=True)
+    decision_import = models.CharField(
+        max_length=30,
+        choices=[
+            ("a_decider", "À décider"),
+            ("importer", "Importer"),
+            ("ignorer", "Ignorer"),
+            ("fusionner", "Fusionner"),
+            ("mettre_a_jour", "Mettre à jour"),
+        ],
+        default="a_decider",
+    )
     prix_ht_actualise = models.DecimalField(
         max_digits=12, decimal_places=4, null=True, blank=True,
         verbose_name="Prix HT actualisé (€)",

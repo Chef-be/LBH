@@ -151,7 +151,16 @@ def vue_relancer_analyse(request, pk):
     devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
     devis.statut = "en_attente"
     devis.erreur_detail = ""
-    devis.save(update_fields=["statut", "erreur_detail"])
+    devis.message_analyse = ""
+    devis.nb_lignes_detectees = 0
+    devis.nb_lignes_rejetees = 0
+    devis.nb_lignes_a_verifier = 0
+    devis.score_qualite_extraction = 0
+    devis.save(update_fields=[
+        "statut", "erreur_detail", "message_analyse",
+        "nb_lignes_detectees", "nb_lignes_rejetees",
+        "nb_lignes_a_verifier", "score_qualite_extraction",
+    ])
     try:
         from .taches import tache_analyser_devis
         tache_analyser_devis.delay(str(devis.id))
@@ -169,11 +178,113 @@ def vue_lignes_devis(request, pk):
     return Response(serialiseur.data)
 
 
+@api_view(["GET"])
+def vue_texte_extrait_devis(request, pk):
+    """Retourne le diagnostic et l'aperçu du texte extrait d'un devis."""
+    devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
+    return Response({
+        "id": str(devis.id),
+        "nom_original": devis.nom_original,
+        "statut": devis.statut,
+        "message_analyse": devis.message_analyse or devis.erreur_detail,
+        "methode_extraction": devis.methode_extraction,
+        "nb_lignes_detectees": devis.nb_lignes_detectees,
+        "nb_lignes_rejetees": devis.nb_lignes_rejetees,
+        "nb_lignes_a_verifier": devis.nb_lignes_a_verifier,
+        "score_qualite_extraction": devis.score_qualite_extraction,
+        "texte_extrait_apercu": devis.texte_extrait_apercu,
+        "donnees_extraction": devis.donnees_extraction,
+    })
+
+
+@api_view(["POST"])
+def vue_mapping_manuel_devis(request, pk):
+    """Importe des lignes de prix validées manuellement depuis l'interface de mapping."""
+    from decimal import Decimal, InvalidOperation
+    from .services import detecter_corps_etat, estimer_sdp_depuis_prix, normaliser_designation
+
+    devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
+    lignes = request.data.get("lignes") or []
+    if not isinstance(lignes, list) or not lignes:
+        return Response({"detail": "Aucune ligne de mapping à importer."}, status=status.HTTP_400_BAD_REQUEST)
+
+    creees = 0
+    erreurs = []
+    for index, ligne in enumerate(lignes, start=1):
+        designation = str(ligne.get("designation") or "").strip()
+        if not designation:
+            erreurs.append(f"Ligne {index} : désignation manquante.")
+            continue
+        try:
+            quantite = Decimal(str(ligne.get("quantite") or "1").replace(",", "."))
+            prix_unitaire = Decimal(str(ligne.get("prix_unitaire_ht") or ligne.get("prix_unitaire") or "0").replace(",", "."))
+            montant = Decimal(str(ligne.get("montant_ht") or "0").replace(",", "."))
+        except (InvalidOperation, TypeError):
+            erreurs.append(f"Ligne {index} : valeur numérique invalide.")
+            continue
+        if prix_unitaire <= 0 and montant > 0 and quantite > 0:
+            prix_unitaire = (montant / quantite).quantize(Decimal("0.0001"))
+        if prix_unitaire <= 0:
+            erreurs.append(f"Ligne {index} : prix unitaire manquant.")
+            continue
+
+        corps_code, corps_libelle = detecter_corps_etat(designation)
+        sdp = estimer_sdp_depuis_prix(prix_unitaire, corps_libelle)
+        LignePrixMarche.objects.create(
+            devis_source=devis,
+            ordre=int(ligne.get("ordre") or index),
+            numero=str(ligne.get("numero") or ""),
+            designation=designation,
+            designation_originale=str(ligne.get("designation_originale") or designation),
+            designation_normalisee=normaliser_designation(designation),
+            unite=str(ligne.get("unite") or "U"),
+            quantite=quantite,
+            prix_ht_original=prix_unitaire,
+            montant_ht=montant if montant > 0 else (quantite * prix_unitaire).quantize(Decimal("0.01")),
+            montant_recalcule_ht=(quantite * prix_unitaire).quantize(Decimal("0.01")),
+            ecart_montant_ht=abs(((quantite * prix_unitaire).quantize(Decimal("0.01"))) - montant) if montant > 0 else Decimal("0"),
+            type_ligne="article",
+            statut_controle="corrigee",
+            score_confiance=Decimal("0.90"),
+            corrections_proposees=["Ligne créée par mapping manuel."],
+            donnees_import={"methode_extraction": "mapping_manuel"},
+            decision_import="importer",
+            indice_code=devis.indice_base_code or "BT01",
+            indice_valeur_base=devis.indice_base_valeur,
+            localite=devis.localite or "",
+            corps_etat=corps_code,
+            corps_etat_libelle=corps_libelle,
+            debourse_sec_estime=sdp.get("debourse_sec"),
+            kpv_estime=sdp.get("kpv"),
+            pct_mo_estime=sdp.get("pct_mo"),
+            pct_materiaux_estime=sdp.get("pct_materiaux"),
+            pct_materiel_estime=sdp.get("pct_materiel"),
+        )
+        creees += 1
+
+    if creees:
+        devis.statut = "termine"
+        devis.erreur_detail = ""
+        devis.message_analyse = f"{creees} ligne(s) importée(s) par mapping manuel."
+        devis.nb_lignes_detectees = devis.lignes.count()
+        devis.methode_extraction = "mapping_manuel"
+        devis.save(update_fields=[
+            "statut", "erreur_detail", "message_analyse",
+            "nb_lignes_detectees", "methode_extraction",
+        ])
+    return Response({"lignes_importees": creees, "erreurs": erreurs})
+
+
 @api_view(["POST"])
 def vue_capitaliser_devis(request, pk):
     """Capitalise toutes les lignes d'un devis en bibliothèque."""
     from .services import capitaliser_ligne_en_bibliotheque
     devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
+    if not LignePrixMarche.objects.filter(devis_source=devis).exists():
+        return Response(
+            {"detail": "Aucune ligne à capitaliser. Lancez une nouvelle analyse ou effectuez un mapping manuel."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     lignes = LignePrixMarche.objects.filter(devis_source=devis, ligne_bibliotheque__isnull=True)
     nb = 0
     erreurs = []
@@ -183,8 +294,9 @@ def vue_capitaliser_devis(request, pk):
             nb += 1
         except Exception as exc:
             erreurs.append(str(exc))
-    devis.capitalise = True
-    devis.save(update_fields=["capitalise"])
+    if nb > 0:
+        devis.capitalise = True
+        devis.save(update_fields=["capitalise"])
     return Response({"capitalise": nb, "erreurs": erreurs})
 
 
