@@ -97,6 +97,42 @@ interface DiagnosticExtraction {
   donnees_extraction: Record<string, unknown>;
 }
 
+interface TableauMappingPrix {
+  id: string;
+  libelle: string;
+  lignes: string[][];
+  nb_lignes: number;
+  nb_colonnes: number;
+}
+
+interface PreparationMappingPrix {
+  texte_extrait: string;
+  tableaux: TableauMappingPrix[];
+  colonnes_candidates: Record<string, { index: number; libelle: string }>;
+  champs_mapping: string[];
+  separateurs_description: string[];
+  apercu_structure: Record<string, unknown>;
+}
+
+interface LignePreviewMappingPrix {
+  ordre: number;
+  numero: string;
+  chapitre: string;
+  designation: string;
+  description: string;
+  unite: string;
+  quantite: string | number | null;
+  prix_unitaire_ht: string | number | null;
+  montant_ht: string | number | null;
+  montant_recalcule_ht: string | number | null;
+  ecart_montant_ht: string | number | null;
+  type_ligne: string;
+  statut_controle: "ok" | "alerte" | "erreur" | "ignoree" | "corrigee";
+  statut: string;
+  capitalisable: boolean;
+  alertes: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -341,198 +377,334 @@ function ModalMappingDocumentPrix({
 }) {
   const queryClient = useQueryClient();
   const notifications = useNotifications();
-  const [mode, setMode] = useState<"texte" | "mapping">(modeInitial);
+  const [etape, setEtape] = useState(modeInitial === "texte" ? 1 : 2);
+  const [tableauId, setTableauId] = useState("texte_extrait");
   const [texteMapping, setTexteMapping] = useState("");
-  const [premiereLigne, setPremiereLigne] = useState(1);
-  const [colonnes, setColonnes] = useState({
+  const [colonnes, setColonnes] = useState<Record<string, number | "">>({
     numero: 0,
+    chapitre: "",
+    sous_chapitre: "",
     designation: 1,
+    description: "",
     unite: 2,
     quantite: 3,
     prix_unitaire_ht: 4,
     montant_ht: 5,
+    total_ht: "",
+    lot: "",
+    corps_etat: "",
+    observation: "",
+    ignorer: "",
   });
-  const [importEnCours, setImportEnCours] = useState(false);
+  const [regles, setRegles] = useState({
+    premiere_ligne: 2,
+    derniere_ligne: 0,
+    ignorer_entetes: true,
+    ignorer_sous_totaux: true,
+    ignorer_totaux: true,
+    fusionner_lignes_multilignes: true,
+    utiliser_ligne_precedente_comme_chapitre: true,
+    cellules_vides_continuation_designation: true,
+    separateur_description: "",
+  });
+  const [preview, setPreview] = useState<{ lignes: LignePreviewMappingPrix[]; resume: Record<string, number> } | null>(null);
+  const [chargementAction, setChargementAction] = useState(false);
+  const [nomModele, setNomModele] = useState("");
 
-  const { data: diagnostic, isLoading } = useQuery<DiagnosticExtraction>({
-    queryKey: ["devis-texte-extrait", devis.id],
-    queryFn: () => api.get(`/api/ressources/devis/${devis.id}/texte-extrait/`),
+  const { data: preparation, isLoading } = useQuery<PreparationMappingPrix>({
+    queryKey: ["devis-mapping-preparer", devis.id],
+    queryFn: () => api.get(`/api/ressources/devis/${devis.id}/mapping/preparer/`),
   });
 
-  const separer = (ligne: string) => ligne
-    .split(/\t|;|,/)
-    .map((cellule) => cellule.trim())
-    .filter(Boolean);
+  const tableaux = preparation?.tableaux ?? [];
+  const tableauActif = tableaux.find((tableau) => tableau.id === tableauId) ?? tableaux[0];
+  const nbColonnes = Math.max(10, tableauActif?.nb_colonnes ?? 10);
+  const optionsColonnes = Array.from({ length: nbColonnes }, (_, index) => index);
+  const libellesChamps: Record<string, string> = {
+    numero: "Numéro de prix",
+    chapitre: "Chapitre",
+    sous_chapitre: "Sous-chapitre",
+    designation: "Désignation",
+    description: "Description",
+    unite: "Unité",
+    quantite: "Quantité",
+    prix_unitaire_ht: "Prix unitaire HT",
+    montant_ht: "Montant HT",
+    total_ht: "Total HT",
+    lot: "Lot",
+    corps_etat: "Corps d’état",
+    observation: "Observation",
+    ignorer: "Ligne à ignorer",
+  };
 
-  const lignesSource = texteMapping
-    .split(/\r?\n/)
-    .slice(Math.max(0, premiereLigne - 1))
-    .map(separer)
-    .filter((cellules) => cellules.length >= 3);
+  const mappingPayload = () => ({
+    tableau_id: tableauActif?.id ?? "texte_extrait",
+    texte: texteMapping,
+    colonnes,
+    regles,
+  });
 
-  const lireCellule = (cellules: string[], index: number) => cellules[index] ?? "";
-  const apercu = lignesSource.slice(0, 10).map((cellules, index) => ({
-    ordre: index + 1,
-    numero: lireCellule(cellules, colonnes.numero),
-    designation: lireCellule(cellules, colonnes.designation),
-    unite: lireCellule(cellules, colonnes.unite),
-    quantite: lireCellule(cellules, colonnes.quantite),
-    prix_unitaire_ht: lireCellule(cellules, colonnes.prix_unitaire_ht),
-    montant_ht: lireCellule(cellules, colonnes.montant_ht),
-  })).filter((ligne) => ligne.designation && ligne.unite);
-
-  const importerMapping = async () => {
-    const lignes = lignesSource.map((cellules, index) => ({
-      ordre: index + 1,
-      numero: lireCellule(cellules, colonnes.numero),
-      designation: lireCellule(cellules, colonnes.designation),
-      unite: lireCellule(cellules, colonnes.unite),
-      quantite: lireCellule(cellules, colonnes.quantite),
-      prix_unitaire_ht: lireCellule(cellules, colonnes.prix_unitaire_ht),
-      montant_ht: lireCellule(cellules, colonnes.montant_ht),
-    })).filter((ligne) => ligne.designation && ligne.unite);
-
-    if (lignes.length === 0) {
-      notifications.erreur("Aucune ligne exploitable dans le mapping manuel.");
-      return;
-    }
-
-    setImportEnCours(true);
+  const previsualiser = async () => {
+    setChargementAction(true);
     try {
-      const resultat = await api.post<{ lignes_importees: number; erreurs: string[] }>(
-        `/api/ressources/devis/${devis.id}/mapping-manuel/`,
-        { lignes }
+      const resultat = await api.post<{ lignes: LignePreviewMappingPrix[]; resume: Record<string, number> }>(
+        `/api/ressources/devis/${devis.id}/mapping/previsualiser/`,
+        mappingPayload()
       );
-      queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
-      queryClient.invalidateQueries({ queryKey: ["devis-lignes", devis.id] });
-      notifications.succes(`${resultat.lignes_importees} ligne(s) importée(s) par mapping manuel.`);
-      onFermer();
+      setPreview(resultat);
+      setEtape(4);
+      notifications.info(`${resultat.resume.total ?? 0} ligne(s) prévisualisée(s).`);
     } catch (e) {
-      notifications.erreur(e instanceof ErreurApi ? e.detail : "Import manuel impossible.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Prévisualisation du mapping impossible.");
     } finally {
-      setImportEnCours(false);
+      setChargementAction(false);
     }
   };
 
-  const optionsColonnes = Array.from({ length: 10 }, (_, index) => index);
+  const validerImport = async () => {
+    setChargementAction(true);
+    try {
+      const resultat = await api.post<{ lignes_importees: number }>(
+        `/api/ressources/devis/${devis.id}/mapping/valider/`,
+        { mapping: mappingPayload(), options: { importer_corrigees: true, ignorer_non_capitalisables: true } }
+      );
+      queryClient.invalidateQueries({ queryKey: ["devis-liste"] });
+      queryClient.invalidateQueries({ queryKey: ["devis-lignes", devis.id] });
+      notifications.succes(`${resultat.lignes_importees} ligne(s) importée(s) par mapping assisté.`);
+      onFermer();
+    } catch (e) {
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Validation du mapping impossible.");
+    } finally {
+      setChargementAction(false);
+    }
+  };
+
+  const sauvegarderModele = async () => {
+    if (!nomModele.trim()) {
+      notifications.erreur("Indiquez un nom de modèle.");
+      return;
+    }
+    setChargementAction(true);
+    try {
+      await api.post(`/api/ressources/devis/${devis.id}/mapping/sauvegarder-modele/`, {
+        nom: nomModele,
+        type_document: devis.type_document,
+        entreprise_source: devis.entreprise,
+        colonnes,
+        regles,
+      });
+      notifications.succes("Modèle de mapping sauvegardé.");
+    } catch (e) {
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Sauvegarde du modèle impossible.");
+    } finally {
+      setChargementAction(false);
+    }
+  };
+
+  const badgePreview = (ligne: LignePreviewMappingPrix) => {
+    if (ligne.statut_controle === "ignoree") return "bg-slate-700 text-slate-200 border-slate-600";
+    if (ligne.capitalisable) return "bg-emerald-500/15 text-emerald-200 border-emerald-500/30";
+    if (ligne.statut_controle === "alerte") return "bg-orange-500/15 text-orange-200 border-orange-500/30";
+    return "bg-red-500/15 text-red-200 border-red-500/30";
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-2xl border border-[var(--bordure)] bg-[var(--fond-carte)] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[var(--bordure)] px-6 py-4">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">Diagnostic d’extraction</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{devis.nom_original}</p>
+            <h3 className="text-base font-semibold text-[var(--texte-principal)]">Mapping manuel assisté</h3>
+            <p className="text-xs text-[var(--texte-secondaire)] mt-0.5">{devis.nom_original}</p>
           </div>
-          <button type="button" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" onClick={onFermer} aria-label="Fermer">
+          <button type="button" className="rounded p-1 text-[var(--texte-secondaire)] hover:bg-white/10 hover:text-[var(--texte-principal)]" onClick={onFermer} aria-label="Fermer">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="flex border-b border-slate-100 px-6 pt-3">
-          <button type="button" className={clsx("px-3 py-2 text-sm font-medium border-b-2", mode === "texte" ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500")} onClick={() => setMode("texte")}>
-            Texte extrait
-          </button>
-          <button type="button" className={clsx("px-3 py-2 text-sm font-medium border-b-2", mode === "mapping" ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500")} onClick={() => setMode("mapping")}>
-            Mapping manuel
-          </button>
+        <div className="flex flex-wrap gap-2 border-b border-[var(--bordure)] px-6 py-3">
+          {["Source", "Colonnes", "Règles", "Prévisualisation", "Validation"].map((label, index) => (
+            <button
+              key={label}
+              type="button"
+              className={clsx(
+                "rounded-full border px-3 py-1.5 text-xs font-medium",
+                etape === index + 1 ? "border-indigo-400 bg-indigo-500/20 text-indigo-100" : "border-[var(--bordure)] text-[var(--texte-secondaire)] hover:bg-white/5"
+              )}
+              onClick={() => setEtape(index + 1)}
+            >
+              {index + 1}. {label}
+            </button>
+          ))}
         </div>
 
-        <div className="max-h-[68vh] overflow-y-auto px-6 py-5">
+        <div className="max-h-[68vh] overflow-y-auto px-6 py-5 text-[var(--texte-principal)]">
           {isLoading ? (
-            <div className="py-12 text-center text-sm text-slate-400">Chargement du diagnostic…</div>
-          ) : mode === "texte" ? (
+            <div className="py-12 text-center text-sm text-[var(--texte-secondaire)]">Préparation du mapping…</div>
+          ) : etape === 1 ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-4 gap-3 text-sm">
-                <div className="rounded-xl border border-slate-200 p-3">
-                  <p className="text-xs text-slate-400">Méthode utilisée</p>
-                  <p className="font-medium text-slate-800 mt-1">{diagnostic?.methode_extraction || "Non renseignée"}</p>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-3">
+                  <p className="text-xs text-[var(--texte-secondaire)]">Tableaux détectés</p>
+                  <p className="mt-1 font-mono text-xl font-bold">{tableaux.length}</p>
                 </div>
-                <div className="rounded-xl border border-slate-200 p-3">
-                  <p className="text-xs text-slate-400">Lignes candidates</p>
-                  <p className="font-mono font-bold text-slate-800 mt-1">{diagnostic?.nb_lignes_detectees ?? 0}</p>
+                <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-3">
+                  <p className="text-xs text-[var(--texte-secondaire)]">Méthode</p>
+                  <p className="mt-1 text-sm font-medium">{String(preparation?.apercu_structure?.methode_extraction || devis.methode_extraction || "Non renseignée")}</p>
                 </div>
-                <div className="rounded-xl border border-slate-200 p-3">
-                  <p className="text-xs text-slate-400">Lignes rejetées</p>
-                  <p className="font-mono font-bold text-slate-800 mt-1">{diagnostic?.nb_lignes_rejetees ?? 0}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 p-3">
-                  <p className="text-xs text-slate-400">À vérifier</p>
-                  <p className="font-mono font-bold text-slate-800 mt-1">{diagnostic?.nb_lignes_a_verifier ?? 0}</p>
+                <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-3">
+                  <p className="text-xs text-[var(--texte-secondaire)]">Score extraction</p>
+                  <p className="mt-1 font-mono text-xl font-bold">{String(preparation?.apercu_structure?.score_qualite_extraction || devis.score_qualite_extraction || 0)}%</p>
                 </div>
               </div>
-              {(diagnostic?.message_analyse || devis.message_analyse || devis.erreur_detail) && (
-                <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
-                  {diagnostic?.message_analyse || devis.message_analyse || devis.erreur_detail}
-                </div>
-              )}
-              <pre className="min-h-72 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-950 p-4 text-xs leading-relaxed text-slate-100">
-                {diagnostic?.texte_extrait_apercu || "Aucun aperçu texte disponible."}
+              <div>
+                <label className="etiquette-champ">Source à mapper</label>
+                <select className="champ-saisie" value={tableauActif?.id ?? tableauId} onChange={(e) => setTableauId(e.target.value)}>
+                  {tableaux.map((tableau) => (
+                    <option key={tableau.id} value={tableau.id}>{tableau.libelle} · {tableau.nb_lignes} ligne(s)</option>
+                  ))}
+                </select>
+              </div>
+              <pre className="min-h-72 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-[var(--bordure)] bg-slate-950 p-4 text-xs leading-relaxed text-slate-100">
+                {tableauActif ? tableauActif.lignes.slice(0, 25).map((ligne) => ligne.join(" | ")).join("\n") : preparation?.texte_extrait || "Aucun aperçu texte disponible."}
               </pre>
-            </div>
-          ) : (
-            <div className="space-y-4">
               <textarea
-                className="champ-saisie min-h-40 font-mono text-xs"
-                placeholder="Collez ici les lignes du tableau, séparées par tabulations, points-virgules ou virgules."
+                className="champ-saisie min-h-28 font-mono text-xs"
+                placeholder="Optionnel : collez ici un tableau corrigé. Si ce champ est rempli, il devient la source du mapping."
                 value={texteMapping}
                 onChange={(e) => setTexteMapping(e.target.value)}
               />
-              <div className="grid grid-cols-7 gap-3 items-end">
-                <div>
-                  <label className="etiquette-champ">1ère ligne</label>
-                  <input className="champ-saisie" type="number" min={1} value={premiereLigne} onChange={(e) => setPremiereLigne(Number(e.target.value) || 1)} />
+            </div>
+          ) : etape === 2 ? (
+            <div className="grid gap-3 md:grid-cols-4">
+              {Object.keys(colonnes).map((champ) => (
+                <div key={champ}>
+                  <label className="etiquette-champ">{libellesChamps[champ] ?? champ}</label>
+                  <select
+                    className="champ-saisie"
+                    value={colonnes[champ]}
+                    onChange={(e) => setColonnes((c) => ({ ...c, [champ]: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  >
+                    <option value="">Non mappé</option>
+                    {optionsColonnes.map((option) => <option key={option} value={option}>Col. {String.fromCharCode(65 + option)}</option>)}
+                  </select>
                 </div>
-                {Object.entries(colonnes).map(([champ, valeur]) => (
-                  <div key={champ}>
-                    <label className="etiquette-champ">{champ.replace("_ht", "").replace(/_/g, " ")}</label>
-                    <select
-                      className="champ-saisie"
-                      value={valeur}
-                      onChange={(e) => setColonnes((c) => ({ ...c, [champ]: Number(e.target.value) }))}
-                    >
-                      {optionsColonnes.map((option) => <option key={option} value={option}>Col. {option + 1}</option>)}
-                    </select>
+              ))}
+            </div>
+          ) : etape === 3 ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-4 space-y-3">
+                <h4 className="text-sm font-semibold">Bornes de lecture</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="etiquette-champ">Première ligne de données</label>
+                    <input className="champ-saisie" type="number" min={1} value={regles.premiere_ligne} onChange={(e) => setRegles((r) => ({ ...r, premiere_ligne: Number(e.target.value) || 1 }))} />
                   </div>
+                  <div>
+                    <label className="etiquette-champ">Dernière ligne</label>
+                    <input className="champ-saisie" type="number" min={0} value={regles.derniere_ligne} onChange={(e) => setRegles((r) => ({ ...r, derniere_ligne: Number(e.target.value) || 0 }))} />
+                  </div>
+                </div>
+                <div>
+                  <label className="etiquette-champ">Séparer description à partir de</label>
+                  <select className="champ-saisie" value={regles.separateur_description} onChange={(e) => setRegles((r) => ({ ...r, separateur_description: e.target.value }))}>
+                    <option value="">Détection automatique</option>
+                    {(preparation?.separateurs_description ?? []).map((sep) => <option key={sep} value={sep}>{sep}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-4 space-y-2">
+                <h4 className="text-sm font-semibold">Règles de nettoyage</h4>
+                {[
+                  ["ignorer_entetes", "Ignorer les lignes d’en-tête"],
+                  ["ignorer_sous_totaux", "Ignorer les sous-totaux"],
+                  ["ignorer_totaux", "Ignorer les totaux généraux"],
+                  ["fusionner_lignes_multilignes", "Fusionner les lignes multi-lignes"],
+                  ["utiliser_ligne_precedente_comme_chapitre", "Utiliser la ligne précédente comme chapitre"],
+                  ["cellules_vides_continuation_designation", "Cellules vides = continuation de désignation"],
+                ].map(([cle, label]) => (
+                  <label key={cle} className="flex items-center gap-2 text-sm text-[var(--texte-secondaire)]">
+                    <input type="checkbox" checked={Boolean(regles[cle as keyof typeof regles])} onChange={(e) => setRegles((r) => ({ ...r, [cle]: e.target.checked }))} />
+                    {label}
+                  </label>
                 ))}
               </div>
-              <div className="rounded-xl border border-slate-200 overflow-hidden">
-                <div className="bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">Prévisualisation avant import</div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead className="bg-white text-slate-400">
-                      <tr>
-                        {["N°", "Désignation", "U", "Quantité", "PU", "Montant"].map((titre) => <th key={titre} className="px-3 py-2 text-left font-medium">{titre}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {apercu.length === 0 ? (
-                        <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Aucune ligne en prévisualisation.</td></tr>
-                      ) : apercu.map((ligne) => (
-                        <tr key={ligne.ordre}>
-                          <td className="px-3 py-2">{ligne.numero}</td>
-                          <td className="px-3 py-2 min-w-80">{ligne.designation}</td>
-                          <td className="px-3 py-2">{ligne.unite}</td>
-                          <td className="px-3 py-2 font-mono">{ligne.quantite}</td>
-                          <td className="px-3 py-2 font-mono">{ligne.prix_unitaire_ht}</td>
-                          <td className="px-3 py-2 font-mono">{ligne.montant_ht}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            </div>
+          ) : etape === 4 ? (
+            <div className="space-y-4">
+              {!preview ? (
+                <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-100">Lancez la prévisualisation pour contrôler les lignes avant import.</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-5 gap-3 text-sm">
+                    {[
+                      ["OK", preview.resume.ok ?? 0],
+                      ["À vérifier", preview.resume.a_verifier ?? 0],
+                      ["Ignorées", preview.resume.ignorees ?? 0],
+                      ["Non capitalisables", preview.resume.non_capitalisables ?? 0],
+                      ["Total", preview.resume.total ?? 0],
+                    ].map(([label, valeur]) => (
+                      <div key={String(label)} className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-3">
+                        <p className="text-xs text-[var(--texte-secondaire)]">{label}</p>
+                        <p className="mt-1 font-mono text-lg font-bold">{valeur}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-[var(--bordure)]">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-white/5 text-[var(--texte-secondaire)]">
+                        <tr>{["Statut", "N°", "Chapitre", "Désignation", "U", "Qté", "PU HT", "Montant", "Écart"].map((titre) => <th key={titre} className="px-3 py-2 text-left font-medium">{titre}</th>)}</tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--bordure)]">
+                        {preview.lignes.map((ligne) => (
+                          <tr key={`${ligne.ordre}-${ligne.numero}`}>
+                            <td className="px-3 py-2"><span className={clsx("rounded-full border px-2 py-0.5", badgePreview(ligne))}>{ligne.statut}</span></td>
+                            <td className="px-3 py-2">{ligne.numero}</td>
+                            <td className="px-3 py-2">{ligne.chapitre}</td>
+                            <td className="px-3 py-2 min-w-80">
+                              <p>{ligne.designation}</p>
+                              {ligne.alertes?.length > 0 && <p className="mt-1 text-[11px] text-orange-200">{ligne.alertes.join(" · ")}</p>}
+                            </td>
+                            <td className="px-3 py-2">{ligne.unite}</td>
+                            <td className="px-3 py-2 font-mono">{ligne.quantite ?? "—"}</td>
+                            <td className="px-3 py-2 font-mono">{formaterMontant(ligne.prix_unitaire_ht)}</td>
+                            <td className="px-3 py-2 font-mono">{formaterMontant(ligne.montant_ht)}</td>
+                            <td className="px-3 py-2 font-mono">{ligne.ecart_montant_ht ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-4">
+                <h4 className="text-sm font-semibold">Validation de l’import</h4>
+                <p className="mt-1 text-sm text-[var(--texte-secondaire)]">Les lignes OK et corrigées seront importées. Les lignes ignorées ou non capitalisables restent hors capitalisation.</p>
+              </div>
+              <div className="rounded-xl border border-[var(--bordure)] bg-[var(--fond-entree)] p-4">
+                <label className="etiquette-champ">Sauvegarder comme modèle réutilisable</label>
+                <div className="flex gap-2">
+                  <input className="champ-saisie" value={nomModele} onChange={(e) => setNomModele(e.target.value)} placeholder="Ex. DPGF entreprise standard" />
+                  <button type="button" className="btn-secondaire" onClick={sauvegarderModele} disabled={chargementAction}>Sauvegarder</button>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
-          <button type="button" className="btn-secondaire" onClick={onFermer}>Fermer</button>
-          {mode === "mapping" && (
-            <button type="button" className="btn-primaire" onClick={importerMapping} disabled={importEnCours}>
-              {importEnCours ? "Import en cours…" : "Importer le mapping"}
+        <div className="flex flex-wrap justify-between gap-3 border-t border-[var(--bordure)] bg-black/10 px-6 py-4">
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondaire" onClick={() => setEtape(1)}>Voir l’extraction brute</button>
+            <button type="button" className="btn-secondaire" onClick={previsualiser} disabled={chargementAction}>Prévisualiser l’import</button>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondaire" onClick={onFermer}>Fermer</button>
+            <button type="button" className="btn-primaire" onClick={validerImport} disabled={chargementAction || !preview}>
+              {chargementAction ? "Traitement…" : "Importer les lignes validées"}
             </button>
-          )}
+          </div>
         </div>
       </div>
     </div>
@@ -618,6 +790,24 @@ function CarteDevis({
               <BookOpen className="h-3.5 w-3.5" />
               {capitalEnCours ? "En cours…" : "Capitaliser"}
             </button>
+          )}
+          {(devis.statut === "termine" || devis.statut === "a_verifier") && (
+            <>
+              <button type="button" className="btn-secondaire text-xs" onClick={() => setModalDiagnostic("mapping")}>
+                <TableProperties className="h-3.5 w-3.5" /> Mapping manuel
+              </button>
+              {devis.lignes_count > 0 && (
+                <button type="button" className="btn-secondaire text-xs" onClick={() => setModalDiagnostic("mapping")}>
+                  <AlertTriangle className="h-3.5 w-3.5" /> Corriger les lignes
+                </button>
+              )}
+              <button type="button" className="btn-secondaire text-xs" onClick={() => setModalDiagnostic("texte")}>
+                <Eye className="h-3.5 w-3.5" /> Voir l’extraction brute
+              </button>
+              <button type="button" className="btn-secondaire text-xs" onClick={relancer}>
+                <RefreshCw className="h-3.5 w-3.5" /> Relancer avec OCR
+              </button>
+            </>
           )}
           {devis.capitalise && (
             <span className="text-xs bg-green-100 text-green-700 rounded-full px-2.5 py-1 flex items-center gap-1">

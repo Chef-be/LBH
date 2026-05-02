@@ -7,13 +7,21 @@ from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
-from .models import DevisAnalyse, EstimationSource, FicheRatioCout, IndiceRevisionPrix, LignePrixMarche
+from .models import (
+    DevisAnalyse,
+    EstimationSource,
+    FicheRatioCout,
+    IndiceRevisionPrix,
+    LignePrixMarche,
+    ModeleMappingDocumentPrix,
+)
 from .serialiseurs import (
     DevisAnalyseSerialiseur,
     EstimationSourceSerialiseur,
     FicheRatioCoutSerialiseur,
     IndiceRevisionPrixSerialiseur,
     LignePrixMarcheSerialiseur,
+    ModeleMappingDocumentPrixSerialiseur,
 )
 
 
@@ -226,80 +234,100 @@ def vue_texte_extrait_devis(request, pk):
 @api_view(["POST"])
 def vue_mapping_manuel_devis(request, pk):
     """Importe des lignes de prix validées manuellement depuis l'interface de mapping."""
-    from decimal import Decimal, InvalidOperation
-    from .services import detecter_corps_etat, estimer_sdp_depuis_prix, normaliser_designation, tronquer_champ
+    from .services_mapping_document_prix import valider_mapping_document
 
-    devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
     lignes = request.data.get("lignes") or []
     if not isinstance(lignes, list) or not lignes:
         return Response({"detail": "Aucune ligne de mapping à importer."}, status=status.HTTP_400_BAD_REQUEST)
+    lignes_tableau = [[
+        ligne.get("numero") or "",
+        ligne.get("designation") or "",
+        ligne.get("unite") or "",
+        ligne.get("quantite") or "",
+        ligne.get("prix_unitaire_ht") or ligne.get("prix_unitaire") or "",
+        ligne.get("montant_ht") or "",
+    ] for ligne in lignes if isinstance(ligne, dict)]
+    mapping = {
+        "lignes": lignes_tableau,
+        "colonnes": {
+            "numero": 0,
+            "designation": 1,
+            "unite": 2,
+            "quantite": 3,
+            "prix_unitaire_ht": 4,
+            "montant_ht": 5,
+        },
+        "regles": {"premiere_ligne": 1, "ignorer_entetes": True, "ignorer_sous_totaux": True, "ignorer_totaux": True},
+    }
+    try:
+        resultat = valider_mapping_document(pk, mapping, {"importer_corrigees": True})
+    except Exception as exc:
+        return Response({"detail": f"Import manuel impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({"lignes_importees": resultat["lignes_importees"], "erreurs": resultat.get("ignorees", [])})
 
-    creees = 0
-    erreurs = []
-    for index, ligne in enumerate(lignes, start=1):
-        designation = str(ligne.get("designation") or "").strip()
-        if not designation:
-            erreurs.append(f"Ligne {index} : désignation manquante.")
-            continue
-        try:
-            quantite = Decimal(str(ligne.get("quantite") or "1").replace(",", "."))
-            prix_unitaire = Decimal(str(ligne.get("prix_unitaire_ht") or ligne.get("prix_unitaire") or "0").replace(",", "."))
-            montant = Decimal(str(ligne.get("montant_ht") or "0").replace(",", "."))
-        except (InvalidOperation, TypeError):
-            erreurs.append(f"Ligne {index} : valeur numérique invalide.")
-            continue
-        if prix_unitaire <= 0 and montant > 0 and quantite > 0:
-            prix_unitaire = (montant / quantite).quantize(Decimal("0.0001"))
-        if prix_unitaire <= 0:
-            erreurs.append(f"Ligne {index} : prix unitaire manquant.")
-            continue
 
-        corps_code, corps_libelle = detecter_corps_etat(designation)
-        sdp = estimer_sdp_depuis_prix(prix_unitaire, corps_libelle)
-        designation_courte = tronquer_champ(designation, 500)
-        LignePrixMarche.objects.create(
-            devis_source=devis,
-            ordre=int(ligne.get("ordre") or index),
-            numero=str(ligne.get("numero") or ""),
-            designation=designation_courte,
-            designation_originale=str(ligne.get("designation_originale") or designation),
-            designation_normalisee=tronquer_champ(normaliser_designation(designation), 500),
-            unite=str(ligne.get("unite") or "U"),
-            quantite=quantite,
-            prix_ht_original=prix_unitaire,
-            montant_ht=montant if montant > 0 else (quantite * prix_unitaire).quantize(Decimal("0.01")),
-            montant_recalcule_ht=(quantite * prix_unitaire).quantize(Decimal("0.01")),
-            ecart_montant_ht=abs(((quantite * prix_unitaire).quantize(Decimal("0.01"))) - montant) if montant > 0 else Decimal("0"),
-            type_ligne="article",
-            statut_controle="corrigee",
-            score_confiance=Decimal("0.90"),
-            corrections_proposees=["Ligne créée par mapping manuel."],
-            donnees_import={"methode_extraction": "mapping_manuel"},
-            decision_import="importer",
-            indice_code=devis.indice_base_code or "BT01",
-            indice_valeur_base=devis.indice_base_valeur,
-            localite=devis.localite or "",
-            corps_etat=corps_code,
-            corps_etat_libelle=corps_libelle,
-            debourse_sec_estime=sdp.get("debourse_sec"),
-            kpv_estime=sdp.get("kpv"),
-            pct_mo_estime=sdp.get("pct_mo"),
-            pct_materiaux_estime=sdp.get("pct_materiaux"),
-            pct_materiel_estime=sdp.get("pct_materiel"),
-        )
-        creees += 1
+@api_view(["GET"])
+def vue_mapping_preparer(request, pk):
+    from .services_mapping_document_prix import preparer_mapping_document
+    try:
+        return Response(preparer_mapping_document(pk))
+    except Exception as exc:
+        return Response({"detail": f"Préparation du mapping impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
 
-    if creees:
-        devis.statut = "termine"
-        devis.erreur_detail = ""
-        devis.message_analyse = f"{creees} ligne(s) importée(s) par mapping manuel."
-        devis.nb_lignes_detectees = devis.lignes.count()
-        devis.methode_extraction = "mapping_manuel"
-        devis.save(update_fields=[
-            "statut", "erreur_detail", "message_analyse",
-            "nb_lignes_detectees", "methode_extraction",
-        ])
-    return Response({"lignes_importees": creees, "erreurs": erreurs})
+
+@api_view(["POST"])
+def vue_mapping_previsualiser(request, pk):
+    from .services_mapping_document_prix import previsualiser_mapping_document
+    try:
+        return Response(previsualiser_mapping_document(pk, request.data or {}))
+    except Exception as exc:
+        return Response({"detail": f"Prévisualisation du mapping impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+def vue_mapping_valider(request, pk):
+    from .services_mapping_document_prix import valider_mapping_document
+    try:
+        resultat = valider_mapping_document(pk, request.data.get("mapping") or request.data or {}, request.data.get("options") or {})
+        return Response(resultat)
+    except Exception as exc:
+        return Response({"detail": f"Validation du mapping impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+def vue_mapping_sauvegarder_modele(request, pk):
+    from .services_mapping_document_prix import sauvegarder_modele_mapping
+    devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
+    payload = dict(request.data or {})
+    payload.setdefault("type_document", devis.type_document)
+    payload.setdefault("entreprise_source", devis.entreprise)
+    try:
+        modele = sauvegarder_modele_mapping(payload)
+        return Response(ModeleMappingDocumentPrixSerialiseur(modele).data, status=status.HTTP_201_CREATED)
+    except Exception as exc:
+        return Response({"detail": f"Sauvegarde du modèle impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VueListeModelesMapping(generics.ListCreateAPIView):
+    queryset = ModeleMappingDocumentPrix.objects.filter(est_actif=True)
+    serializer_class = ModeleMappingDocumentPrixSerialiseur
+
+
+@api_view(["POST"])
+def vue_appliquer_modele_mapping(request, pk):
+    from .services_mapping_document_prix import previsualiser_mapping_document
+    modele = generics.get_object_or_404(ModeleMappingDocumentPrix, pk=pk, est_actif=True)
+    devis_id = request.data.get("devis_id")
+    if not devis_id:
+        return Response({"detail": "Devis cible manquant."}, status=status.HTTP_400_BAD_REQUEST)
+    mapping = {
+        "colonnes": modele.colonnes_mapping,
+        "regles": {**(modele.regles_nettoyage or {}), "separateur_description": modele.separateur_description},
+    }
+    try:
+        return Response(previsualiser_mapping_document(devis_id, mapping))
+    except Exception as exc:
+        return Response({"detail": f"Application du modèle impossible : {exc}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(["POST"])

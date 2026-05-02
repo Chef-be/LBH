@@ -18,9 +18,15 @@ urlpatterns = [
     path("devis/<uuid:pk>/relancer/", views.vue_relancer_analyse, name="ressources-devis-relancer"),
     path("devis/<uuid:pk>/lignes/", views.vue_lignes_devis, name="ressources-devis-lignes"),
     path("devis/<uuid:pk>/texte-extrait/", views.vue_texte_extrait_devis, name="ressources-devis-texte-extrait"),
+    path("devis/<uuid:pk>/mapping/preparer/", views.vue_mapping_preparer, name="ressources-devis-mapping-preparer"),
+    path("devis/<uuid:pk>/mapping/previsualiser/", views.vue_mapping_previsualiser, name="ressources-devis-mapping-previsualiser"),
+    path("devis/<uuid:pk>/mapping/valider/", views.vue_mapping_valider, name="ressources-devis-mapping-valider"),
+    path("devis/<uuid:pk>/mapping/sauvegarder-modele/", views.vue_mapping_sauvegarder_modele, name="ressources-devis-mapping-modele"),
     path("devis/<uuid:pk>/mapping-manuel/", views.vue_mapping_manuel_devis, name="ressources-devis-mapping-manuel"),
     path("devis/<uuid:pk>/capitaliser/", views.vue_capitaliser_devis, name="ressources-devis-capitaliser"),
     path("devis/vider-expires/", views.vue_vider_devis_expires, name="ressources-devis-vider-expires"),
+    path("mappings/", views.VueListeModelesMapping.as_view(), name="ressources-mappings"),
+    path("mappings/<uuid:pk>/appliquer/", views.vue_appliquer_modele_mapping, name="ressources-mapping-appliquer"),
 
     # Banque de prix marché
     path("prix-marche/", views.VueListePrixMarche.as_view(), name="ressources-prix-marche"),

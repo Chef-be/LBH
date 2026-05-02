@@ -6,6 +6,7 @@ from .models import (
     FicheRatioCout,
     IndiceRevisionPrix,
     LignePrixMarche,
+    ModeleMappingDocumentPrix,
 )
 
 
@@ -42,6 +43,14 @@ class LignePrixMarcheAdmin(admin.ModelAdmin):
     search_fields = ("designation", "localite")
     ordering = ("-nb_occurrences", "designation")
     readonly_fields = ("designation_normalisee",)
+
+
+@admin.register(ModeleMappingDocumentPrix)
+class ModeleMappingDocumentPrixAdmin(admin.ModelAdmin):
+    list_display = ("nom", "type_document", "entreprise_source", "est_actif", "date_modification")
+    list_filter = ("type_document", "est_actif")
+    search_fields = ("nom", "entreprise_source")
+    readonly_fields = ("date_creation", "date_modification")
 
 
 @admin.register(EstimationSource)

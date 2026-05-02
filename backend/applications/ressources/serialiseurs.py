@@ -2,7 +2,14 @@
 
 from rest_framework import serializers
 
-from .models import DevisAnalyse, EstimationSource, FicheRatioCout, IndiceRevisionPrix, LignePrixMarche
+from .models import (
+    DevisAnalyse,
+    EstimationSource,
+    FicheRatioCout,
+    IndiceRevisionPrix,
+    LignePrixMarche,
+    ModeleMappingDocumentPrix,
+)
 
 
 class IndiceRevisionPrixSerialiseur(serializers.ModelSerializer):
@@ -77,6 +84,18 @@ class DevisAnalyseSerialiseur(serializers.ModelSerializer):
         if obj.fichier and request:
             return request.build_absolute_uri(obj.fichier.url)
         return ""
+
+
+class ModeleMappingDocumentPrixSerialiseur(serializers.ModelSerializer):
+    class Meta:
+        model = ModeleMappingDocumentPrix
+        fields = [
+            "id", "nom", "type_document", "entreprise_source",
+            "colonnes_mapping", "regles_nettoyage", "regles_ignore",
+            "separateur_description", "est_actif",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
 
 
 class EstimationSourceSerialiseur(serializers.ModelSerializer):

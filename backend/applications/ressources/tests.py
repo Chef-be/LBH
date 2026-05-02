@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .models import DevisAnalyse, LignePrixMarche
+from .models import DevisAnalyse, LignePrixMarche, ModeleMappingDocumentPrix
 from .moteur_import_prix import (
     LigneCandidate,
     analyser_structure_ligne_prix,
@@ -20,6 +20,14 @@ from .moteur_import_prix import (
     reconstruire_lignes_depuis_texte,
 )
 from .services import analyser_devis
+from .services_mapping_document_prix import (
+    appliquer_mapping_document,
+    detecter_colonnes_mapping,
+    preparer_mapping_document,
+    previsualiser_mapping_document,
+    sauvegarder_modele_mapping,
+    valider_mapping_document,
+)
 from .taches import tache_analyser_devis
 
 
@@ -364,3 +372,132 @@ class AnalyseDevisTests(TestCase):
         self.assertIn("295 €", ligne.designation_originale)
         self.assertTrue(ligne.donnees_import["nettoyage_designation"])
         self.assertIn("295", ligne.donnees_import["fragments_supprimes"])
+
+
+class MappingDocumentPrixTests(TestCase):
+    def _devis_tableau(self) -> DevisAnalyse:
+        devis = _devis("dpgf.xlsx")
+        devis.texte_extrait_apercu = (
+            "N°;Désignation;U;Qté;PU;Total\n"
+            "101;Installation de chantier;F;1;1000,00;1000,00\n"
+            "Sous-total;;;;;1000,00\n"
+        )
+        devis.donnees_extraction = {
+            "tableaux": [[
+                ["N°", "Désignation", "U", "Qté", "PU", "Total"],
+                ["101", "Installation de chantier", "F", "1", "1000,00", "1000,00"],
+                ["Sous-total", "", "", "", "", "1000,00"],
+            ]]
+        }
+        devis.save(update_fields=["texte_extrait_apercu", "donnees_extraction"])
+        return devis
+
+    def _mapping_base(self) -> dict:
+        return {
+            "tableau_id": "tableau_1",
+            "colonnes": {
+                "numero": 0,
+                "designation": 1,
+                "unite": 2,
+                "quantite": 3,
+                "prix_unitaire_ht": 4,
+                "montant_ht": 5,
+            },
+            "regles": {
+                "premiere_ligne": 2,
+                "ignorer_entetes": True,
+                "ignorer_sous_totaux": True,
+                "ignorer_totaux": True,
+            },
+        }
+
+    def test_preparer_mapping_avec_tableau(self):
+        devis = self._devis_tableau()
+        resultat = preparer_mapping_document(devis.id)
+        self.assertGreaterEqual(len(resultat["tableaux"]), 1)
+        self.assertEqual(resultat["colonnes_candidates"]["designation"]["index"], 1)
+
+    def test_preparer_mapping_sans_tableau_avec_texte(self):
+        devis = _devis()
+        devis.texte_extrait_apercu = "101;Installation de chantier;F;1;100;100"
+        devis.save(update_fields=["texte_extrait_apercu"])
+        resultat = preparer_mapping_document(devis.id)
+        self.assertEqual(resultat["tableaux"][0]["id"], "texte_extrait")
+
+    def test_detection_colonnes_mapping(self):
+        colonnes = detecter_colonnes_mapping({
+            "lignes": [["N° Prix", "Désignation des ouvrages", "Unité", "Quantité", "P.U.", "Somme H.T."]]
+        })
+        self.assertEqual(colonnes["numero"]["index"], 0)
+        self.assertEqual(colonnes["montant_ht"]["index"], 5)
+
+    def test_previsualisation_sans_ecriture_base(self):
+        devis = self._devis_tableau()
+        resultat = previsualiser_mapping_document(devis.id, self._mapping_base())
+        self.assertEqual(resultat["resume"]["ok"], 1)
+        self.assertEqual(LignePrixMarche.objects.filter(devis_source=devis).count(), 0)
+
+    def test_validation_ecrit_lignes_prix_marche(self):
+        devis = self._devis_tableau()
+        resultat = valider_mapping_document(devis.id, self._mapping_base(), {"importer_corrigees": True})
+        self.assertEqual(resultat["lignes_importees"], 1)
+        self.assertEqual(LignePrixMarche.objects.filter(devis_source=devis).count(), 1)
+
+    def test_ignore_entetes_et_sous_totaux(self):
+        devis = self._devis_tableau()
+        mapping = self._mapping_base()
+        mapping["regles"]["premiere_ligne"] = 1
+        resultat = appliquer_mapping_document(devis.id, mapping)
+        self.assertEqual(resultat["resume"]["ignorees"], 2)
+        self.assertEqual(resultat["resume"]["ok"], 1)
+
+    def test_fusion_designation_multiligne(self):
+        devis = _devis()
+        mapping = {
+            "lignes": [
+                ["", "Installation de chantier", "", "", "", ""],
+                ["101", "et signalisation", "F", "1", "100", "100"],
+            ],
+            "colonnes": {"numero": 0, "designation": 1, "unite": 2, "quantite": 3, "prix_unitaire_ht": 4, "montant_ht": 5},
+            "regles": {"cellules_vides_continuation_designation": True},
+        }
+        resultat = previsualiser_mapping_document(devis.id, mapping)
+        self.assertIn("Installation de chantier", resultat["lignes"][0]["designation"])
+
+    def test_separe_designation_et_description(self):
+        devis = _devis()
+        mapping = {
+            "lignes": [["101", "Installation Ce prix comprend les amenées", "F", "1", "100", "100"]],
+            "colonnes": {"numero": 0, "designation": 1, "unite": 2, "quantite": 3, "prix_unitaire_ht": 4, "montant_ht": 5},
+            "regles": {"separateur_description": "Ce prix comprend"},
+        }
+        resultat = previsualiser_mapping_document(devis.id, mapping)
+        self.assertEqual(resultat["lignes"][0]["designation"], "Installation")
+        self.assertIn("Ce prix comprend", resultat["lignes"][0]["description"])
+
+    def test_controle_quantite_pu_montant(self):
+        devis = _devis()
+        mapping = {
+            "lignes": [["101", "Installation de chantier", "F", "2", "100", "250"]],
+            "colonnes": {"numero": 0, "designation": 1, "unite": 2, "quantite": 3, "prix_unitaire_ht": 4, "montant_ht": 5},
+            "regles": {},
+        }
+        resultat = previsualiser_mapping_document(devis.id, mapping)
+        self.assertEqual(resultat["lignes"][0]["statut_controle"], "alerte")
+        self.assertFalse(resultat["lignes"][0]["capitalisable"])
+
+    def test_sauvegarder_et_reappliquer_modele(self):
+        devis = self._devis_tableau()
+        modele = sauvegarder_modele_mapping({
+            "nom": "DPGF standard",
+            "type_document": "dpgf",
+            "colonnes": self._mapping_base()["colonnes"],
+            "regles": self._mapping_base()["regles"],
+        })
+        self.assertEqual(ModeleMappingDocumentPrix.objects.count(), 1)
+        resultat = previsualiser_mapping_document(devis.id, {
+            "tableau_id": "tableau_1",
+            "colonnes": modele.colonnes_mapping,
+            "regles": modele.regles_nettoyage,
+        })
+        self.assertEqual(resultat["resume"]["ok"], 1)

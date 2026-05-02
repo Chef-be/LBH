@@ -279,6 +279,35 @@ class LignePrixMarche(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Modèles de mapping assisté
+# ---------------------------------------------------------------------------
+
+
+class ModeleMappingDocumentPrix(models.Model):
+    """Mapping réutilisable pour importer des BPU, DPGF, DQE ou devis similaires."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nom = models.CharField(max_length=200, verbose_name="Nom du modèle")
+    type_document = models.CharField(max_length=50, blank=True, verbose_name="Type de document")
+    entreprise_source = models.CharField(max_length=200, blank=True, verbose_name="Entreprise / source")
+    colonnes_mapping = models.JSONField(default=dict, blank=True, verbose_name="Colonnes mappées")
+    regles_nettoyage = models.JSONField(default=dict, blank=True, verbose_name="Règles de lecture")
+    regles_ignore = models.JSONField(default=dict, blank=True, verbose_name="Règles d'ignore")
+    separateur_description = models.CharField(max_length=100, blank=True, verbose_name="Séparateur description")
+    est_actif = models.BooleanField(default=True, verbose_name="Actif")
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date_modification"]
+        verbose_name = "Modèle de mapping document prix"
+        verbose_name_plural = "Modèles de mapping document prix"
+
+    def __str__(self) -> str:
+        return self.nom
+
+
+# ---------------------------------------------------------------------------
 # Estimation sources et fiches ratio
 # ---------------------------------------------------------------------------
 
