@@ -47,7 +47,10 @@ interface ParcoursProjet {
   referentiels: {
     familles_client: ReferentielOption[];
     sous_types_client: ReferentielOption[];
+    cadres_juridiques?: ReferentielOption[];
     contextes_contractuels: ReferentielOption[];
+    roles_lbh?: ReferentielOption[];
+    methodes_estimation?: ReferentielOption[];
     missions_principales: ReferentielOption[];
     sous_missions: ReferentielOption[];
     phases_intervention: ReferentielOption[];
@@ -980,7 +983,7 @@ export function FormulaireNouveauProjet() {
       if (!intitule.trim()) nouvellesErreurs.intitule = "Intitulé obligatoire.";
       if (!familleClientId) nouvellesErreurs.famille_client = "Famille client obligatoire.";
       if (!sousTypeClientId) nouvellesErreurs.sous_type_client = "Sous-type de client obligatoire.";
-      if (!contexteContractuelId) nouvellesErreurs.contexte_contractuel = "Contexte contractuel obligatoire.";
+      if (!contexteContractuelId) nouvellesErreurs.contexte_contractuel = "Mode de commande obligatoire.";
       if (estMaitriseOeuvre && !phaseInterventionId) {
         nouvellesErreurs.phase_intervention =
           natureOuvrage === "infrastructure"
@@ -1457,7 +1460,7 @@ export function FormulaireNouveauProjet() {
                   {erreurs.sous_type_client ? <p className="mt-1 text-xs text-red-500">{erreurs.sous_type_client}</p> : null}
                 </div>
                 <div>
-                  <label className="libelle-champ" htmlFor="contexte-contractuel">Contexte contractuel *</label>
+                  <label className="libelle-champ" htmlFor="contexte-contractuel">Mode de commande / relation contractuelle *</label>
                   <select id="contexte-contractuel" className="champ-saisie" value={contexteContractuelId} onChange={(e) => setContexteContractuelId(e.target.value)}>
                     <option value="">Sélectionner</option>
                     {parcours?.referentiels.contextes_contractuels.map((option) => <option key={option.id} value={option.id}>{option.libelle}</option>)}
@@ -1470,7 +1473,7 @@ export function FormulaireNouveauProjet() {
                       {estMaitriseOeuvre
                         ? natureOuvrage === "infrastructure"
                           ? "Élément de mission infrastructure *"
-                          : "Élément de mission MOE *"
+                          : "Phase d'intervention MOE *"
                         : "Phase d'intervention"}
                     </label>
                     <select id="phase-intervention" className="champ-saisie" value={phaseInterventionId} onChange={(e) => setPhaseInterventionId(e.target.value)}>
@@ -2139,12 +2142,12 @@ export function FormulaireNouveauProjet() {
             <p className="text-sm font-semibold text-slate-900">Contexte courant</p>
             <dl className="mt-4 space-y-3 text-sm">
               <div><dt className="text-xs uppercase tracking-wide text-slate-500">Ouvrage</dt><dd className="mt-1 font-medium text-slate-900">{libelleNatureOuvrage(natureOuvrage)}</dd></div>
-              <div><dt className="text-xs uppercase tracking-wide text-slate-500">Marché</dt><dd className="mt-1 font-medium text-slate-900">{natureMarche}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-500">Cadre juridique</dt><dd className="mt-1 font-medium text-slate-900">{(parcours?.referentiels.cadres_juridiques ?? []).find((item) => item.id === natureMarche)?.libelle || natureMarche}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-slate-500">Famille</dt><dd className="mt-1 font-medium text-slate-900">{familleClientSelectionnee?.libelle || "—"}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-slate-500">Client</dt><dd className="mt-1 font-medium text-slate-900">{parcours?.referentiels.sous_types_client.find((item) => item.id === sousTypeClientId)?.libelle || "—"}</dd></div>
-              <div><dt className="text-xs uppercase tracking-wide text-slate-500">Contexte</dt><dd className="mt-1 font-medium text-slate-900">{contexteSelectionne?.libelle || "—"}</dd></div>
-              {!estEntreprise ? <div><dt className="text-xs uppercase tracking-wide text-slate-500">{estMaitriseOeuvre ? (natureOuvrage === "infrastructure" ? "Mission infra" : "Élément de mission") : "Phase"}</dt><dd className="mt-1 font-medium text-slate-900">{parcours?.referentiels.phases_intervention.find((item) => item.id === phaseInterventionId)?.libelle || "—"}</dd></div> : null}
-              <div><dt className="text-xs uppercase tracking-wide text-slate-500">{estEntreprise ? "Processus" : "Prestations"}</dt><dd className="mt-1 font-medium text-slate-900">{missionsPrincipalesSelectionnees.length ? missionsPrincipalesSelectionnees.map((id) => (parcours?.referentiels.missions_principales.find((item) => item.id === id)?.libelle || id)).join(", ") : "—"}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-500">Mode de commande</dt><dd className="mt-1 font-medium text-slate-900">{contexteSelectionne?.libelle || "—"}</dd></div>
+              {!estEntreprise ? <div><dt className="text-xs uppercase tracking-wide text-slate-500">Phase d&apos;intervention</dt><dd className="mt-1 font-medium text-slate-900">{parcours?.referentiels.phases_intervention.find((item) => item.id === phaseInterventionId)?.libelle || "—"}</dd></div> : null}
+              <div><dt className="text-xs uppercase tracking-wide text-slate-500">Mission confiée</dt><dd className="mt-1 font-medium text-slate-900">{missionsPrincipalesSelectionnees.length ? missionsPrincipalesSelectionnees.map((id) => (parcours?.referentiels.missions_principales.find((item) => item.id === id)?.libelle || id)).join(", ") : "—"}</dd></div>
             </dl>
           </div>
 

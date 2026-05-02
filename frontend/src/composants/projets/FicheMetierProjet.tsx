@@ -20,7 +20,7 @@ interface ModuleActifProjet {
 interface FicheMetierProjetData {
   profil_fiche: string;
   en_tete: Record<string, string>;
-  contexte_metier: Record<string, string | string[]>;
+  contexte_metier: Record<string, string | string[] | { code?: string; libelle?: string } | Array<{ code?: string; libelle?: string }>>;
   modules_actifs: ModuleActifProjet[];
   pieces_sources: {
     attendues: Array<{ code: string; libelle: string; obligatoire?: boolean }>;
@@ -64,6 +64,14 @@ function libelleProfil(code: string) {
   }[code] || code;
 }
 
+function afficherValeurMetier(valeur: FicheMetierProjetData["contexte_metier"][string]) {
+  if (Array.isArray(valeur)) {
+    return valeur.map((item) => typeof item === "string" ? item : item.libelle || item.code || "").filter(Boolean).join(", ");
+  }
+  if (typeof valeur === "object" && valeur !== null) return valeur.libelle || valeur.code || "—";
+  return valeur || "—";
+}
+
 function hrefModuleProjet(projetId: string, code: string) {
   if (code === "ressources") return "/ressources/devis";
   return `/projets/${projetId}/${code}`;
@@ -104,10 +112,10 @@ export function FicheMetierProjet({ projetId, fiche }: { projetId: string; fiche
         <div className="xl:col-span-2 space-y-6">
           <CarteSection titre="Contexte métier" icone={<ClipboardList size={16} />}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {Object.entries(fiche.contexte_metier).filter(([, valeur]) => valeur && String(valeur).length > 0).map(([cle, valeur]) => (
+              {Object.entries(fiche.contexte_metier).filter(([, valeur]) => afficherValeurMetier(valeur) !== "—").map(([cle, valeur]) => (
                 <div key={cle} className="rounded-xl bg-slate-50 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-wide text-slate-400">{cle.replace(/_/g, " ")}</p>
-                  <p className="text-sm font-medium text-slate-800">{Array.isArray(valeur) ? valeur.join(", ") : valeur}</p>
+                  <p className="text-sm font-medium text-slate-800">{afficherValeurMetier(valeur)}</p>
                 </div>
               ))}
             </div>

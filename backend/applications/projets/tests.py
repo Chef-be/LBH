@@ -8,6 +8,14 @@ from applications.documents.models import DossierDocumentProjet, Document, TypeD
 from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
 from applications.projets.models import Projet, PreanalyseSourcesProjet, AffectationProjet, LivrableProjet
+from applications.projets.services_coherence_projet import (
+    construire_livrables_attendus,
+    construire_modules_actifs,
+    suggerer_champs_donnees_techniques,
+    suggerer_methodes_estimation,
+    suggerer_missions,
+    valider_combinaison_projet,
+)
 from applications.pieces_ecrites.models import ModeleDocument, PieceEcrite
 from applications.appels_offres.models import AppelOffres
 
@@ -504,3 +512,93 @@ class ApiProjetsTests(TestCase):
         liste = self.client.get(f"/api/projets/{self.projet.id}/livrables/")
         self.assertEqual(liste.status_code, status.HTTP_200_OK, liste.data)
         self.assertGreaterEqual(len(liste.data), 1)
+
+    def test_coherence_moa_enveloppe_faisabilite_valide(self):
+        controle = valider_combinaison_projet({
+            "famille_client": "maitrise_ouvrage",
+            "phase_intervention": "faisabilite",
+            "missions_principales": ["verifier_enveloppe"],
+        })
+        self.assertTrue(controle["valide"])
+
+    def test_coherence_moa_enveloppe_pro_signale_incoherence(self):
+        controle = valider_combinaison_projet({
+            "famille_client": "maitrise_ouvrage",
+            "phase_intervention": "pro",
+            "missions_principales": ["verifier_enveloppe"],
+        })
+        self.assertFalse(controle["valide"])
+        self.assertIn("moa_phase_pro", [a["code"] for a in controle["bloquant"]])
+
+    def test_coherence_moa_revue_estimation_pro_valide(self):
+        controle = valider_combinaison_projet({
+            "famille_client": "amo",
+            "phase_intervention": "revue_pro",
+            "missions_principales": ["revue_estimation_pro"],
+        })
+        self.assertTrue(controle["valide"])
+
+    def test_moe_pro_dce_missions_et_livrables(self):
+        payload = {"famille_client": "maitrise_oeuvre", "phase_intervention": "pro"}
+        self.assertIn("economie_conception", [m["code"] for m in suggerer_missions(payload)])
+        self.assertTrue({"cctp", "dpgf", "bpu_dqe", "estimation"}.issubset({l["code"] for l in construire_livrables_attendus(payload)}))
+
+    def test_moe_act_genere_rapport_analyse_offres(self):
+        livrables = construire_livrables_attendus({"famille_client": "maitrise_oeuvre", "phase_intervention": "act"})
+        self.assertIn("rapport_analyse_offres", [l["code"] for l in livrables])
+
+    def test_entreprise_appel_offres_livrables(self):
+        livrables = construire_livrables_attendus({"famille_client": "entreprise", "contexte_contractuel": "appel_offres"})
+        self.assertTrue({"analyse_dce", "etude_prix", "memoire_technique"}.issubset({l["code"] for l in livrables}))
+
+    def test_entreprise_ne_propose_pas_phases_moe_par_defaut(self):
+        reponse = self.client.get("/api/projets/parcours/?famille_client=entreprise&contexte_contractuel=appel_offres")
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertNotIn("pro", [p["code"] for p in reponse.data["referentiels"]["phases_intervention"]])
+
+    def test_cotraitance_demande_role_lbh(self):
+        controle = valider_combinaison_projet({"famille_client": "cotraitance", "contexte_contractuel": "cotraitance"})
+        self.assertFalse(controle["valide"])
+        self.assertIn("role_lbh_manquant", [a["code"] for a in controle["bloquant"]])
+
+    def test_sous_traitance_demande_donneur_ordre_et_format(self):
+        controle = valider_combinaison_projet({"famille_client": "sous_traitance", "contexte_contractuel": "sous_traitance"})
+        self.assertIn("donneur_ordre_manquant", [a["code"] for a in controle["alertes"]])
+        self.assertIn("format_attendu_manquant", [a["code"] for a in controle["alertes"]])
+
+    def test_methodes_filtrees_par_contexte(self):
+        methodes_moa = [m["code"] for m in suggerer_methodes_estimation({"famille_client": "maitrise_ouvrage", "phase_intervention": "faisabilite"})]
+        methodes_entreprise = [m["code"] for m in suggerer_methodes_estimation({"famille_client": "entreprise"})]
+        self.assertIn("ratio_m2", methodes_moa)
+        self.assertIn("debourse_sec", methodes_entreprise)
+        self.assertNotIn("debourse_sec", methodes_moa)
+
+    def test_donnees_techniques_batiment_et_infrastructure(self):
+        batiment = [c["code"] for c in suggerer_champs_donnees_techniques({"famille_client": "maitrise_ouvrage", "nature_ouvrage": "batiment"})]
+        infra = [c["code"] for c in suggerer_champs_donnees_techniques({"famille_client": "maitrise_ouvrage", "nature_ouvrage": "infrastructure"})]
+        self.assertIn("surface_plancher", batiment)
+        self.assertIn("lineaire_voirie", infra)
+
+    def test_fiche_projet_retourne_libelles_et_codes(self):
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "maitrise_ouvrage",
+                "sous_type_client": "collectivite",
+                "contexte_contractuel": "consultation_directe",
+                "mission_principale": "verifier_enveloppe",
+                "phase_intervention": "faisabilite",
+                "nature_ouvrage": "infrastructure",
+                "nature_marche": "public",
+            }
+        }
+        self.projet.save(update_fields=["qualification_wizard"])
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/fiche-metier/")
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["contexte_metier"]["famille_client"]["libelle"], "Maîtrise d'ouvrage")
+        self.assertEqual(reponse.data["contexte_metier"]["nature_ouvrage"]["libelle"], "Infrastructure / VRD")
+
+    def test_modules_actifs_raisons_adaptees(self):
+        moa = construire_modules_actifs({"famille_client": "maitrise_ouvrage"})
+        entreprise = construire_modules_actifs({"famille_client": "entreprise"})
+        self.assertIn("ratios", next(m["raison_activation"] for m in moa if m["code"] == "ressources"))
+        self.assertIn("DCE", next(m["raison_activation"] for m in entreprise if m["code"] == "ressources"))

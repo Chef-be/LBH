@@ -5,6 +5,15 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .services_coherence_projet import (
+    CADRES_JURIDIQUES,
+    LIBELLES_CODES,
+    construire_modules_actifs as construire_modules_actifs_coherence,
+    construire_options_wizard_contexte,
+    suggerer_champs_donnees_techniques,
+    suggerer_missions,
+)
+
 
 def _option(code: str, libelle: str, description: str = "", **extras: Any) -> dict[str, Any]:
     return {
@@ -414,13 +423,18 @@ def _champs_dynamiques(famille_client: str) -> list[dict[str, Any]]:
 
 def referentiels_projet(famille_client: str = "", nature_ouvrage: str = "batiment") -> dict[str, list[dict[str, Any]]]:
     famille = famille_client if famille_client in SOUS_TYPES_CLIENT_PAR_FAMILLE else "autre"
+    options = construire_options_wizard_contexte({"famille_client": famille, "nature_ouvrage": nature_ouvrage})
     return {
-        "familles_client": deepcopy(FAMILLES_CLIENT),
-        "sous_types_client": deepcopy(SOUS_TYPES_CLIENT_PAR_FAMILLE.get(famille, SOUS_TYPES_CLIENT_PAR_FAMILLE["autre"])),
-        "contextes_contractuels": deepcopy(CONTEXTES_CONTRACTUELS_PAR_FAMILLE.get(famille, CONTEXTES_CONTRACTUELS_PAR_FAMILLE["autre"])),
-        "missions_principales": _missions_pour_famille(famille, nature_ouvrage),
+        "familles_client": deepcopy(options["types_client"]),
+        "sous_types_client": deepcopy(options["sous_types_client"]),
+        "cadres_juridiques": deepcopy(CADRES_JURIDIQUES),
+        # Compatibilité frontend existant : ce champ représente désormais le mode de commande.
+        "contextes_contractuels": deepcopy(options["modes_commande"]),
+        "roles_lbh": deepcopy(options["roles_lbh"]),
+        "methodes_estimation": deepcopy(options["methodes_estimation"]),
+        "missions_principales": deepcopy(options["missions"]),
         "sous_missions": deepcopy(SOUS_MISSIONS),
-        "phases_intervention": _phases_pour_famille(famille, nature_ouvrage),
+        "phases_intervention": deepcopy(options["phases_intervention"]),
     }
 
 
@@ -450,7 +464,25 @@ def construire_parcours_projet(
     nature_ouvrage: str = "batiment",
     nature_marche: str = "public",
 ) -> dict[str, Any]:
+    payload = {
+        "famille_client": famille_client,
+        "sous_type_client": sous_type_client,
+        "contexte_contractuel": contexte_contractuel,
+        "missions_principales": missions_principales or [],
+        "phase_intervention": phase_intervention,
+        "nature_ouvrage": nature_ouvrage,
+        "nature_marche": nature_marche,
+    }
+    options = construire_options_wizard_contexte(payload)
     referentiels = referentiels_projet(famille_client=famille_client, nature_ouvrage=nature_ouvrage)
+    referentiels.update({
+        "missions_principales": suggerer_missions(payload),
+        "methodes_estimation": options["methodes_estimation"],
+        "roles_lbh": options["roles_lbh"],
+        "cadres_juridiques": options["cadres_juridiques"],
+        "contextes_contractuels": options["modes_commande"],
+        "phases_intervention": options["phases_intervention"],
+    })
 
     from .services import construire_dossiers_documentaires
 
@@ -477,16 +509,21 @@ def construire_parcours_projet(
         ],
         "selection": {
             "nature_marche": nature_marche,
+            "cadre_juridique": nature_marche,
             "nature_ouvrage": nature_ouvrage,
             "missions_principales": missions_principales or [],
             "famille_client": famille_client,
             "sous_type_client": sous_type_client,
             "contexte_contractuel": contexte_contractuel,
+            "mode_commande": contexte_contractuel,
             "phase_intervention": phase_intervention,
         },
         "referentiels": referentiels,
-        "champs_dynamiques": _champs_dynamiques(famille_client or "autre"),
+        "champs_dynamiques": [{"groupe": "donnees_metier", "champs": suggerer_champs_donnees_techniques(payload)}],
         "dossiers_ged": dossiers_ged,
+        "controle_coherence": options["controle_coherence"],
+        "livrables_attendus": options["livrables_attendus"],
+        "modules_actifs": construire_modules_actifs_coherence(payload),
     }
 
 
@@ -541,7 +578,7 @@ def normaliser_contexte_persistant(contexte: dict[str, Any] | None) -> dict[str,
         "missions_associees": [valeur for valeur in missions_associees if valeur],
         "phase_intervention": source.get("phase_intervention") or "",
         "nature_ouvrage": source.get("nature_ouvrage") or "batiment",
-        "nature_marche": source.get("nature_marche") or "public",
+        "nature_marche": source.get("cadre_juridique") or source.get("nature_marche") or "public",
         "partie_contractante": source.get("partie_contractante") or "",
         "role_lbh": source.get("role_lbh") or "",
         "methode_estimation": source.get("methode_estimation") or "",
@@ -593,7 +630,7 @@ def _resoudre_mission(referentiel_statique: list[dict[str, Any]], code: str) -> 
     return (
         _trouver_option(referentiel_statique, code)
         or _mission_depuis_bdd(code)
-        or _option(code, code)
+        or _option(code, LIBELLES_CODES.get(code, code))
     )
 
 
@@ -633,11 +670,12 @@ def contexte_projet_pour_projet(projet) -> dict[str, Any] | None:
             for code in contexte_normalise["missions_associees"]
         ],
         "phase_intervention": _trouver_option(referentiels["phases_intervention"], contexte_normalise["phase_intervention"]) if contexte_normalise["phase_intervention"] else None,
-        "nature_ouvrage": contexte_normalise["nature_ouvrage"],
-        "nature_marche": contexte_normalise["nature_marche"],
+        "cadre_juridique": _trouver_option(referentiels["cadres_juridiques"], contexte_normalise["nature_marche"]) or _option(contexte_normalise["nature_marche"], LIBELLES_CODES.get(contexte_normalise["nature_marche"], contexte_normalise["nature_marche"] or "—")),
+        "nature_ouvrage": _option(contexte_normalise["nature_ouvrage"], LIBELLES_CODES.get(contexte_normalise["nature_ouvrage"], contexte_normalise["nature_ouvrage"] or "—")),
+        "nature_marche": _trouver_option(referentiels["cadres_juridiques"], contexte_normalise["nature_marche"]) or _option(contexte_normalise["nature_marche"], LIBELLES_CODES.get(contexte_normalise["nature_marche"], contexte_normalise["nature_marche"] or "—")),
         "partie_contractante": contexte_normalise["partie_contractante"],
-        "role_lbh": contexte_normalise["role_lbh"],
-        "methode_estimation": contexte_normalise["methode_estimation"],
+        "role_lbh": _option(contexte_normalise["role_lbh"], LIBELLES_CODES.get(contexte_normalise["role_lbh"], contexte_normalise["role_lbh"] or "—")),
+        "methode_estimation": _option(contexte_normalise["methode_estimation"], LIBELLES_CODES.get(contexte_normalise["methode_estimation"], contexte_normalise["methode_estimation"] or "—")),
         "donnees_entree": contexte_normalise["donnees_entree"],
         "sous_missions": [
             _trouver_option(referentiels["sous_missions"], code) or _mission_depuis_bdd(code) or _option(code, code)

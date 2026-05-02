@@ -8,6 +8,12 @@ from typing import Any
 
 from .models import LivrableProjet, LivrableType, MissionClient
 from .referentiels import contexte_projet_pour_projet
+from .services_coherence_projet import (
+    construire_livrables_attendus,
+    construire_modules_actifs as construire_modules_actifs_coherence,
+    libeller_code,
+    valider_combinaison_projet,
+)
 from .services import libelle_phase_projet, normaliser_phase_projet
 
 
@@ -67,10 +73,10 @@ def _contexte_normalise(projet) -> dict[str, Any]:
         "missions_associees": [m for m in missions_associees if m],
         "sous_missions": [m for m in sous_missions if m],
         "phase_intervention": phase,
-        "nature_ouvrage": str(contexte.get("nature_ouvrage") or "batiment"),
-        "nature_marche": str(contexte.get("nature_marche") or ""),
+        "nature_ouvrage": _code_option(contexte.get("nature_ouvrage")) or "batiment",
+        "nature_marche": _code_option(contexte.get("nature_marche") or contexte.get("cadre_juridique")),
         "partie_contractante": str(contexte.get("partie_contractante") or ""),
-        "role_lbh": str(contexte.get("role_lbh") or ""),
+        "role_lbh": _code_option(contexte.get("role_lbh")),
     }
 
 
@@ -119,6 +125,19 @@ def _module(code: str, libelle: str, actif: bool, niveau: str, raison: str, ordr
 
 
 def construire_modules_actifs(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    modules = construire_modules_actifs_coherence({
+        "famille_client": ctx["famille_client"],
+        "sous_type_client": ctx["sous_type_client"],
+        "contexte_contractuel": ctx["contexte_contractuel"],
+        "phase_intervention": ctx["phase_intervention"],
+        "mission_principale": ctx["mission_principale"],
+        "missions_principales": ctx["missions_associees"],
+        "nature_ouvrage": ctx["nature_ouvrage"],
+        "nature_marche": ctx["nature_marche"],
+        "role_lbh": ctx["role_lbh"],
+    })
+    if modules:
+        return modules
     profil = _profil_fiche(ctx)
     phase = ctx["phase_intervention"]
     nature = ctx["nature_ouvrage"]
@@ -188,6 +207,19 @@ def _documents_disponibles(projet) -> list[dict[str, Any]]:
 
 
 def _livrables_attendus(ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    livrables = construire_livrables_attendus({
+        "famille_client": ctx["famille_client"],
+        "sous_type_client": ctx["sous_type_client"],
+        "contexte_contractuel": ctx["contexte_contractuel"],
+        "phase_intervention": ctx["phase_intervention"],
+        "mission_principale": ctx["mission_principale"],
+        "missions_principales": ctx["missions_associees"],
+    })
+    if livrables:
+        return [
+            {**livrable, "module_source": livrable.get("module_source", "documents"), "document_lie": None, "ordre": index}
+            for index, livrable in enumerate(livrables, start=1)
+        ]
     profil = _profil_fiche(ctx)
     if profil == "moa_enveloppe":
         items = [("note_budgetaire", "Note budgétaire", "pieces-ecrites"), ("estimation_previsionnelle", "Estimation prévisionnelle", "economie"), ("comparaison_scenarios", "Comparaison de scénarios", "economie")]
@@ -289,6 +321,17 @@ def _alertes_et_actions(projet, ctx: dict[str, Any], pieces_attendues: list[dict
         actions.append({"code": "completer_enveloppe", "libelle": "Compléter l'enveloppe financière", "module": "economie"})
     if livrables and not LivrableProjet.objects.filter(projet=projet).exists():
         actions.append({"code": "generer_livrables", "libelle": "Générer les livrables attendus", "module": "projet"})
+    controle = valider_combinaison_projet({
+        "famille_client": ctx["famille_client"],
+        "sous_type_client": ctx["sous_type_client"],
+        "contexte_contractuel": ctx["contexte_contractuel"],
+        "phase_intervention": ctx["phase_intervention"],
+        "mission_principale": ctx["mission_principale"],
+        "missions_principales": [ctx["mission_principale"], *ctx["missions_associees"]],
+        "role_lbh": ctx["role_lbh"],
+    })
+    for alerte in [*controle["bloquant"], *controle["alertes"]]:
+        alertes.append({"niveau": "bloquant" if alerte in controle["bloquant"] else "attention", "code": alerte["code"], "message": alerte["message"]})
     return alertes, actions
 
 
@@ -333,16 +376,18 @@ def construire_fiche_metier_projet(projet) -> dict[str, Any]:
             "statut_metier": projet.get_statut_display(),
         },
         "contexte_metier": {
-            "famille_client": ctx["famille_client"],
-            "sous_type_client": ctx["sous_type_client"],
-            "contexte_contractuel": ctx["contexte_contractuel"],
-            "mission_principale": ctx["mission_principale"],
-            "missions_associees": ctx["missions_associees"],
-            "phase_intervention": ctx["phase_intervention"],
-            "nature_ouvrage": ctx["nature_ouvrage"],
-            "nature_marche": ctx["nature_marche"],
+            "famille_client": libeller_code(ctx["famille_client"]),
+            "sous_type_client": libeller_code(ctx["sous_type_client"]),
+            "contexte_contractuel": libeller_code(ctx["contexte_contractuel"]),
+            "mode_commande": libeller_code(ctx["contexte_contractuel"]),
+            "mission_principale": libeller_code(ctx["mission_principale"]),
+            "missions_associees": [libeller_code(code) for code in ctx["missions_associees"]],
+            "phase_intervention": libeller_code(ctx["phase_intervention"]),
+            "nature_ouvrage": libeller_code(ctx["nature_ouvrage"]),
+            "nature_marche": libeller_code(ctx["nature_marche"]),
+            "cadre_juridique": libeller_code(ctx["nature_marche"]),
             "partie_contractante": ctx["partie_contractante"],
-            "role_lbh": ctx["role_lbh"],
+            "role_lbh": libeller_code(ctx["role_lbh"]),
         },
         "parcours_metier": {
             "profil": profil,
