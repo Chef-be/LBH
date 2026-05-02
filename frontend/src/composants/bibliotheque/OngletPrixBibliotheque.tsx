@@ -8,14 +8,18 @@ import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
 import { ActionsRapidesAdaptatives } from "@/composants/ui/ActionsRapides";
 import {
+  AlertTriangle,
   Calculator,
   CheckCircle,
+  ClipboardList,
   DatabaseZap,
   Eye,
   FileText,
   FileUp,
   Filter,
   Pencil,
+  PlusCircle,
+  RefreshCw,
   Search,
   Trash2,
   UploadCloud,
@@ -183,6 +187,36 @@ interface SousDetailPrix {
   observations?: string;
 }
 
+interface AuditSdpDs {
+  coherent: boolean;
+  total_sdp: string;
+  ds_agrege: string;
+  ecart: string;
+  ecart_pourcentage: string;
+  statut: "coherent" | "ecart_sdp_ds" | "sdp_absent" | "ds_absent";
+  message: string;
+  actions_proposees: string[];
+  nb_sous_details: number;
+  ds_justifie_par_sdp: boolean;
+  source_ds: string;
+  detail_ressources: Record<string, string>;
+}
+
+interface PropositionComplementSdp {
+  creation_possible: boolean;
+  ecart: string;
+  detail?: string;
+  ligne?: {
+    type_ressource: string;
+    designation: string;
+    unite: string;
+    quantite: string;
+    cout_unitaire_ht: string;
+    montant_ht: string;
+    observations: string;
+  };
+}
+
 // Couleurs par type de ressource (SDP)
 const COULEURS_RESSOURCE: Record<string, string> = {
   mo: "#6366f1",
@@ -237,6 +271,134 @@ function classePctDS(type: string, pct: number): string {
   return "text-green-700";
 }
 
+function ModalAuditSdpDs({
+  audit,
+  proposition,
+  confirmationComplement,
+  actionEnCours,
+  onFermer,
+  onRecalculer,
+  onProposerComplement,
+  onConfirmerComplement,
+  onAnnulerComplement,
+}: {
+  audit: AuditSdpDs;
+  proposition: PropositionComplementSdp | null;
+  confirmationComplement: boolean;
+  actionEnCours: string | null;
+  onFermer: () => void;
+  onRecalculer: () => void;
+  onProposerComplement: () => void;
+  onConfirmerComplement: () => void;
+  onAnnulerComplement: () => void;
+}) {
+  const details = audit.detail_ressources ?? {};
+  const sourceEstimee = audit.source_ds === "estimation_inverse";
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Audit SDP / déboursé sec</h3>
+            <p className="mt-1 text-sm text-slate-500">{audit.message}</p>
+          </div>
+          <button type="button" onClick={onFermer} className="rounded-lg p-1.5 hover:bg-slate-100">
+            <X className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
+
+        <div className="space-y-5 px-5 py-4">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="text-xs text-slate-400">Total du sous-détail de prix</p>
+              <p className="mt-1 font-mono text-sm font-semibold text-slate-900">{formaterMontant(audit.total_sdp)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="text-xs text-slate-400">Déboursé sec agrégé</p>
+              <p className="mt-1 font-mono text-sm font-semibold text-slate-900">{formaterMontant(audit.ds_agrege)}</p>
+            </div>
+            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+              <p className="text-xs text-orange-600">Écart à justifier</p>
+              <p className="mt-1 font-mono text-sm font-semibold text-orange-800">{formaterMontant(audit.ecart)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="text-xs text-slate-400">Écart %</p>
+              <p className="mt-1 font-mono text-sm font-semibold text-slate-900">{toNumber(audit.ecart_pourcentage).toFixed(2)} %</p>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Détail par type de ressource</h4>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[
+                ["total_mo", "Main-d'œuvre"],
+                ["total_matieres", "Matières"],
+                ["total_materiel", "Matériel"],
+                ["total_consommables", "Consommables"],
+                ["total_sous_traitance", "Sous-traitance"],
+                ["total_transport", "Transport"],
+                ["total_frais_divers", "Frais divers"],
+              ].map(([cle, libelle]) => (
+                <div key={cle} className="flex justify-between rounded-md bg-slate-50 px-3 py-2 text-sm">
+                  <span className="text-slate-500">{libelle}</span>
+                  <span className="font-mono text-slate-800">{formaterMontant(details[cle])}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {sourceEstimee && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Le DS provient d’une estimation inverse. Il ne doit pas être présenté comme un sous-détail analytique réel.
+            </div>
+          )}
+
+          {proposition?.ligne && (
+            <div className="rounded-lg border border-slate-200 p-3 text-sm">
+              <p className="font-medium text-slate-800">Proposition de complément SDP</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <span className="text-slate-500">Désignation : {proposition.ligne.designation}</span>
+                <span className="font-mono text-slate-800">Montant : {formaterMontant(proposition.ligne.montant_ht)}</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">{proposition.ligne.observations}</p>
+            </div>
+          )}
+
+          {confirmationComplement && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-3 text-sm text-orange-800">
+              Confirmer la création de cette ligne de complément SDP ? Elle sera ajoutée comme “Frais divers” et devra être requalifiée.
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          {confirmationComplement ? (
+            <>
+              <button type="button" className="btn-secondaire text-sm" onClick={onAnnulerComplement}>Annuler</button>
+              <button type="button" className="btn-primaire text-sm" onClick={onConfirmerComplement} disabled={actionEnCours === "creer-complement"}>
+                <PlusCircle className="h-4 w-4" />
+                Créer le complément SDP
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn-secondaire text-sm" onClick={onProposerComplement} disabled={actionEnCours === "proposer-complement"}>
+                <ClipboardList className="h-4 w-4" />
+                Proposer un complément SDP
+              </button>
+              <button type="button" className="btn-primaire text-sm" onClick={onRecalculer} disabled={actionEnCours === "recalculer-sdp"}>
+                <RefreshCw className="h-4 w-4" />
+                Recalculer le DS depuis le SDP
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PanneauDetailLigne({
   ligne,
   onFermer,
@@ -255,11 +417,20 @@ function PanneauDetailLigne({
     queryKey: ["sous-details-bibliotheque", ligne.id],
     queryFn: () => api.get<SousDetailPrix[]>(`/api/bibliotheque/${ligne.id}/sous-details/`),
   });
+  const { data: auditSdpDs, refetch: rechargerAudit } = useQuery<AuditSdpDs>({
+    queryKey: ["audit-sdp-ds", ligne.id],
+    queryFn: () => api.get<AuditSdpDs>(`/api/bibliotheque/${ligne.id}/audit-sdp-ds/`),
+  });
   const sousDetails: SousDetailPrix[] = Array.isArray(sousDetailsData)
     ? (sousDetailsData as SousDetailPrix[])
     : ((sousDetailsData as unknown as { results?: SousDetailPrix[] })?.results ?? []);
 
   const [completionEnCours, setCompletionEnCours] = useState(false);
+  const [auditOuvert, setAuditOuvert] = useState(false);
+  const [actionAudit, setActionAudit] = useState<string | null>(null);
+  const [propositionComplement, setPropositionComplement] = useState<PropositionComplementSdp | null>(null);
+  const [confirmationComplement, setConfirmationComplement] = useState(false);
+  const [messageActionSdp, setMessageActionSdp] = useState<string | null>(null);
 
   const completerSousDetails = async () => {
     setCompletionEnCours(true);
@@ -267,8 +438,64 @@ function PanneauDetailLigne({
       await api.post(`/api/bibliotheque/${ligne.id}/completer-sous-details/`, {});
       queryClient.invalidateQueries({ queryKey: ["sous-details-bibliotheque", ligne.id] });
       rechargerSD();
+      rechargerAudit();
     } finally {
       setCompletionEnCours(false);
+    }
+  };
+
+  const recalculerDepuisSdp = async () => {
+    setActionAudit("recalculer-sdp");
+    try {
+      await api.post(`/api/bibliotheque/${ligne.id}/recalculer-ds-depuis-sdp/`, {});
+      queryClient.invalidateQueries({ queryKey: ["bibliotheque"] });
+      rechargerAudit();
+      rechargerSD();
+    } finally {
+      setActionAudit(null);
+    }
+  };
+
+  const proposerComplement = async () => {
+    setActionAudit("proposer-complement");
+    try {
+      const proposition = await api.post<PropositionComplementSdp>(`/api/bibliotheque/${ligne.id}/proposer-complement-sdp/`, {});
+      setPropositionComplement(proposition);
+      setConfirmationComplement(Boolean(proposition.creation_possible));
+      setAuditOuvert(true);
+    } finally {
+      setActionAudit(null);
+    }
+  };
+
+  const confirmerComplement = async () => {
+    setActionAudit("creer-complement");
+    try {
+      await api.post(`/api/bibliotheque/${ligne.id}/creer-complement-sdp/`, { confirmation: true });
+      setConfirmationComplement(false);
+      setPropositionComplement(null);
+      queryClient.invalidateQueries({ queryKey: ["bibliotheque"] });
+      rechargerSD();
+      rechargerAudit();
+    } finally {
+      setActionAudit(null);
+    }
+  };
+
+  const genererPropositionEstimee = async () => {
+    setActionAudit("proposition-estimee");
+    try {
+      const proposition = await api.post<{ methode?: string; ds_estime?: string; detail?: string }>(
+        `/api/bibliotheque/${ligne.id}/proposer-decomposition-estimee/`,
+        {}
+      );
+      setMessageActionSdp(
+        proposition.ds_estime
+          ? `Proposition de décomposition estimée générée sur un DS estimé de ${formaterMontant(proposition.ds_estime)}.`
+          : proposition.detail || "Proposition de décomposition estimée générée."
+      );
+    } finally {
+      setActionAudit(null);
     }
   };
 
@@ -397,11 +624,28 @@ function PanneauDetailLigne({
             {chargementSD ? (
               <p className="text-sm text-slate-400">Chargement…</p>
             ) : sousDetails.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">
-                Aucun sous-détail renseigné.{" "}
-                <button type="button" className="text-primaire-600 hover:underline" onClick={completerSousDetails} disabled={completionEnCours}>
-                  Générer depuis composantes agrégées
-                </button>
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm">
+                <p className="font-medium text-slate-700">Ce prix n’est pas encore justifié par un sous-détail analytique.</p>
+                <p className="mt-1 text-slate-500">Le déboursé sec est conservé comme valeur estimée ou saisie manuelle tant qu’aucun SDP réel n’est validé.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link href={`/bibliotheque/${ligne.id}`} className="btn-secondaire text-xs">
+                    <PlusCircle className="h-3.5 w-3.5" />
+                    Créer un sous-détail
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn-secondaire text-xs"
+                    onClick={genererPropositionEstimee}
+                    disabled={actionAudit === "proposition-estimee"}
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" />
+                    Générer une proposition estimée
+                  </button>
+                  <button type="button" className="btn-secondaire text-xs" onClick={() => setMessageActionSdp("DS conservé comme valeur manuelle.")}>
+                    Conserver comme DS manuel
+                  </button>
+                </div>
+                {messageActionSdp && <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">{messageActionSdp}</p>}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -531,9 +775,31 @@ function PanneauDetailLigne({
                 })}
                 {/* Écart DS SDP vs DS agrégé */}
                 {ds > 0 && Math.abs(totalSDP - ds) > 0.01 && (
-                  <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
-                    Écart SDP/DS : Total SDP = {formaterMontant(totalSDP)}, DS agrégé = {formaterMontant(ds)}{" "}
-                    (Δ = {formaterMontant(Math.abs(totalSDP - ds))})
+                  <div className="mt-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-orange-500" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold">Incohérence entre le sous-détail et le déboursé sec</p>
+                        <p className="mt-1">
+                          Le total du sous-détail de prix est de {formaterMontant(totalSDP)}, alors que le déboursé sec agrégé est de {formaterMontant(ds)}.
+                          {" "}Il manque {formaterMontant(Math.abs(totalSDP - ds))} de justification analytique, ou le DS agrégé doit être recalculé depuis le SDP.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button type="button" className="btn-secondaire text-xs" onClick={recalculerDepuisSdp} disabled={actionAudit === "recalculer-sdp"}>
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            Recalculer le DS depuis le SDP
+                          </button>
+                          <button type="button" className="btn-secondaire text-xs" onClick={proposerComplement} disabled={actionAudit === "proposer-complement"}>
+                            <ClipboardList className="h-3.5 w-3.5" />
+                            Proposer un complément SDP
+                          </button>
+                          <button type="button" className="btn-secondaire text-xs" onClick={() => setAuditOuvert(true)}>
+                            <Eye className="h-3.5 w-3.5" />
+                            Voir le détail de l’audit
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -699,6 +965,19 @@ function PanneauDetailLigne({
           Modifier
         </Link>
       </div>
+      {auditOuvert && auditSdpDs && (
+        <ModalAuditSdpDs
+          audit={auditSdpDs}
+          proposition={propositionComplement}
+          confirmationComplement={confirmationComplement}
+          actionEnCours={actionAudit}
+          onFermer={() => setAuditOuvert(false)}
+          onRecalculer={recalculerDepuisSdp}
+          onProposerComplement={proposerComplement}
+          onConfirmerComplement={confirmerComplement}
+          onAnnulerComplement={() => setConfirmationComplement(false)}
+        />
+      )}
     </div>
   );
 }

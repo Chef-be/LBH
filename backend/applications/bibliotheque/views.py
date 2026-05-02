@@ -10,12 +10,17 @@ from rest_framework.response import Response
 
 from .models import LignePrixBibliotheque, SousDetailPrix
 from .services import (
+    auditer_coherence_sdp_ds,
     completer_sous_details_manquants,
+    creer_complement_sdp_depuis_ecart,
     generer_sous_details_depuis_composantes,
+    generer_proposition_decomposition_estimee,
     importer_bordereau_depuis_fichier,
     importer_bordereaux_prix_references,
     importer_referentiel_prix_construction,
+    proposer_complement_sdp_depuis_ecart,
     recalculer_composantes_depuis_sous_details,
+    recalculer_ds_depuis_sdp,
     recalculer_depuis_prix_vente,
 )
 from .serialiseurs import (
@@ -180,36 +185,73 @@ def vue_recalculer_sous_details(request, pk):
        puis décomposition par ratios ARTIPRIX 2025
     3. Ni sous-détails ni PV → erreur 400
     """
-    from .taches import recalculer_ligne_inverse
+    entree = generics.get_object_or_404(LignePrixBibliotheque.objects.prefetch_related("sous_details"), pk=pk)
+    if entree.sous_details.exists():
+        resultat = recalculer_ds_depuis_sdp(entree, utilisateur=request.user)
+        return Response({
+            **resultat,
+            "methode": "sous_details",
+            "debourse_sec_unitaire": resultat["apres"]["debourse_sec_unitaire"],
+        })
 
-    entree = generics.get_object_or_404(LignePrixBibliotheque, pk=pk)
-    composantes, methode = recalculer_ligne_inverse(entree)
-
-    if not composantes:
+    proposition = generer_proposition_decomposition_estimee(entree)
+    if not proposition.get("creation_possible"):
         return Response(
-            {"detail": "Aucun sous-détail ni prix de vente disponible pour recalculer."},
+            {"detail": "Aucun sous-détail ni prix de vente disponible pour proposer un recalcul."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
-    for champ, valeur in composantes.items():
-        setattr(entree, champ, valeur)
-    entree.save(update_fields=list(composantes.keys()) + ["date_modification"])
-
-    libelle_methode = {
-        "sous_details": "Recalcul depuis sous-détails.",
-        "inversees": "Étude de prix inversée (DS = PV × Kpv).",
-        "affinees": "Sous-détails affinés par étude inversée (écart > 30%).",
-    }.get(methode, "Recalcul effectué.")
-
     return Response({
-        "detail": libelle_methode,
-        "methode": methode,
-        "debourse_sec_unitaire": str(composantes.get("debourse_sec_unitaire", "0")),
-        "cout_matieres": str(composantes.get("cout_matieres", "0")),
-        "cout_materiel": str(composantes.get("cout_materiel", "0")),
-        "temps_main_oeuvre": str(composantes.get("temps_main_oeuvre", "0")),
-        "cout_horaire_mo": str(composantes.get("cout_horaire_mo", "0")),
+        "detail": "Aucun SDP réel présent : proposition estimée retournée sans modifier la ligne.",
+        "methode": "proposition_estimee",
+        "proposition": proposition,
     })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_audit_sdp_ds(request, pk):
+    entree = generics.get_object_or_404(LignePrixBibliotheque.objects.prefetch_related("sous_details"), pk=pk)
+    return Response(auditer_coherence_sdp_ds(entree))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_recalculer_ds_depuis_sdp(request, pk):
+    entree = generics.get_object_or_404(LignePrixBibliotheque.objects.prefetch_related("sous_details"), pk=pk)
+    if not entree.sous_details.exists():
+        return Response({"detail": "Aucun sous-détail analytique réel à utiliser."}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(recalculer_ds_depuis_sdp(entree, utilisateur=request.user))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_proposer_complement_sdp(request, pk):
+    entree = generics.get_object_or_404(LignePrixBibliotheque.objects.prefetch_related("sous_details"), pk=pk)
+    return Response(proposer_complement_sdp_depuis_ecart(entree))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_creer_complement_sdp(request, pk):
+    if not _coerce_booleen(request.data.get("confirmation")):
+        return Response({"detail": "Confirmation requise pour créer un complément SDP."}, status=status.HTTP_400_BAD_REQUEST)
+    entree = generics.get_object_or_404(LignePrixBibliotheque.objects.prefetch_related("sous_details"), pk=pk)
+    return Response(creer_complement_sdp_depuis_ecart(entree, utilisateur=request.user))
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_proposer_decomposition_estimee(request, pk):
+    entree = generics.get_object_or_404(LignePrixBibliotheque.objects.prefetch_related("sous_details"), pk=pk)
+    if entree.sous_details.exists():
+        return Response(
+            {"detail": "Un sous-détail analytique réel existe déjà. L'estimation inverse n'est pas appliquée."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    proposition = generer_proposition_decomposition_estimee(entree)
+    if not proposition.get("creation_possible"):
+        return Response(proposition, status=status.HTTP_400_BAD_REQUEST)
+    return Response(proposition)
 
 
 @api_view(["POST"])

@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from .models import LignePrixBibliotheque, SousDetailPrix
+from .services import auditer_coherence_sdp_ds
 
 
 class LignePrixBibliothequeListeSerialiseur(serializers.ModelSerializer):
@@ -24,6 +25,13 @@ class LignePrixBibliothequeDetailSerialiseur(serializers.ModelSerializer):
     auteur_nom = serializers.SerializerMethodField()
     niveau_libelle = serializers.CharField(source="get_niveau_display", read_only=True)
     statut_libelle = serializers.CharField(source="get_statut_validation_display", read_only=True)
+    total_sdp = serializers.SerializerMethodField()
+    ds_agrege = serializers.SerializerMethodField()
+    ecart_sdp_ds = serializers.SerializerMethodField()
+    ecart_sdp_ds_pourcentage = serializers.SerializerMethodField()
+    coherence_sdp_ds = serializers.SerializerMethodField()
+    message_coherence_sdp_ds = serializers.SerializerMethodField()
+    nb_sous_details = serializers.SerializerMethodField()
 
     class Meta:
         model = LignePrixBibliotheque
@@ -42,6 +50,10 @@ class LignePrixBibliothequeDetailSerialiseur(serializers.ModelSerializer):
             "cout_matieres", "cout_materiel", "cout_consommables",
             "cout_sous_traitance", "cout_transport", "cout_frais_divers",
             "debourse_sec_unitaire", "prix_vente_unitaire",
+            "total_sdp", "ds_agrege", "ecart_sdp_ds", "ecart_sdp_ds_pourcentage",
+            "coherence_sdp_ds", "message_coherence_sdp_ds", "nb_sous_details",
+            "ds_justifie_par_sdp", "source_ds", "date_dernier_recalcul_sdp",
+            "message_controle_sdp_ds",
             "lot_cctp_reference", "caracteristiques_techniques", "conditions_mise_en_oeuvre",
             "source", "auteur", "auteur_nom", "fiabilite",
             "periode_validite_debut", "periode_validite_fin",
@@ -56,6 +68,34 @@ class LignePrixBibliothequeDetailSerialiseur(serializers.ModelSerializer):
         if obj.auteur:
             return f"{obj.auteur.prenom} {obj.auteur.nom}"
         return None
+
+    def _audit_sdp_ds(self, obj):
+        cache = getattr(obj, "_audit_sdp_ds_cache", None)
+        if cache is None:
+            cache = auditer_coherence_sdp_ds(obj)
+            setattr(obj, "_audit_sdp_ds_cache", cache)
+        return cache
+
+    def get_total_sdp(self, obj):
+        return self._audit_sdp_ds(obj)["total_sdp"]
+
+    def get_ds_agrege(self, obj):
+        return self._audit_sdp_ds(obj)["ds_agrege"]
+
+    def get_ecart_sdp_ds(self, obj):
+        return self._audit_sdp_ds(obj)["ecart"]
+
+    def get_ecart_sdp_ds_pourcentage(self, obj):
+        return self._audit_sdp_ds(obj)["ecart_pourcentage"]
+
+    def get_coherence_sdp_ds(self, obj):
+        return self._audit_sdp_ds(obj)["statut"]
+
+    def get_message_coherence_sdp_ds(self, obj):
+        return self._audit_sdp_ds(obj)["message"]
+
+    def get_nb_sous_details(self, obj):
+        return self._audit_sdp_ds(obj)["nb_sous_details"]
 
 
 class SousDetailPrixSerialiseur(serializers.ModelSerializer):

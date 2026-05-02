@@ -36,6 +36,14 @@ class LignePrixBibliotheque(models.Model):
         ("etude_prix", "Étude de prix"),
     ]
 
+    SOURCES_DS = [
+        ("sdp_reel", "Sous-détail analytique réel"),
+        ("estimation_inverse", "Estimation inverse"),
+        ("saisie_manuelle", "Saisie manuelle"),
+        ("import", "Import"),
+        ("inconnu", "Inconnu"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Niveau de prix
@@ -97,6 +105,10 @@ class LignePrixBibliotheque(models.Model):
     cout_frais_divers = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     debourse_sec_unitaire = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     prix_vente_unitaire = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    source_ds = models.CharField(max_length=30, choices=SOURCES_DS, default="inconnu")
+    date_dernier_recalcul_sdp = models.DateTimeField(null=True, blank=True)
+    ds_justifie_par_sdp = models.BooleanField(default=False)
+    message_controle_sdp_ds = models.TextField(blank=True)
 
     # Liens CCTP
     prescriptions_liees = models.ManyToManyField(
@@ -188,6 +200,7 @@ class SousDetailPrix(models.Model):
         ("mo", "Main-d'œuvre"),
         ("matiere", "Matière / Fourniture"),
         ("materiel", "Matériel / Engin"),
+        ("consommable", "Consommable"),
         ("sous_traitance", "Sous-traitance"),
         ("transport", "Transport"),
         ("frais_divers", "Frais divers"),

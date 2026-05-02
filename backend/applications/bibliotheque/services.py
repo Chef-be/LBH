@@ -15,6 +15,7 @@ from typing import Iterable
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
+from django.utils import timezone
 from django.db import transaction
 from lxml import html as lxml_html
 
@@ -1962,55 +1963,263 @@ def completer_sous_details_manquants(ligne_prix: LignePrixBibliotheque) -> int:
     return len(nouvelles)
 
 
+def _q4(valeur: Decimal) -> Decimal:
+    return valeur.quantize(Decimal("0.0001"))
+
+
+def calculer_total_sdp(ligne_prix: LignePrixBibliotheque) -> dict[str, Decimal | int]:
+    """Calcule le total SDP réel et sa ventilation depuis les sous-détails."""
+    totaux: dict[str, Decimal | int] = {
+        "total_sdp": Decimal("0"),
+        "total_mo": Decimal("0"),
+        "total_matieres": Decimal("0"),
+        "total_materiel": Decimal("0"),
+        "total_consommables": Decimal("0"),
+        "total_sous_traitance": Decimal("0"),
+        "total_transport": Decimal("0"),
+        "total_frais_divers": Decimal("0"),
+        "total_temps_mo": Decimal("0"),
+        "nb_sous_details": 0,
+    }
+
+    for sous_detail in ligne_prix.sous_details.all():
+        montant = sous_detail.montant_ht or Decimal("0")
+        totaux["total_sdp"] += montant
+        totaux["nb_sous_details"] += 1
+        if sous_detail.type_ressource == "mo":
+            totaux["total_mo"] += montant
+            totaux["total_temps_mo"] += sous_detail.quantite or Decimal("0")
+        elif sous_detail.type_ressource == "matiere":
+            totaux["total_matieres"] += montant
+        elif sous_detail.type_ressource == "materiel":
+            totaux["total_materiel"] += montant
+        elif sous_detail.type_ressource == "consommable":
+            totaux["total_consommables"] += montant
+        elif sous_detail.type_ressource == "sous_traitance":
+            totaux["total_sous_traitance"] += montant
+        elif sous_detail.type_ressource == "transport":
+            totaux["total_transport"] += montant
+        elif sous_detail.type_ressource == "frais_divers":
+            totaux["total_frais_divers"] += montant
+
+    for cle, valeur in list(totaux.items()):
+        if isinstance(valeur, Decimal):
+            totaux[cle] = _q4(valeur)
+    return totaux
+
+
+def _decimal_vers_chaine(valeur: Decimal | int) -> str:
+    if isinstance(valeur, int):
+        return str(valeur)
+    return str(_q4(valeur))
+
+
+def auditer_coherence_sdp_ds(ligne_prix: LignePrixBibliotheque) -> dict[str, object]:
+    """Contrôle la cohérence entre le SDP réel et le DS agrégé."""
+    totaux = calculer_total_sdp(ligne_prix)
+    total_sdp = totaux["total_sdp"]
+    ds_agrege = ligne_prix.debourse_sec_unitaire or Decimal("0")
+    nb_sous_details = int(totaux["nb_sous_details"])
+
+    if nb_sous_details == 0:
+        statut = "sdp_absent"
+        coherent = False
+        ecart = ds_agrege
+        message = "DS non justifié par sous-détail analytique."
+        actions = ["creer_sdp_manuellement", "generer_decomposition_estimee", "conserver_ds_manuel"]
+    elif ds_agrege <= 0:
+        statut = "ds_absent"
+        coherent = False
+        ecart = total_sdp
+        message = "Un sous-détail analytique existe, mais le déboursé sec agrégé est absent."
+        actions = ["recalculer_ds_depuis_sdp"]
+    else:
+        ecart = abs(ds_agrege - total_sdp)
+        coherent = ecart <= Decimal("0.0100")
+        statut = "coherent" if coherent else "ecart_sdp_ds"
+        if coherent:
+            message = "Le déboursé sec agrégé correspond au total du sous-détail de prix."
+            actions = []
+        else:
+            message = (
+                "Le déboursé sec agrégé ne correspond pas au total du sous-détail de prix. "
+                f"Le DS agrégé vaut {ds_agrege:.2f} €, mais seuls {total_sdp:.2f} € sont "
+                f"justifiés par les sous-détails. Écart : {ecart:.2f} €."
+            )
+            actions = ["recalculer_ds_depuis_sdp", "completer_sdp_depuis_ds"]
+
+    ecart_pourcentage = Decimal("0")
+    if ds_agrege > 0:
+        ecart_pourcentage = (abs(ds_agrege - total_sdp) / ds_agrege * Decimal("100")).quantize(Decimal("0.01"))
+
+    return {
+        "coherent": coherent,
+        "total_sdp": _decimal_vers_chaine(total_sdp),
+        "ds_agrege": _decimal_vers_chaine(ds_agrege),
+        "ecart": _decimal_vers_chaine(abs(ecart)),
+        "ecart_pourcentage": str(ecart_pourcentage),
+        "statut": statut,
+        "message": message,
+        "actions_proposees": actions,
+        "nb_sous_details": nb_sous_details,
+        "ds_justifie_par_sdp": bool(coherent and nb_sous_details > 0),
+        "source_ds": ligne_prix.source_ds or "inconnu",
+        "detail_ressources": {
+            cle: _decimal_vers_chaine(valeur)
+            for cle, valeur in totaux.items()
+            if cle != "nb_sous_details"
+        },
+    }
+
+
+@transaction.atomic
+def recalculer_ds_depuis_sdp(ligne_prix: LignePrixBibliotheque, utilisateur=None) -> dict[str, object]:
+    """Aligne le DS agrégé sur le total du sous-détail analytique réel."""
+    ligne = LignePrixBibliotheque.objects.select_for_update().prefetch_related("sous_details").get(pk=ligne_prix.pk)
+    avant = {
+        "temps_main_oeuvre": ligne.temps_main_oeuvre,
+        "cout_horaire_mo": ligne.cout_horaire_mo,
+        "cout_matieres": ligne.cout_matieres,
+        "cout_materiel": ligne.cout_materiel,
+        "cout_consommables": ligne.cout_consommables,
+        "cout_sous_traitance": ligne.cout_sous_traitance,
+        "cout_transport": ligne.cout_transport,
+        "cout_frais_divers": ligne.cout_frais_divers,
+        "debourse_sec_unitaire": ligne.debourse_sec_unitaire,
+    }
+    totaux = calculer_total_sdp(ligne)
+    total_temps_mo = totaux["total_temps_mo"]
+    total_mo = totaux["total_mo"]
+    cout_horaire_mo = Decimal("0")
+    if total_temps_mo > 0:
+        cout_horaire_mo = _q4(total_mo / total_temps_mo)
+
+    ligne.temps_main_oeuvre = _q4(total_temps_mo)
+    ligne.cout_horaire_mo = cout_horaire_mo
+    ligne.cout_matieres = totaux["total_matieres"]
+    ligne.cout_materiel = totaux["total_materiel"]
+    ligne.cout_consommables = totaux["total_consommables"]
+    ligne.cout_sous_traitance = totaux["total_sous_traitance"]
+    ligne.cout_transport = totaux["total_transport"]
+    ligne.cout_frais_divers = totaux["total_frais_divers"]
+    ligne.debourse_sec_unitaire = totaux["total_sdp"]
+    ligne.source_ds = "sdp_reel"
+    ligne.ds_justifie_par_sdp = True
+    ligne.date_dernier_recalcul_sdp = timezone.now()
+    ligne.message_controle_sdp_ds = "DS agrégé recalculé depuis le sous-détail analytique réel."
+    ligne.save(update_fields=[
+        "temps_main_oeuvre", "cout_horaire_mo", "cout_matieres", "cout_materiel",
+        "cout_consommables", "cout_sous_traitance", "cout_transport", "cout_frais_divers",
+        "debourse_sec_unitaire", "source_ds", "ds_justifie_par_sdp",
+        "date_dernier_recalcul_sdp", "message_controle_sdp_ds", "date_modification",
+    ])
+
+    apres = {cle: getattr(ligne, cle) for cle in avant}
+    return {
+        "detail": "Déboursé sec agrégé recalculé depuis le sous-détail de prix.",
+        "avant": {cle: _decimal_vers_chaine(valeur) for cle, valeur in avant.items()},
+        "apres": {cle: _decimal_vers_chaine(valeur) for cle, valeur in apres.items()},
+        "audit": auditer_coherence_sdp_ds(ligne),
+    }
+
+
+def proposer_complement_sdp_depuis_ecart(ligne_prix: LignePrixBibliotheque) -> dict[str, object]:
+    """Prépare une ligne de complément SDP sans l'enregistrer."""
+    totaux = calculer_total_sdp(ligne_prix)
+    total_sdp = totaux["total_sdp"]
+    ds_agrege = ligne_prix.debourse_sec_unitaire or Decimal("0")
+    ecart = _q4(ds_agrege - total_sdp)
+    if ecart <= 0:
+        return {"creation_possible": False, "detail": "Aucun complément positif à proposer.", "ecart": _decimal_vers_chaine(ecart)}
+    return {
+        "creation_possible": True,
+        "ecart": _decimal_vers_chaine(ecart),
+        "ligne": {
+            "type_ressource": "frais_divers",
+            "designation": "Complément de déboursé à qualifier",
+            "unite": ligne_prix.unite or "u",
+            "quantite": "1.000000",
+            "cout_unitaire_ht": str(ecart),
+            "montant_ht": str(ecart),
+            "observations": "Ligne générée pour rapprocher le SDP du DS agrégé. À requalifier.",
+        },
+    }
+
+
+@transaction.atomic
+def creer_complement_sdp_depuis_ecart(ligne_prix: LignePrixBibliotheque, utilisateur=None) -> dict[str, object]:
+    """Crée une ligne de complément SDP après confirmation utilisateur."""
+    ligne = LignePrixBibliotheque.objects.select_for_update().prefetch_related("sous_details").get(pk=ligne_prix.pk)
+    proposition = proposer_complement_sdp_depuis_ecart(ligne)
+    if not proposition.get("creation_possible"):
+        return proposition
+    ordre_max = ligne.sous_details.order_by("-ordre").values_list("ordre", flat=True).first() or 0
+    donnees = proposition["ligne"]
+    sous_detail = SousDetailPrix.objects.create(
+        ligne_prix=ligne,
+        ordre=ordre_max + 1,
+        type_ressource=donnees["type_ressource"],
+        designation=donnees["designation"],
+        unite=donnees["unite"],
+        quantite=Decimal(donnees["quantite"]),
+        cout_unitaire_ht=Decimal(donnees["cout_unitaire_ht"]),
+        observations=donnees["observations"],
+    )
+    ligne.ds_justifie_par_sdp = False
+    ligne.message_controle_sdp_ds = "Complément SDP créé depuis l'écart avec le DS agrégé, à requalifier."
+    ligne.save(update_fields=["ds_justifie_par_sdp", "message_controle_sdp_ds", "date_modification"])
+    return {
+        "detail": "Complément de sous-détail créé. Il doit être requalifié avant validation métier.",
+        "sous_detail_id": str(sous_detail.id),
+        "ligne": proposition["ligne"],
+        "audit": auditer_coherence_sdp_ds(ligne),
+    }
+
+
+def generer_proposition_decomposition_estimee(ligne_prix: LignePrixBibliotheque) -> dict[str, object]:
+    """Produit une proposition estimée sans créer de SDP réel."""
+    from .taches import calculer_ds_depuis_pv, decomposer_ds_en_composantes
+
+    ds = ligne_prix.debourse_sec_unitaire or Decimal("0")
+    source = "debourse_sec_unitaire"
+    if ds <= 0 and ligne_prix.prix_vente_unitaire and ligne_prix.prix_vente_unitaire > 0:
+        ds = calculer_ds_depuis_pv(ligne_prix.prix_vente_unitaire, ligne_prix.corps_etat or "", ligne_prix.famille or "")
+        source = "prix_vente_unitaire"
+    if ds <= 0:
+        return {"creation_possible": False, "detail": "Aucun DS ni prix de vente disponible pour proposer une décomposition estimée."}
+
+    composantes = decomposer_ds_en_composantes(ds, ligne_prix.corps_etat or "", ligne_prix.famille or "")
+    return {
+        "creation_possible": True,
+        "methode": "Décomposition estimée par ratios métier depuis le DS ou le prix de vente.",
+        "hypotheses": "Ratios statistiques par corps d'état. Cette proposition n'est pas un sous-détail analytique réel.",
+        "confiance": "moyenne",
+        "source": source,
+        "source_ds": "estimation_inverse" if source == "prix_vente_unitaire" else (ligne_prix.source_ds or "saisie_manuelle"),
+        "ds_estime": _decimal_vers_chaine(ds),
+        "composantes": {cle: _decimal_vers_chaine(valeur) for cle, valeur in composantes.items()},
+    }
+
+
 def recalculer_composantes_depuis_sous_details(ligne_prix: LignePrixBibliotheque) -> dict[str, Decimal]:
     """Recalcule les composantes économiques d'une ligne depuis ses sous-détails."""
-    sous_details = ligne_prix.sous_details.all()
-
-    temps_main_oeuvre = Decimal("0")
-    montant_mo = Decimal("0")
-    cout_matieres = Decimal("0")
-    cout_materiel = Decimal("0")
-    cout_sous_traitance = Decimal("0")
-    cout_transport = Decimal("0")
-    cout_frais_divers = Decimal("0")
-
-    for sous_detail in sous_details:
-        if sous_detail.type_ressource == "mo":
-            temps_main_oeuvre += sous_detail.quantite
-            montant_mo += sous_detail.montant_ht
-        elif sous_detail.type_ressource == "matiere":
-            cout_matieres += sous_detail.montant_ht
-        elif sous_detail.type_ressource == "materiel":
-            cout_materiel += sous_detail.montant_ht
-        elif sous_detail.type_ressource == "sous_traitance":
-            cout_sous_traitance += sous_detail.montant_ht
-        elif sous_detail.type_ressource == "transport":
-            cout_transport += sous_detail.montant_ht
-        elif sous_detail.type_ressource == "frais_divers":
-            cout_frais_divers += sous_detail.montant_ht
-
-    cout_horaire_mo = ligne_prix.cout_horaire_mo
+    totaux = calculer_total_sdp(ligne_prix)
+    temps_main_oeuvre = totaux["total_temps_mo"]
+    montant_mo = totaux["total_mo"]
+    cout_horaire_mo = Decimal("0")
     if temps_main_oeuvre > 0:
         cout_horaire_mo = (montant_mo / temps_main_oeuvre).quantize(Decimal("0.0001"))
 
-    debourse_sec = (
-        montant_mo
-        + cout_matieres
-        + cout_materiel
-        + cout_sous_traitance
-        + cout_transport
-        + cout_frais_divers
-    )
-
     return {
-        "temps_main_oeuvre": temps_main_oeuvre.quantize(Decimal("0.0001")),
+        "temps_main_oeuvre": temps_main_oeuvre,
         "cout_horaire_mo": cout_horaire_mo,
-        "cout_matieres": cout_matieres.quantize(Decimal("0.0001")),
-        "cout_materiel": cout_materiel.quantize(Decimal("0.0001")),
-        "cout_sous_traitance": cout_sous_traitance.quantize(Decimal("0.0001")),
-        "cout_transport": cout_transport.quantize(Decimal("0.0001")),
-        "cout_frais_divers": cout_frais_divers.quantize(Decimal("0.0001")),
-        "debourse_sec_unitaire": debourse_sec.quantize(Decimal("0.0001")),
+        "cout_matieres": totaux["total_matieres"],
+        "cout_materiel": totaux["total_materiel"],
+        "cout_consommables": totaux["total_consommables"],
+        "cout_sous_traitance": totaux["total_sous_traitance"],
+        "cout_transport": totaux["total_transport"],
+        "cout_frais_divers": totaux["total_frais_divers"],
+        "debourse_sec_unitaire": totaux["total_sdp"],
     }
 
 
@@ -2294,12 +2503,11 @@ def importer_referentiel_prix_construction(
 
     for url in urls_fiches:
         try:
-            _importer_une_fiche_prix_construction(url, auteur=auteur, creer_articles_cctp=creer_articles_cctp)
-            # Lire le résultat depuis la base pour savoir si c'est une création ou mise à jour
-            # (la fonction interne gère la transaction)
-            crees_fiche, maj_fiche = _compteurs_derniere_fiche(url)
-            crees += crees_fiche
-            maj += maj_fiche
+            creee = _importer_une_fiche_prix_construction(url, auteur=auteur, creer_articles_cctp=creer_articles_cctp)
+            if creee:
+                crees += 1
+            else:
+                maj += 1
             if creer_articles_cctp:
                 articles += 1
         except Exception as exc:
@@ -2317,19 +2525,8 @@ def importer_referentiel_prix_construction(
     }
 
 
-def _compteurs_derniere_fiche(url: str) -> tuple[int, int]:
-    """Retourne (crees, mises_a_jour) pour la dernière fiche importée depuis cette URL."""
-    try:
-        existe = LignePrixBibliotheque.objects.filter(url_source=url, origine_import='prix_construction').exists()
-        # update_or_create a déjà été appelé — on ne peut pas distinguer création vs maj ici
-        # On renvoie (0, 1) par convention (la fiche existe forcément après import)
-        return (0, 1)
-    except Exception:
-        return (0, 0)
-
-
 @transaction.atomic
-def _importer_une_fiche_prix_construction(url: str, auteur=None, creer_articles_cctp: bool = True) -> None:
+def _importer_une_fiche_prix_construction(url: str, auteur=None, creer_articles_cctp: bool = True) -> bool:
     """Importe une fiche unitaire dans une transaction dédiée."""
     fiche = analyser_fiche_prix_construction(url)
     ligne = construire_ligne_bibliotheque_depuis_fiche_prix_construction(fiche, auteur=auteur)
@@ -2362,17 +2559,20 @@ def _importer_une_fiche_prix_construction(url: str, auteur=None, creer_articles_
             "cout_horaire_mo": ligne.cout_horaire_mo,
             "cout_matieres": ligne.cout_matieres,
             "cout_materiel": ligne.cout_materiel,
+            "cout_consommables": ligne.cout_consommables,
             "cout_sous_traitance": ligne.cout_sous_traitance,
             "cout_transport": ligne.cout_transport,
             "cout_frais_divers": ligne.cout_frais_divers,
             "debourse_sec_unitaire": ligne.debourse_sec_unitaire,
             "prix_vente_unitaire": ligne.prix_vente_unitaire,
+            "source_ds": "import",
+            "ds_justifie_par_sdp": bool(fiche.justification_prix),
             "source": ligne.source,
             "auteur": auteur,
             "fiabilite": ligne.fiabilite,
             "statut_validation": ligne.statut_validation,
         }
-    entree, _ = LignePrixBibliotheque.objects.update_or_create(
+    entree, creee = LignePrixBibliotheque.objects.update_or_create(
         code=fiche.code_interne,
         defaults=valeurs,
     )
@@ -2385,3 +2585,4 @@ def _importer_une_fiche_prix_construction(url: str, auteur=None, creer_articles_
 
     if creer_articles_cctp:
         synchroniser_article_cctp_reference(entree)
+    return creee

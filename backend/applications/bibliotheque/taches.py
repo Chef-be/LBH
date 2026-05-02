@@ -285,38 +285,29 @@ def decomposer_ds_en_composantes(
     }
 
 
-def recalculer_ligne_inverse(ligne) -> tuple[dict[str, Decimal], str]:
+def recalculer_ligne_inverse(ligne) -> tuple[dict[str, object], str]:
     """
     Recalcule une ligne par étude de prix inversée avec 3 stratégies :
 
-    1. Sous-détails existants → recalcul classique.
-       Si PV connu et écart DS/PV > 30% → affinage par interpolation.
+    1. Sous-détails existants → recalcul depuis le SDP réel uniquement.
+       Aucun affinage inverse ne remplace les données analytiques réelles.
     2. PV connu, pas de sous-détails → DS = PV × Kpv inverse + décomposition statistique.
     3. Ni sous-détails ni PV → ignorée.
     """
-    from applications.bibliotheque.services import recalculer_composantes_depuis_sous_details
+    from applications.bibliotheque.services import (
+        auditer_coherence_sdp_ds,
+        recalculer_composantes_depuis_sous_details,
+    )
 
     a_sous_details = ligne.sous_details.exists()
     pv = ligne.prix_vente_unitaire or Decimal("0")
 
     if a_sous_details:
         composantes = recalculer_composantes_depuis_sous_details(ligne)
-        ds_calcule = composantes.get("debourse_sec_unitaire", Decimal("0"))
-
-        if pv > 0 and ds_calcule > 0:
-            ds_theorique = calculer_ds_depuis_pv(pv, ligne.corps_etat or "", ligne.famille or "")
-            if ds_theorique > 0:
-                ecart_relatif = abs(ds_calcule - ds_theorique) / ds_theorique
-                if ecart_relatif > Decimal("0.30"):
-                    ds_final = (ds_calcule * Decimal("0.7") + ds_theorique * Decimal("0.3")).quantize(D4)
-                    affines = decomposer_ds_en_composantes(
-                        ds_final, ligne.corps_etat or "", ligne.famille or "",
-                        cout_horaire_existant=composantes.get("cout_horaire_mo"),
-                    )
-                    affines["temps_main_oeuvre"] = composantes["temps_main_oeuvre"]
-                    affines["cout_horaire_mo"] = composantes["cout_horaire_mo"]
-                    return affines, "affinees"
-
+        audit = auditer_coherence_sdp_ds(ligne)
+        composantes["source_ds"] = "sdp_reel"
+        composantes["ds_justifie_par_sdp"] = audit["coherent"]
+        composantes["message_controle_sdp_ds"] = str(audit["message"])
         return composantes, "sous_details"
 
     elif pv > 0:
@@ -326,6 +317,9 @@ def recalculer_ligne_inverse(ligne) -> tuple[dict[str, Decimal], str]:
             ds, ligne.corps_etat or "", ligne.famille or "",
             cout_horaire_existant=th_existant,
         )
+        composantes["source_ds"] = "estimation_inverse"
+        composantes["ds_justifie_par_sdp"] = False
+        composantes["message_controle_sdp_ds"] = "DS estimé par moteur inverse depuis le prix de vente."
         return composantes, "inversees"
 
     return {}, "ignorees"

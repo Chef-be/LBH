@@ -10,8 +10,12 @@ from applications.organisations.models import Organisation
 from applications.bibliotheque.models import LignePrixBibliotheque, SousDetailPrix
 from applications.bibliotheque.services import (
     analyser_fiche_prix_construction,
+    auditer_coherence_sdp_ds,
+    creer_complement_sdp_depuis_ecart,
     extraire_lignes_economiques_depuis_texte,
     generer_sous_details_depuis_composantes,
+    proposer_complement_sdp_depuis_ecart,
+    recalculer_ds_depuis_sdp,
     importer_bordereau_depuis_fichier,
     importer_bordereaux_prix_references,
     importer_document_economique_dans_bibliotheque,
@@ -125,6 +129,140 @@ LOT 01 GROS OEUVRE
 
 
 class BibliothequePrixTests(TestCase):
+    def creer_ligne_sdp_ds(self, ds=Decimal("4.8000")):
+        return LignePrixBibliotheque.objects.create(
+            code="LBH-SDP-DS",
+            famille="Gros œuvre",
+            designation_courte="Prix test SDP DS",
+            designation_longue="Prix test SDP DS",
+            unite="u",
+            debourse_sec_unitaire=ds,
+            prix_vente_unitaire=Decimal("7.0000"),
+        )
+
+    def ajouter_sous_detail(self, ligne, montant, type_ressource="matiere", **kwargs):
+        return SousDetailPrix.objects.create(
+            ligne_prix=ligne,
+            ordre=kwargs.get("ordre", ligne.sous_details.count() + 1),
+            type_ressource=type_ressource,
+            designation=kwargs.get("designation", f"Ressource {type_ressource}"),
+            unite=kwargs.get("unite", "u"),
+            quantite=kwargs.get("quantite", Decimal("1")),
+            cout_unitaire_ht=kwargs.get("cout_unitaire_ht", montant),
+            nombre_ressources=kwargs.get("nombre_ressources", Decimal("1")),
+            temps_unitaire=kwargs.get("temps_unitaire", Decimal("0")),
+            taux_horaire=kwargs.get("taux_horaire", Decimal("0")),
+        )
+
+    def test_audit_detecte_ecart_sdp_ds(self):
+        ligne = self.creer_ligne_sdp_ds()
+        self.ajouter_sous_detail(ligne, Decimal("1.2000"))
+        self.ajouter_sous_detail(ligne, Decimal("1.3200"))
+
+        audit = auditer_coherence_sdp_ds(ligne)
+
+        self.assertEqual(audit["total_sdp"], "2.5200")
+        self.assertEqual(audit["ecart"], "2.2800")
+        self.assertFalse(audit["coherent"])
+        self.assertEqual(audit["statut"], "ecart_sdp_ds")
+        self.assertIn("recalculer_ds_depuis_sdp", audit["actions_proposees"])
+        self.assertIn("completer_sdp_depuis_ds", audit["actions_proposees"])
+
+    def test_recalcul_ds_depuis_sdp_aligne_debourse_sec(self):
+        ligne = self.creer_ligne_sdp_ds()
+        self.ajouter_sous_detail(ligne, Decimal("1.2000"))
+        self.ajouter_sous_detail(ligne, Decimal("1.3200"))
+
+        recalculer_ds_depuis_sdp(ligne)
+        ligne.refresh_from_db()
+
+        self.assertEqual(ligne.debourse_sec_unitaire, Decimal("2.5200"))
+        self.assertEqual(ligne.source_ds, "sdp_reel")
+        self.assertTrue(ligne.ds_justifie_par_sdp)
+
+    def test_proposition_complement_sdp_depuis_ecart(self):
+        ligne = self.creer_ligne_sdp_ds()
+        self.ajouter_sous_detail(ligne, Decimal("1.2000"))
+        self.ajouter_sous_detail(ligne, Decimal("1.3200"))
+
+        proposition = proposer_complement_sdp_depuis_ecart(ligne)
+
+        self.assertTrue(proposition["creation_possible"])
+        self.assertEqual(proposition["ecart"], "2.2800")
+        self.assertEqual(proposition["ligne"]["montant_ht"], "2.2800")
+
+    def test_creation_complement_sdp_depuis_ecart(self):
+        ligne = self.creer_ligne_sdp_ds()
+        self.ajouter_sous_detail(ligne, Decimal("1.2000"))
+        self.ajouter_sous_detail(ligne, Decimal("1.3200"))
+
+        resultat = creer_complement_sdp_depuis_ecart(ligne)
+
+        self.assertIn("sous_detail_id", resultat)
+        self.assertEqual(ligne.sous_details.count(), 3)
+        self.assertEqual(ligne.sous_details.order_by("-ordre").first().montant_ht, Decimal("2.2800"))
+
+    def test_audit_sdp_absent_ds_present(self):
+        ligne = self.creer_ligne_sdp_ds()
+
+        audit = auditer_coherence_sdp_ds(ligne)
+
+        self.assertEqual(audit["statut"], "sdp_absent")
+        self.assertIn("DS non justifié", audit["message"])
+
+    def test_audit_sdp_coherent(self):
+        ligne = self.creer_ligne_sdp_ds(ds=Decimal("2.5200"))
+        self.ajouter_sous_detail(ligne, Decimal("1.2000"))
+        self.ajouter_sous_detail(ligne, Decimal("1.3200"))
+
+        audit = auditer_coherence_sdp_ds(ligne)
+
+        self.assertTrue(audit["coherent"])
+        self.assertEqual(audit["statut"], "coherent")
+
+    def test_recalcul_sdp_plusieurs_lignes_mo_taux_pondere(self):
+        ligne = self.creer_ligne_sdp_ds()
+        self.ajouter_sous_detail(
+            ligne,
+            Decimal("45.0000"),
+            type_ressource="mo",
+            quantite=Decimal("1.500000"),
+            cout_unitaire_ht=Decimal("30.000000"),
+            temps_unitaire=Decimal("1.500000"),
+            taux_horaire=Decimal("30.0000"),
+        )
+        self.ajouter_sous_detail(
+            ligne,
+            Decimal("80.0000"),
+            type_ressource="mo",
+            quantite=Decimal("2.000000"),
+            cout_unitaire_ht=Decimal("40.000000"),
+            temps_unitaire=Decimal("2.000000"),
+            taux_horaire=Decimal("40.0000"),
+        )
+
+        recalculer_ds_depuis_sdp(ligne)
+        ligne.refresh_from_db()
+
+        self.assertEqual(ligne.temps_main_oeuvre, Decimal("3.5000"))
+        self.assertEqual(ligne.cout_horaire_mo, Decimal("35.7143"))
+        self.assertEqual(ligne.debourse_sec_unitaire, Decimal("125.0000"))
+
+    def test_recalcul_inverse_necrase_pas_sdp_reel(self):
+        from applications.bibliotheque.taches import recalculer_ligne_inverse
+
+        ligne = self.creer_ligne_sdp_ds()
+        ligne.prix_vente_unitaire = Decimal("1000.0000")
+        ligne.save(update_fields=["prix_vente_unitaire"])
+        self.ajouter_sous_detail(ligne, Decimal("1.2000"))
+        self.ajouter_sous_detail(ligne, Decimal("1.3200"))
+
+        composantes, methode = recalculer_ligne_inverse(ligne)
+
+        self.assertEqual(methode, "sous_details")
+        self.assertEqual(composantes["debourse_sec_unitaire"], Decimal("2.5200"))
+        self.assertEqual(composantes["source_ds"], "sdp_reel")
+
     def test_parser_bordereau_artiprix_extrait_codes_designations_et_variantes(self):
         with patch("applications.bibliotheque.services._texte_pdf", return_value=EXTRAIT_BORDEREAU):
             lignes = parser_bordereau_artiprix(__import__("pathlib").Path("ARTIPRIX-AExt.pdf"))
@@ -312,7 +450,7 @@ class ApiBibliothequeTests(TestCase):
             cout_transport_mensuel="75.00",
         )
 
-    def test_recalcul_global_genere_les_sous_details_absents(self):
+    def test_recalcul_global_declenche_le_traitement_asynchrone(self):
         ligne = LignePrixBibliotheque.objects.create(
             code="LBH-BATCH-001",
             famille="VRD",
@@ -329,11 +467,8 @@ class ApiBibliothequeTests(TestCase):
 
         reponse = self.client.post("/api/bibliotheque/recalculer-tous/", {}, format="json")
 
-        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
-        ligne.refresh_from_db()
-        self.assertEqual(reponse.data["lignes_regenerees"], 1)
-        self.assertEqual(ligne.sous_details.count(), 2)
-        self.assertEqual(ligne.debourse_sec_unitaire, Decimal("13.0000"))
+        self.assertEqual(reponse.status_code, status.HTTP_202_ACCEPTED, reponse.data)
+        self.assertIn("tache_id", reponse.data)
 
     def test_super_admin_peut_vider_entierement_la_bibliotheque(self):
         LignePrixBibliotheque.objects.create(
