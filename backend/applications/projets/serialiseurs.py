@@ -4,7 +4,7 @@ Sérialiseurs pour l'application Projets — Plateforme LBH.
 
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, AffectationProjet, PlanningGeneral, TacheGantt
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, AffectationProjet, PlanningGeneral, TacheGantt, LivrableProjet
 from .services import (
     construire_processus_recommande,
     construire_suggestion_phase_projet,
@@ -75,6 +75,25 @@ class AffectationProjetSerialiseur(serializers.ModelSerializer):
         extra_kwargs = {
             "projet": {"required": False, "allow_null": True},
         }
+
+
+class LivrableProjetSerialiseur(serializers.ModelSerializer):
+    document_lie_libelle = serializers.CharField(source="document_lie.intitule", read_only=True, allow_null=True)
+    responsable_nom = serializers.CharField(source="responsable.nom_complet", read_only=True, allow_null=True)
+    statut_libelle = serializers.CharField(source="get_statut_display", read_only=True)
+
+    class Meta:
+        model = LivrableProjet
+        fields = [
+            "id", "projet", "mission_client", "livrable_type", "code", "libelle",
+            "description", "statut", "statut_libelle", "document_lie",
+            "document_lie_libelle", "module_source", "date_prevue",
+            "date_production", "date_validation", "responsable",
+            "responsable_nom", "observations", "ordre",
+            "date_creation", "date_modification",
+        ]
+        read_only_fields = ["id", "date_creation", "date_modification"]
+        extra_kwargs = {"projet": {"required": False}}
 
 
 class ProjetListeSerialiseur(serializers.ModelSerializer):

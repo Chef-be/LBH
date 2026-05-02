@@ -18,8 +18,17 @@ interface OngletProjet {
   badge?: number;
 }
 
+export interface ModuleActifProjetNavigation {
+  code: string;
+  libelle: string;
+  actif: boolean;
+  niveau_pertinence?: "obligatoire" | "recommande" | "optionnel" | "masque" | string;
+  ordre?: number;
+}
+
 interface NavigationProjetProps {
   idProjet: string;
+  modulesActifs?: ModuleActifProjetNavigation[];
   contexte?: {
     afficherEconomie?: boolean;
     afficherMetres?: boolean;
@@ -36,23 +45,35 @@ interface NavigationProjetProps {
   };
 }
 
-export function NavigationProjet({ idProjet, contexte = {} }: NavigationProjetProps) {
+export function NavigationProjet({ idProjet, modulesActifs, contexte = {} }: NavigationProjetProps) {
   const pathname = usePathname();
 
+  const modulesBackend = new Set((modulesActifs || []).filter((m) => m.actif !== false).map((m) => m.code));
+  const utiliserModulesBackend = Boolean(modulesActifs && modulesActifs.length > 0);
+
   const {
-    afficherEconomie = true,
-    afficherMetres = true,
-    afficherPiecesEcrites = true,
-    afficherAppelsOffres = true,
-    afficherPlanning = true,
-    afficherExecution = true,
-    afficherRentabilite = false,
-    afficherVoirie = false,
-    afficherBatiment = false,
+    afficherEconomie: afficherEconomieLocal = true,
+    afficherMetres: afficherMetresLocal = true,
+    afficherPiecesEcrites: afficherPiecesEcritesLocal = true,
+    afficherAppelsOffres: afficherAppelsOffresLocal = true,
+    afficherPlanning: afficherPlanningLocal = true,
+    afficherExecution: afficherExecutionLocal = true,
+    afficherRentabilite: afficherRentabiliteLocal = false,
+    afficherVoirie: afficherVoirieLocal = false,
+    afficherBatiment: afficherBatimentLocal = false,
     nbMetres,
     nbPiecesEcrites,
     nbDocuments,
   } = contexte;
+  const afficherEconomie = utiliserModulesBackend ? modulesBackend.has("economie") : afficherEconomieLocal;
+  const afficherMetres = utiliserModulesBackend ? modulesBackend.has("metres") : afficherMetresLocal;
+  const afficherPiecesEcrites = utiliserModulesBackend ? modulesBackend.has("pieces-ecrites") : afficherPiecesEcritesLocal;
+  const afficherAppelsOffres = utiliserModulesBackend ? modulesBackend.has("appels-offres") : afficherAppelsOffresLocal;
+  const afficherPlanning = utiliserModulesBackend ? modulesBackend.has("planning") : afficherPlanningLocal;
+  const afficherExecution = utiliserModulesBackend ? modulesBackend.has("execution") : afficherExecutionLocal;
+  const afficherRentabilite = utiliserModulesBackend ? modulesBackend.has("rentabilite") : afficherRentabiliteLocal;
+  const afficherVoirie = utiliserModulesBackend ? modulesBackend.has("voirie") : afficherVoirieLocal;
+  const afficherBatiment = utiliserModulesBackend ? modulesBackend.has("batiment") : afficherBatimentLocal;
 
   const onglets: OngletProjet[] = [
     {

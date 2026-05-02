@@ -507,6 +507,77 @@ class LivrableType(models.Model):
         return f"{self.libelle} ({self.get_type_document_display()})"
 
 
+class LivrableProjet(models.Model):
+    """Livrable attendu ou produit dans le cadre métier d'un projet."""
+
+    STATUTS = [
+        ("attendu", "Attendu"),
+        ("en_cours", "En cours"),
+        ("produit", "Produit"),
+        ("soumis", "Soumis"),
+        ("valide", "Validé"),
+        ("abandonne", "Abandonné"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    projet = models.ForeignKey(Projet, on_delete=models.CASCADE, related_name="livrables_projet")
+    mission_client = models.ForeignKey(
+        MissionClient,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="livrables_projet",
+    )
+    livrable_type = models.ForeignKey(
+        LivrableType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="livrables_projet",
+    )
+    code = models.SlugField(max_length=100)
+    libelle = models.CharField(max_length=220)
+    description = models.TextField(blank=True)
+    statut = models.CharField(max_length=20, choices=STATUTS, default="attendu")
+    document_lie = models.ForeignKey(
+        "documents.Document",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="livrables_projet",
+    )
+    module_source = models.CharField(max_length=60, blank=True)
+    date_prevue = models.DateField(null=True, blank=True)
+    date_production = models.DateField(null=True, blank=True)
+    date_validation = models.DateField(null=True, blank=True)
+    responsable = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="livrables_projet_responsable",
+    )
+    observations = models.TextField(blank=True)
+    ordre = models.PositiveSmallIntegerField(default=0)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "projets_livrable_projet"
+        verbose_name = "Livrable projet"
+        verbose_name_plural = "Livrables projet"
+        ordering = ["ordre", "libelle"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["projet", "code"],
+                name="projets_livrable_unique_par_projet",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.projet.reference} — {self.libelle}"
+
+
 class ModeleDocument(models.Model):
     """Modèle de document paramétrable configurable depuis l'administration."""
 

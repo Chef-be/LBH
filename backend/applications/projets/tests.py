@@ -7,7 +7,7 @@ from unittest.mock import patch
 from applications.documents.models import DossierDocumentProjet, Document, TypeDocument
 from applications.comptes.models import Utilisateur
 from applications.organisations.models import Organisation
-from applications.projets.models import Projet, PreanalyseSourcesProjet, AffectationProjet
+from applications.projets.models import Projet, PreanalyseSourcesProjet, AffectationProjet, LivrableProjet
 from applications.pieces_ecrites.models import ModeleDocument, PieceEcrite
 from applications.appels_offres.models import AppelOffres
 
@@ -417,3 +417,90 @@ class ApiProjetsTests(TestCase):
         self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
         self.assertEqual(reponse.data["phase_code"], "ao")
         self.assertEqual(reponse.data["phase_index"], 6)
+
+    def test_fiche_metier_moa_verifie_enveloppe(self):
+        self.projet.clientele_cible = "moa_publique"
+        self.projet.objectif_mission = "verifier_enveloppe"
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "maitrise_ouvrage",
+                "contexte_contractuel": "marche_public",
+                "mission_principale": "verifier_enveloppe",
+                "nature_ouvrage": "batiment",
+                "nature_marche": "public",
+            }
+        }
+        self.projet.save(update_fields=["clientele_cible", "objectif_mission", "qualification_wizard"])
+
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/fiche-metier/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["profil_fiche"], "moa_enveloppe")
+        self.assertIn("programme", [p["code"] for p in reponse.data["pieces_sources"]["attendues"]])
+        self.assertNotIn("execution", [m["code"] for m in reponse.data["modules_actifs"]])
+        self.assertEqual(reponse.data["synthese_economique"]["lien_module"], "economie")
+
+    def test_fiche_metier_moe_dce_active_metres_et_pieces(self):
+        self.projet.phase_actuelle = "dce"
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "maitrise_oeuvre",
+                "contexte_contractuel": "dce_consultation",
+                "mission_principale": "redaction_cctp",
+                "phase_intervention": "pro",
+                "nature_ouvrage": "batiment",
+                "nature_marche": "public",
+            }
+        }
+        self.projet.save(update_fields=["phase_actuelle", "qualification_wizard"])
+
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/fiche-metier/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        modules = {m["code"]: m for m in reponse.data["modules_actifs"]}
+        self.assertEqual(reponse.data["profil_fiche"], "moe_dce")
+        self.assertIn("metres", modules)
+        self.assertIn("pieces-ecrites", modules)
+        self.assertIn("dpgf", [l["code"] for l in reponse.data["livrables"]["attendus"]])
+
+    def test_fiche_metier_entreprise_appel_offres_active_ressources(self):
+        self.projet.clientele_cible = "entreprise_travaux"
+        self.projet.objectif_mission = "reponse_ao_entreprise"
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "entreprise",
+                "sous_type_client": "entreprise_generale",
+                "contexte_contractuel": "appel_offres",
+                "mission_principale": "reponse_appel_offres",
+                "nature_ouvrage": "batiment",
+            }
+        }
+        self.projet.save(update_fields=["clientele_cible", "objectif_mission", "qualification_wizard"])
+
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/fiche-metier/")
+
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["profil_fiche"], "entreprise_ao")
+        modules = [m["code"] for m in reponse.data["modules_actifs"]]
+        self.assertIn("ressources", modules)
+        self.assertIn("appels-offres", modules)
+        self.assertIn("dpgf", [p["code"] for p in reponse.data["pieces_sources"]["attendues"]])
+
+    def test_generation_livrables_depuis_parcours(self):
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "maitrise_oeuvre",
+                "contexte_contractuel": "dce_consultation",
+                "mission_principale": "redaction_cctp",
+                "phase_intervention": "pro",
+            }
+        }
+        self.projet.save(update_fields=["qualification_wizard"])
+
+        reponse = self.client.post(f"/api/projets/{self.projet.id}/livrables/generer-depuis-parcours/", {}, format="json")
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        self.assertTrue(LivrableProjet.objects.filter(projet=self.projet, code="cctp").exists())
+        liste = self.client.get(f"/api/projets/{self.projet.id}/livrables/")
+        self.assertEqual(liste.status_code, status.HTTP_200_OK, liste.data)
+        self.assertGreaterEqual(len(liste.data), 1)

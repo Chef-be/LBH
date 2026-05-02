@@ -11,13 +11,14 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, MissionClient, LivrableType, ModeleDocument, AffectationProjet
+from .models import Projet, Lot, Intervenant, PreanalyseSourcesProjet, MissionClient, LivrableType, ModeleDocument, AffectationProjet, LivrableProjet
 from .serialiseurs import (
     ProjetListeSerialiseur,
     ProjetDetailSerialiseur,
     LotSerialiseur,
     IntervenantSerialiseur,
     AffectationProjetSerialiseur,
+    LivrableProjetSerialiseur,
     PreanalyseSourcesProjetSerialiseur,
 )
 from .services import (
@@ -29,6 +30,7 @@ from .services import (
     normaliser_phase_projet,
 )
 from .referentiels import construire_parcours_projet, lister_references_indices_prix
+from .services_parcours_metier import construire_fiche_metier_projet, generer_livrables_depuis_parcours
 from .taches import executer_preanalyse_sources_projet, importer_sources_preanalyse_dans_projet
 from applications.documents.services import synchroniser_dossiers_projet
 
@@ -473,6 +475,45 @@ def vue_synthese_projet(requete, projet_id):
         "phase_libelle": libelle_phase_projet(phase_code),
         "activite_recente": activite[:5],
     })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_fiche_metier_projet(requete, projet_id):
+    """Retourne la fiche métier du dossier, construite côté backend."""
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    return Response(construire_fiche_metier_projet(projet))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_livrables_projet(requete, projet_id):
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    livrables = LivrableProjet.objects.filter(projet=projet).order_by("ordre", "libelle")
+    return Response(LivrableProjetSerialiseur(livrables, many=True, context={"request": requete}).data)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_generer_livrables_depuis_parcours(requete, projet_id):
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    crees = generer_livrables_depuis_parcours(projet, utilisateur=requete.user)
+    livrables = LivrableProjet.objects.filter(projet=projet).order_by("ordre", "libelle")
+    return Response({
+        "detail": f"{len(crees)} livrable(s) généré(s) depuis le parcours métier.",
+        "livrables": LivrableProjetSerialiseur(livrables, many=True, context={"request": requete}).data,
+    }, status=201 if crees else 200)
+
+
+@api_view(["PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_livrable_projet_detail(requete, projet_id, livrable_id):
+    projet = generics.get_object_or_404(Projet, pk=projet_id)
+    livrable = generics.get_object_or_404(LivrableProjet, pk=livrable_id, projet=projet)
+    serialiseur = LivrableProjetSerialiseur(livrable, data=requete.data, partial=True, context={"request": requete})
+    serialiseur.is_valid(raise_exception=True)
+    serialiseur.save()
+    return Response(serialiseur.data)
 
 
 @api_view(["POST"])

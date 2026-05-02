@@ -7,9 +7,9 @@ import { useRouter } from "next/navigation";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
 import { useSessionStore } from "@/crochets/useSession";
-import { ArrowLeft, Euro, FolderOpen, Users, Pencil, Trash2, X, Info, ChevronRight, Target } from "lucide-react";
-import { NavigationProjet } from "@/composants/projets/NavigationProjet";
-import { DashboardProjet } from "@/composants/projets/DashboardProjet";
+import { ArrowLeft, Pencil, Trash2, X } from "lucide-react";
+import { NavigationProjet, type ModuleActifProjetNavigation } from "@/composants/projets/NavigationProjet";
+import { FicheMetierProjet } from "@/composants/projets/FicheMetierProjet";
 import { ModalConfirmation } from "@/composants/ui/ModalConfirmation";
 import { useNotifications } from "@/contextes/FournisseurNotifications";
 
@@ -55,11 +55,6 @@ interface PhaseSuggeree {
   avancee_superieure: boolean;
   phase_actuelle: string;
   phase_actuelle_libelle: string;
-}
-
-interface SyntheseProjet {
-  total_prix_vente_etudes: number;
-  total_marge_nette_etudes?: number;
 }
 
 interface ProjetDetail {
@@ -170,11 +165,6 @@ function formaterDate(iso: string | null) {
   });
 }
 
-function formaterMontant(val: number | null) {
-  if (val == null) return "—";
-  return `${Number(val).toLocaleString("fr-FR", { minimumFractionDigits: 0 })} €`;
-}
-
 function formaterValeurContexte(valeur: string | string[] | boolean) {
   if (Array.isArray(valeur)) return valeur.join(", ") || "—";
   if (typeof valeur === "boolean") return valeur ? "Oui" : "Non";
@@ -273,9 +263,9 @@ export function DetailProjet({ id }: { id: string }) {
     queryKey: ["projet", id],
     queryFn: () => api.get<ProjetDetail>(`/api/projets/${id}/`),
   });
-  const { data: synthese } = useQuery<SyntheseProjet>({
-    queryKey: ["projet-synthese", id],
-    queryFn: () => api.get<SyntheseProjet>(`/api/projets/${id}/synthese/`),
+  const { data: ficheMetier } = useQuery<any>({
+    queryKey: ["projet-fiche-metier", id],
+    queryFn: () => api.get(`/api/projets/${id}/fiche-metier/`),
     enabled: Boolean(projet),
   });
 
@@ -316,6 +306,7 @@ export function DetailProjet({ id }: { id: string }) {
   }
 
   const contexte = projet.contexte_projet;
+  const modulesActifs = (ficheMetier?.modules_actifs ?? []) as ModuleActifProjetNavigation[];
   const estGestionProjet =
     estSuperAdmin ||
     utilisateur?.id === projet.responsable ||
@@ -359,27 +350,7 @@ export function DetailProjet({ id }: { id: string }) {
   const afficherVoirie = natureOuvrage === "infrastructure" || natureOuvrage === "mixte";
   const afficherBatiment = natureOuvrage === "batiment" || natureOuvrage === "mixte" || (!natureOuvrage && (estMaitriseOeuvre || estMaitriseOuvrage));
   const modulesAffectes = extraireVisibiliteModules(affectationsUtilisateur);
-  const estIntervenantProjet = projet.intervenants.some(
-    (intervenant) => intervenant.utilisateur_nom === utilisateur?.nom_complet
-  );
   const navigationFiltree = !estGestionProjet && affectationsUtilisateur.length > 0;
-  const equipeProjet = projet.intervenants.length > 0
-    ? projet.intervenants
-    : (projet.responsable_nom
-      ? [{
-          id: "responsable-defaut",
-          utilisateur_nom: projet.responsable_nom,
-          role: "responsable",
-          role_libelle: "Responsable",
-        }]
-      : []);
-  const syntheseFinanciere = [
-    { libelle: "Montant estimé HT", valeur: projet.montant_estime },
-    { libelle: "Montant du marché HT", valeur: projet.montant_marche },
-    { libelle: "Études économiques HT", valeur: synthese?.total_prix_vente_etudes ?? null },
-    { libelle: "Marge nette études HT", valeur: synthese?.total_marge_nette_etudes ?? null },
-    { libelle: "Honoraires prévus HT", valeur: projet.honoraires_prevus, accent: true },
-  ];
 
   return (
     <div className="space-y-6">
@@ -408,6 +379,13 @@ export function DetailProjet({ id }: { id: string }) {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("ouvrir-modal-contexte"))}
+            className="btn-secondaire text-xs"
+          >
+            Contexte détaillé
+          </button>
           {estGestionProjet && (
             <Link href={`/projets/${id}/modifier`} className="btn-primaire text-xs">
               <Pencil size={12} /> Modifier
@@ -430,6 +408,7 @@ export function DetailProjet({ id }: { id: string }) {
       {/* Navigation interne au projet */}
       <NavigationProjet
         idProjet={id}
+        modulesActifs={modulesActifs}
         contexte={{
           afficherEconomie: !navigationFiltree ? true : modulesAffectes.afficherEconomie,
           afficherMetres: !navigationFiltree ? contexteMetres : contexteMetres && modulesAffectes.afficherMetres,
@@ -443,122 +422,13 @@ export function DetailProjet({ id }: { id: string }) {
         }}
       />
 
-      {/* Dashboard projet */}
-      <DashboardProjet projet={projet} />
-
-      {/* Grille compacte */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Colonne gauche */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Contexte compact */}
-          <ContexteCompact projet={projet} />
-
-          {estIntervenantProjet && affectationsUtilisateur.length > 0 && (
-            <div className="carte">
-              <div className="mb-4 flex items-center gap-2">
-                <Target size={16} />
-                <h2>Mes affectations sur ce dossier</h2>
-              </div>
-              <div className="space-y-2">
-                {affectationsUtilisateur.map((affectation) => (
-                  <div
-                    key={affectation.id}
-                    className="rounded-xl border px-3 py-3 text-sm"
-                    style={{ borderColor: "var(--bordure)", background: "var(--fond-entree)" }}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="badge-neutre">{affectation.nature_libelle}</span>
-                      <span className="badge-info">{affectation.role_libelle}</span>
-                    </div>
-                    <p className="mt-2 font-medium">{affectation.libelle_cible || affectation.code_cible}</p>
-                    {affectation.commentaires ? (
-                      <p className="mt-1 text-xs" style={{ color: "var(--texte-3)" }}>
-                        {affectation.commentaires}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Lots */}
-          {projet.lots.length > 0 && (
-            <div className="carte">
-              <h2 className="mb-4 flex items-center gap-2">
-                <FolderOpen size={16} /> Lots ({projet.lots.length})
-              </h2>
-              <div className="space-y-2">
-                {projet.lots.map((lot) => (
-                  <div key={lot.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: "var(--fond-entree)" }}>
-                    <div>
-                      <span className="font-mono text-xs mr-2" style={{ color: "var(--texte-3)" }}>Lot {lot.numero}</span>
-                      <span className="font-medium text-sm">{lot.intitule}</span>
-                      {lot.description && (
-                        <p className="text-xs mt-0.5" style={{ color: "var(--texte-3)" }}>{lot.description}</p>
-                      )}
-                    </div>
-                    {lot.montant_estime != null && (
-                      <span className="font-mono text-sm" style={{ color: "var(--texte-2)" }}>
-                        {formaterMontant(lot.montant_estime)}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+      {ficheMetier ? (
+        <FicheMetierProjet projetId={id} fiche={ficheMetier} />
+      ) : (
+        <div className="carte py-10 text-center text-sm" style={{ color: "var(--texte-3)" }}>
+          Chargement de la fiche métier du dossier…
         </div>
-
-        {/* Colonne droite : synthèse financière + équipe */}
-        <div className="space-y-6">
-          {/* Synthèse financière */}
-          <div className="carte">
-            <h2 className="mb-4 flex items-center gap-2">
-              <Euro size={16} /> Synthèse financière
-            </h2>
-            <dl className="space-y-3 text-sm">
-              {syntheseFinanciere.map((ligne) => (
-                <div
-                  key={ligne.libelle}
-                  className={ligne.accent ? "flex justify-between pt-3" : "flex justify-between"}
-                  style={ligne.accent ? { borderTop: "1px solid var(--bordure)" } : undefined}
-                >
-                  <dt style={{ color: "var(--texte-3)" }}>{ligne.libelle}</dt>
-                  <dd className="font-mono font-medium" style={ligne.accent ? { color: "var(--c-base)" } : undefined}>
-                    {formaterMontant(ligne.valeur)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-
-          {/* Intervenants */}
-          <div className="carte">
-            <h2 className="mb-4 flex items-center gap-2">
-              <Users size={16} /> Équipe ({equipeProjet.length})
-            </h2>
-            {equipeProjet.length === 0 ? (
-              <p className="text-sm" style={{ color: "var(--texte-3)" }}>Aucun intervenant affecté.</p>
-            ) : (
-              <ul className="space-y-2">
-                {equipeProjet.map((intervenant, idx) => (
-                  <li key={idx} className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{intervenant.utilisateur_nom}</span>
-                    <span className="badge-neutre">{intervenant.role_libelle}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Métadonnées */}
-          <div className="carte text-xs space-y-1" style={{ color: "var(--texte-3)" }}>
-            <p>Créé le {formaterDate(projet.date_creation)}</p>
-            <p>Modifié le {formaterDate(projet.date_modification)}</p>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Modal contexte détaillé */}
       <ModalContexte projet={projet} />
@@ -577,73 +447,6 @@ export function DetailProjet({ id }: { id: string }) {
           }
         }}
       />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Contexte compact avec bouton "Voir les détails"
-// ---------------------------------------------------------------------------
-
-function ContexteCompact({ projet }: { projet: ProjetDetail }) {
-  return (
-    <div className="carte">
-      <div className="flex items-center justify-between mb-4">
-        <h2>Contexte du projet</h2>
-        <button
-          type="button"
-          onClick={() => {
-            const evt = new CustomEvent("ouvrir-modal-contexte");
-            window.dispatchEvent(evt);
-          }}
-          className="inline-flex items-center gap-1 text-xs font-medium rounded-lg px-3 py-1.5 transition"
-          style={{ color: "var(--c-base)", background: "var(--c-clair)", border: "1px solid var(--c-leger)" }}
-        >
-          <Info size={12} /> Voir les détails <ChevronRight size={12} />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-        {projet.contexte_projet && (
-          <>
-            <div>
-              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Famille client</p>
-              <p className="font-medium">{projet.contexte_projet.famille_client.libelle}</p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Contexte contractuel</p>
-              <p className="font-medium">{projet.contexte_projet.contexte_contractuel.libelle}</p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Mission principale</p>
-              <p className="font-medium">{projet.contexte_projet.mission_principale.libelle}</p>
-            </div>
-            {projet.contexte_projet.phase_intervention && (
-              <div>
-                <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color: "var(--texte-3)" }}>Phase d&apos;intervention</p>
-                <p className="font-medium">{projet.contexte_projet.phase_intervention.libelle}</p>
-              </div>
-            )}
-            {projet.contexte_projet.sous_missions.length > 0 && (
-              <div className="col-span-2">
-                <p className="text-xs uppercase tracking-wide mb-1.5" style={{ color: "var(--texte-3)" }}>Sous-missions</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {projet.contexte_projet.sous_missions.map((sm) => (
-                    <span key={sm.code} className="rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ background: "var(--c-clair)", color: "var(--c-base)", border: "1px solid var(--c-leger)" }}>
-                      {sm.libelle}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {!projet.contexte_projet && (
-          <div className="col-span-2">
-            <p className="text-sm" style={{ color: "var(--texte-3)" }}>Aucun contexte métier renseigné.</p>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
