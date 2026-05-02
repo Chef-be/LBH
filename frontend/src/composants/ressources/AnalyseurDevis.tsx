@@ -493,7 +493,7 @@ function CarteDevis({
   const aucuneLigne = devis.lignes_count === 0 && (devis.statut === "termine" || devis.statut === "a_verifier");
   const messageDiagnostic = devis.message_analyse || devis.erreur_detail;
 
-  const { data: lignesData } = useQuery<LignePrixMarche[]>({
+  const { data: lignesData, isLoading: lignesChargement, isError: lignesErreur } = useQuery<LignePrixMarche[]>({
     queryKey: ["devis-lignes", devis.id],
     queryFn: () => api.get(`/api/ressources/devis/${devis.id}/lignes/`),
     enabled: deplie && (devis.statut === "termine" || devis.statut === "a_verifier"),
@@ -623,7 +623,7 @@ function CarteDevis({
         </div>
       )}
 
-      {deplie && lignes.length > 0 && (
+      {deplie && (
         <div className="border-t border-slate-100 px-5 py-4 space-y-2 bg-slate-50">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-700">Lignes extraites ({lignes.length})</h3>
@@ -631,9 +631,23 @@ function CarteDevis({
               Indice {devis.indice_base_code} = {devis.indice_base_valeur ?? "?"}
             </p>
           </div>
-          {lignes.map((ligne) => (
-            <LigneSDP key={ligne.id} ligne={ligne} />
-          ))}
+          {lignesChargement ? (
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+              Chargement des lignes extraites…
+            </div>
+          ) : lignesErreur ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              Impossible de charger les lignes extraites. Relancez l’analyse ou ouvrez le diagnostic.
+            </div>
+          ) : lignes.length === 0 ? (
+            <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+              Aucune ligne n’est rattachée à ce devis.
+            </div>
+          ) : (
+            lignes.map((ligne) => (
+              <LigneSDP key={ligne.id} ligne={ligne} />
+            ))
+          )}
         </div>
       )}
 

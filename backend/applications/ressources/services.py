@@ -72,6 +72,14 @@ def normaliser_designation(texte: str) -> str:
     return " ".join(mots)
 
 
+def tronquer_champ(texte: str, longueur: int = 500) -> str:
+    """Préserve la base quand un PDF fournit une cellule anormalement longue."""
+    texte = (texte or "").strip()
+    if len(texte) <= longueur:
+        return texte
+    return texte[:longueur].rstrip()
+
+
 def similarite_cosinus(texte_a: str, texte_b: str) -> float:
     mots_a = set(texte_a.split())
     mots_b = set(texte_b.split())
@@ -400,13 +408,14 @@ def analyser_devis(devis_analyse) -> list[dict]:
             if indice_base and indice_actuel:
                 prix_actualise = actualiser_prix(prix_ht, indice_base, indice_actuel)
 
-            designation_norm = normaliser_designation(designation)
+            designation_courte = tronquer_champ(designation, 500)
+            designation_norm = tronquer_champ(normaliser_designation(designation), 500)
             ligne_proche = trouver_ligne_similaire(designation_norm, code_lot, seuil_similarite())
             ligne_marche = LignePrixMarche.objects.create(
                 devis_source=devis_analyse,
                 ordre=int(ligne.get("ordre") or 0),
                 numero=str(ligne.get("numero") or ""),
-                designation=designation,
+                designation=designation_courte,
                 designation_originale=str(ligne.get("designation_originale") or designation),
                 designation_normalisee=designation_norm,
                 unite=unite,

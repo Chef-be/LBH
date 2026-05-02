@@ -189,3 +189,16 @@ class AnalyseDevisTests(TestCase):
         self.assertEqual(len(lignes), 1)
         self.assertEqual(LignePrixMarche.objects.filter(devis_source=courant).count(), 1)
         self.assertEqual(LignePrixMarche.objects.filter(devis_source=ancien).count(), 1)
+
+    def test_designation_tres_longue_ne_bloque_pas_l_import(self):
+        devis = _devis("long.pdf")
+        designation = " ".join(["Désignation très détaillée"] * 40)
+        texte = f"{designation} F 1 100,00 100,00"
+        with patch("applications.ressources.services.requests.post", return_value=FauxReponsePdf(texte)):
+            lignes = analyser_devis(devis)
+
+        self.assertEqual(len(lignes), 1)
+        ligne = LignePrixMarche.objects.get(devis_source=devis)
+        self.assertLessEqual(len(ligne.designation), 500)
+        self.assertGreater(len(ligne.designation_originale), 500)
+        self.assertLessEqual(len(ligne.designation_normalisee), 500)

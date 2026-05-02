@@ -201,7 +201,7 @@ def vue_texte_extrait_devis(request, pk):
 def vue_mapping_manuel_devis(request, pk):
     """Importe des lignes de prix validées manuellement depuis l'interface de mapping."""
     from decimal import Decimal, InvalidOperation
-    from .services import detecter_corps_etat, estimer_sdp_depuis_prix, normaliser_designation
+    from .services import detecter_corps_etat, estimer_sdp_depuis_prix, normaliser_designation, tronquer_champ
 
     devis = generics.get_object_or_404(DevisAnalyse, pk=pk)
     lignes = request.data.get("lignes") or []
@@ -230,13 +230,14 @@ def vue_mapping_manuel_devis(request, pk):
 
         corps_code, corps_libelle = detecter_corps_etat(designation)
         sdp = estimer_sdp_depuis_prix(prix_unitaire, corps_libelle)
+        designation_courte = tronquer_champ(designation, 500)
         LignePrixMarche.objects.create(
             devis_source=devis,
             ordre=int(ligne.get("ordre") or index),
             numero=str(ligne.get("numero") or ""),
-            designation=designation,
+            designation=designation_courte,
             designation_originale=str(ligne.get("designation_originale") or designation),
-            designation_normalisee=normaliser_designation(designation),
+            designation_normalisee=tronquer_champ(normaliser_designation(designation), 500),
             unite=str(ligne.get("unite") or "U"),
             quantite=quantite,
             prix_ht_original=prix_unitaire,
