@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/crochets/useApi";
 import { DevisHonoraires, Facture } from "@/types/societe";
 import { Plus, FileText, ChevronRight, Receipt, AlertTriangle } from "lucide-react";
+import { ModalNouvelleAffaire } from "@/composants/societe/ModalNouvelleAffaire";
 
 function formaterMontant(val: string): string {
   const n = parseFloat(val);
@@ -46,6 +47,7 @@ export default function PageListeDevis() {
   const [onglet, setOnglet] = useState<"devis" | "factures">("devis");
   const [filtre, setFiltre] = useState<Filtre>("tous");
   const [filtreFacture, setFiltreFacture] = useState<FiltreFacture>("tous");
+  const [modalAffaireOuverte, setModalAffaireOuverte] = useState(false);
 
   const { data: devis = [], isLoading } = useQuery<DevisHonoraires[]>({
     queryKey: ["devis", filtre],
@@ -74,14 +76,20 @@ export default function PageListeDevis() {
             Devis d&apos;honoraires et factures dans un même espace.
           </p>
         </div>
-        <Link
-          href="/societe/devis/nouveau"
+        <button
+          type="button"
+          onClick={() => setModalAffaireOuverte(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
           style={{ background: "var(--c-base)" }}
         >
           <Plus size={14} /> Nouvelle affaire
-        </Link>
+        </button>
       </div>
+
+      <ModalNouvelleAffaire
+        ouvert={modalAffaireOuverte}
+        onFermer={() => setModalAffaireOuverte(false)}
+      />
 
       <div className="flex gap-2 rounded-xl p-1" style={{ background: "var(--fond-entree)", border: "1px solid var(--bordure)" }}>
         <button type="button" onClick={() => setOnglet("devis")} className="rounded-lg px-4 py-2 text-sm font-semibold" style={{ background: onglet === "devis" ? "var(--c-base)" : "transparent", color: onglet === "devis" ? "#fff" : "var(--texte-2)" }}>
@@ -146,13 +154,14 @@ export default function PageListeDevis() {
               Créez votre premier devis d&apos;honoraires
             </p>
           </div>
-          <Link
-            href="/societe/devis/nouveau"
+          <button
+            type="button"
+            onClick={() => setModalAffaireOuverte(true)}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
             style={{ background: "var(--c-base)" }}
           >
             <Plus size={14} /> Nouvelle affaire
-          </Link>
+          </button>
         </div>
       )}
 

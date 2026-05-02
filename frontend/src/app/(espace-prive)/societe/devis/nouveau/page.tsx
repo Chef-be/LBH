@@ -196,6 +196,8 @@ export default function PageNouveauDevis() {
   const [utilisateurPressenti, setUtilisateurPressenti] = useState("");
   const [clientLocalId, setClientLocalId] = useState("");
   const [clientPublicSelectionne, setClientPublicSelectionne] = useState<EntreprisePubliqueOption | null>(null);
+  const [suggestionsClientOuvertes, setSuggestionsClientOuvertes] = useState(false);
+  const [clientNomSelectionne, setClientNomSelectionne] = useState("");
   const [roleSocieteAutre, setRoleSocieteAutre] = useState(false);
 
   const requeteParcours = useMemo(() => {
@@ -276,10 +278,13 @@ export default function PageNouveauDevis() {
   });
 
   const rechercheClient = form.client_nom.trim();
+  const suggestionsClientActives = suggestionsClientOuvertes
+    && rechercheClient.length >= 2
+    && rechercheClient !== clientNomSelectionne;
 
   const { data: clientsLocaux = [] } = useQuery<OrganisationOption[]>({
     queryKey: ["societe-clients-locaux", rechercheClient],
-    enabled: rechercheClient.length >= 2,
+    enabled: suggestionsClientActives,
     queryFn: async () => {
       const r = await api.get<{ results?: OrganisationOption[] } | OrganisationOption[]>(
         `/api/organisations/?search=${encodeURIComponent(rechercheClient)}`,
@@ -290,7 +295,7 @@ export default function PageNouveauDevis() {
 
   const { data: clientsPublics = [] } = useQuery<EntreprisePubliqueOption[]>({
     queryKey: ["societe-clients-publics", rechercheClient],
-    enabled: rechercheClient.length >= 3 && clientsLocaux.length === 0,
+    enabled: suggestionsClientActives && rechercheClient.length >= 3 && clientsLocaux.length === 0,
     queryFn: async () => {
       const r = await api.get<{ results: EntreprisePubliqueOption[] }>(
         `/api/organisations/recherche-entreprises/?q=${encodeURIComponent(rechercheClient)}&limit=5`,
@@ -358,6 +363,8 @@ export default function PageNouveauDevis() {
     if (champ === "client_nom") {
       setClientLocalId("");
       setClientPublicSelectionne(null);
+      setClientNomSelectionne("");
+      setSuggestionsClientOuvertes(true);
     }
     if (champ === "role_lbh") setRoleSocieteAutre(!ROLES_SOCIETE.includes(String(valeur)) && Boolean(valeur));
   };
@@ -365,6 +372,8 @@ export default function PageNouveauDevis() {
   const appliquerClientLocal = (client: OrganisationOption) => {
     setClientLocalId(client.id);
     setClientPublicSelectionne(null);
+    setClientNomSelectionne(client.nom);
+    setSuggestionsClientOuvertes(false);
     setForm((courant) => ({
       ...courant,
       client_nom: client.nom,
@@ -377,6 +386,8 @@ export default function PageNouveauDevis() {
   const appliquerClientPublic = (client: EntreprisePubliqueOption) => {
     setClientLocalId("");
     setClientPublicSelectionne(client);
+    setClientNomSelectionne(client.nom);
+    setSuggestionsClientOuvertes(false);
     setForm((courant) => ({
       ...courant,
       client_nom: client.nom,
@@ -1020,8 +1031,17 @@ export default function PageNouveauDevis() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="relative">
             <label className="mb-1 block text-xs font-medium" style={{ color: "var(--texte-3)" }}>Nom du client</label>
-            <input type="text" value={form.client_nom} onChange={(e) => mettreAJourFormulaire("client_nom", e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-sm" style={stylesChamp} />
-            {rechercheClient.length >= 2 && (clientsLocaux.length > 0 || clientsPublics.length > 0) ? (
+            <input
+              type="text"
+              value={form.client_nom}
+              onFocus={() => {
+                if (form.client_nom.trim() !== clientNomSelectionne) setSuggestionsClientOuvertes(true);
+              }}
+              onChange={(e) => mettreAJourFormulaire("client_nom", e.target.value)}
+              className="w-full rounded-lg px-3 py-2.5 text-sm"
+              style={stylesChamp}
+            />
+            {suggestionsClientActives && (clientsLocaux.length > 0 || clientsPublics.length > 0) ? (
               <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-xl p-2 shadow-xl" style={{ background: "var(--fond-carte)", border: "1px solid var(--bordure)" }}>
                 {clientsLocaux.map((client) => (
                   <button key={client.id} type="button" onClick={() => appliquerClientLocal(client)} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:opacity-80" style={{ color: "var(--texte)" }}>
