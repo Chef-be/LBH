@@ -69,6 +69,8 @@ interface LignePrixMarche {
     fragments_supprimes?: string[];
     nettoyage_designation?: boolean;
     designation_originale?: string;
+    chapitre?: string;
+    capitalisable?: boolean;
     [key: string]: unknown;
   };
   decision_import: string;
@@ -115,6 +117,15 @@ function fragmentsSupprimes(ligne: LignePrixMarche): string[] {
   return Array.isArray(fragments) ? fragments.map(String).filter(Boolean) : [];
 }
 
+function ligneCapitalisable(ligne: LignePrixMarche): boolean {
+  return ligne.type_ligne === "article"
+    && !["erreur", "ignoree"].includes(ligne.statut_controle)
+    && Boolean(ligne.designation && ligne.unite)
+    && nombreDecimal(ligne.prix_ht_original) > 0
+    && nombreDecimal(ligne.score_confiance) >= 0.55
+    && ligne.donnees_import?.capitalisable !== false;
+}
+
 function classeKpv(kpv: number): string {
   if (kpv <= 0) return "text-slate-400";
   if (kpv < 1.10) return "text-red-600";
@@ -157,6 +168,8 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
   const fragments = fragmentsSupprimes(ligne);
   const nettoyageDesignation = Boolean(ligne.donnees_import?.nettoyage_designation || fragments.length > 0);
   const designationOriginale = ligne.designation_originale || String(ligne.donnees_import?.designation_originale || "");
+  const chapitre = typeof ligne.donnees_import?.chapitre === "string" ? ligne.donnees_import.chapitre : "";
+  const capitalisable = ligneCapitalisable(ligne);
 
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden">
@@ -170,6 +183,7 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
           <p className="font-medium text-slate-800 text-sm truncate">{ligne.designation}</p>
           <p className="text-xs text-slate-400 mt-0.5">
             {ligne.numero && <span className="mr-1">{ligne.numero}</span>}
+            {chapitre && <span className="mr-1">{chapitre} ·</span>}
             {ligne.corps_etat_libelle || "Corps d'état non identifié"} · {ligne.unite}
             {ligne.quantite != null && <span> · Qté {Number(ligne.quantite).toLocaleString("fr-FR")}</span>}
           </p>
@@ -185,10 +199,20 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
               À vérifier
             </span>
           )}
+          {!capitalisable && !ligne.ligne_bibliotheque && (
+            <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">
+              Non capitalisable
+            </span>
+          )}
           {nettoyageDesignation && (
             <span className="text-xs bg-sky-100 text-sky-700 rounded-full px-2 py-0.5">
               Libellé nettoyé
             </span>
+          )}
+          {chapitre && (
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <span className="font-medium">Chapitre :</span> {chapitre}
+            </div>
           )}
           {ligne.ligne_bibliotheque && (
             <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5 flex items-center gap-1">

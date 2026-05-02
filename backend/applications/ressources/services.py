@@ -410,7 +410,10 @@ def analyser_devis(devis_analyse) -> list[dict]:
 
             designation_originale = str(ligne.get("designation_originale") or designation)
             fragments_supprimes = ligne.get("fragments_supprimes") or []
+            fragments_ignores = ligne.get("fragments_ignores") or []
             nettoyage_designation = bool(ligne.get("nettoyage_designation") or fragments_supprimes)
+            alertes_import = ligne.get("alertes") or []
+            chapitre = str(ligne.get("chapitre") or "")
             designation_courte = tronquer_champ(designation, 500)
             designation_norm = tronquer_champ(normaliser_designation(designation), 500)
             ligne_proche = trouver_ligne_similaire(designation_norm, code_lot, seuil_similarite())
@@ -436,8 +439,18 @@ def analyser_devis(devis_analyse) -> list[dict]:
                     "score_similarite": similarite_cosinus(designation_norm, ligne_proche.designation_normalisee) if ligne_proche else 0,
                     "methode_extraction": diagnostic.get("methode"),
                     "designation_originale": designation_originale,
+                    "chapitre": chapitre,
                     "fragments_supprimes": fragments_supprimes,
+                    "fragments_ignores": fragments_ignores,
                     "nettoyage_designation": nettoyage_designation,
+                    "alertes": alertes_import,
+                    "capitalisable": (
+                        str(ligne.get("type_ligne") or "article") == "article"
+                        and str(ligne.get("statut_controle") or "ok") not in {"erreur", "ignoree"}
+                        and bool(unite)
+                        and prix_ht > 0
+                        and (ligne.get("score_confiance") or Decimal("0")) >= Decimal("0.60")
+                    ),
                 },
                 decision_import="a_decider",
                 prix_ht_actualise=prix_actualise,

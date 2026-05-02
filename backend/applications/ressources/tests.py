@@ -12,6 +12,8 @@ from rest_framework.test import APIClient
 from .models import DevisAnalyse, LignePrixMarche
 from .moteur_import_prix import (
     LigneCandidate,
+    analyser_structure_ligne_prix,
+    classifier_ligne,
     controler_ligne,
     nettoyer_designation_prix_extraite,
     parser_ligne_prix_candidate,
@@ -44,6 +46,49 @@ class FauxReponsePdf:
 
 
 class MoteurImportPrixTests(TestCase):
+    def test_entete_somme_ht_classee_entete(self):
+        self.assertEqual(classifier_ligne("Somme (€ H.T.)"), "entete_tableau")
+
+    def test_entete_tableau_complete_classee_entete(self):
+        self.assertEqual(classifier_ligne("N° Prix Désignation Unité Quantité P.U. Somme H.T."), "entete_tableau")
+
+    def test_ligne_pointilles_ignoree(self):
+        self.assertEqual(classifier_ligne("........................................................................"), "ligne_pointilles")
+
+    def test_numero_article_pas_prix_unitaire(self):
+        structure = analyser_structure_ligne_prix("101 Fourniture et pose de regard U 2 650,00 1 300,00")
+        self.assertEqual(structure["numero"], "101")
+        self.assertEqual(structure["prix_unitaire_ht"], Decimal("650.00"))
+        self.assertNotEqual(structure["prix_unitaire_ht"], Decimal("101"))
+
+    def test_numero_article_bt_conserve(self):
+        structure = analyser_structure_ligne_prix("203 raccordement BT sur coffret existant U 1 288,00 288,00")
+        self.assertEqual(structure["numero"], "203")
+        self.assertIn("raccordement bt", structure["designation"].lower())
+
+    def test_numero_article_alphanumerique_conserve(self):
+        structure = analyser_structure_ligne_prix("100l câble Alu NF C33-210 ml 5 12,00 60,00")
+        self.assertEqual(structure["numero"], "100l")
+        self.assertEqual(structure["prix_unitaire_ht"], Decimal("12.00"))
+
+    def test_codes_sans_libelle_a_verifier_ou_ignores(self):
+        structure = analyser_structure_ligne_prix("213-c 213-d 213-e")
+        self.assertIn(structure["type_ligne"], {"ligne_a_verifier", "commentaire"})
+        self.assertNotEqual(structure["type_ligne"], "article")
+
+    def test_basse_tension_classe_chapitre(self):
+        self.assertEqual(classifier_ligne("BASSE TENSION"), "chapitre")
+
+    def test_chapitre_designation_separes(self):
+        structure = analyser_structure_ligne_prix("BASSE TENSION - câble Alu NF C33-210 ml 2 10,00 20,00")
+        self.assertEqual(structure["chapitre"], "BASSE TENSION")
+        self.assertEqual(structure["designation"], "Câble Alu NF C33-210")
+
+    def test_travaux_preparatoires_designation_separes(self):
+        structure = analyser_structure_ligne_prix("TRAVAUX PREPARATOIRES - être linéaire provisoire ml 2 10,00 20,00")
+        self.assertEqual(structure["chapitre"], "TRAVAUX PREPARATOIRES")
+        self.assertEqual(structure["designation"], "Être linéaire provisoire")
+
     def test_ligne_complete_sur_une_ligne(self):
         lignes, diagnostic = reconstruire_lignes_depuis_texte(
             "Installation de chantier Fft 1,00 25 000,00 € 25 000,00 €"
@@ -249,6 +294,30 @@ class AnalyseDevisTests(TestCase):
         self.assertEqual(reponse.status_code, 400)
         self.assertFalse(devis.capitalise)
         self.assertIn("Aucune ligne à capitaliser", reponse.json()["detail"])
+
+    def test_capitalisation_ligne_suspecte_bloquee(self):
+        devis = _devis()
+        ligne = LignePrixMarche.objects.create(
+            devis_source=devis,
+            designation="........................................................................",
+            designation_normalisee="",
+            unite="U",
+            prix_ht_original=Decimal("100.00"),
+            type_ligne="ligne_pointilles",
+            statut_controle="ignoree",
+            score_confiance=Decimal("0.00"),
+        )
+        client = APIClient()
+        utilisateur = get_user_model().objects.create_user(
+            courriel="ressources2@example.com",
+            password="secret-test-123",
+            prenom="Test",
+            nom="Ressources",
+        )
+        client.force_authenticate(utilisateur)
+        reponse = client.post(f"/api/ressources/prix-marche/{ligne.id}/capitaliser/")
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn("pas un article", reponse.json()["detail"])
 
     def test_ligne_extraite_reste_liee_au_devis_courant_malgre_similaire(self):
         ancien = _devis("ancien.pdf")

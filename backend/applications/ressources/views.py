@@ -1,5 +1,7 @@
 """Vues API pour la section Ressources."""
 
+from decimal import Decimal
+
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -13,6 +15,30 @@ from .serialiseurs import (
     IndiceRevisionPrixSerialiseur,
     LignePrixMarcheSerialiseur,
 )
+
+
+def evaluer_ligne_capitalisable(ligne: LignePrixMarche) -> tuple[bool, str]:
+    """Vérifie qu'une ligne extraite peut alimenter la bibliothèque de prix."""
+    donnees_import = ligne.donnees_import or {}
+    if ligne.type_ligne != "article":
+        return False, "La ligne n'est pas un article de prix."
+    if ligne.statut_controle in {"erreur", "ignoree"}:
+        return False, "La ligne est marquée comme non exploitable."
+    if not (ligne.designation or "").strip() or set((ligne.designation or "").strip()) <= {".", "-", "–", "—", "_"}:
+        return False, "La désignation est vide ou décorative."
+    if not (ligne.unite or "").strip():
+        return False, "L'unité est absente."
+    if not ligne.prix_ht_original or ligne.prix_ht_original <= 0:
+        return False, "Le prix unitaire est absent."
+    if ligne.score_confiance is not None and ligne.score_confiance < Decimal("0.55"):
+        return False, "Le score de confiance est trop faible."
+    if donnees_import.get("capitalisable") is False:
+        return False, "La ligne doit être vérifiée avant capitalisation."
+    if ligne.ecart_montant_ht and ligne.montant_ht:
+        tolerance = max(Decimal("0.05"), abs(ligne.montant_ht) * Decimal("0.05"))
+        if ligne.ecart_montant_ht > tolerance:
+            return False, "Le triplet quantité / PU / montant est incohérent."
+    return True, ""
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +315,12 @@ def vue_capitaliser_devis(request, pk):
     lignes = LignePrixMarche.objects.filter(devis_source=devis, ligne_bibliotheque__isnull=True)
     nb = 0
     erreurs = []
+    ignorees = []
     for ligne in lignes:
+        capitalisable, raison = evaluer_ligne_capitalisable(ligne)
+        if not capitalisable:
+            ignorees.append({"id": str(ligne.id), "designation": ligne.designation, "raison": raison})
+            continue
         try:
             capitaliser_ligne_en_bibliotheque(ligne)
             nb += 1
@@ -298,7 +329,17 @@ def vue_capitaliser_devis(request, pk):
     if nb > 0:
         devis.capitalise = True
         devis.save(update_fields=["capitalise"])
-    return Response({"capitalise": nb, "erreurs": erreurs})
+    if nb == 0 and ignorees:
+        return Response(
+            {
+                "detail": "Aucune ligne capitalisable. Corrigez les lignes à vérifier avant capitalisation.",
+                "capitalise": nb,
+                "ignorees": ignorees,
+                "erreurs": erreurs,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response({"capitalise": nb, "ignorees": ignorees, "erreurs": erreurs})
 
 
 @api_view(["DELETE"])
@@ -344,6 +385,9 @@ def vue_capitaliser_ligne(request, pk):
     """Capitalise une ligne de prix marché en bibliothèque."""
     from .services import capitaliser_ligne_en_bibliotheque
     ligne = generics.get_object_or_404(LignePrixMarche, pk=pk)
+    capitalisable, raison = evaluer_ligne_capitalisable(ligne)
+    if not capitalisable:
+        return Response({"detail": raison}, status=status.HTTP_400_BAD_REQUEST)
     try:
         ligne_bib = capitaliser_ligne_en_bibliotheque(ligne)
         return Response({"detail": "Capitalisé.", "ligne_bibliotheque_id": str(ligne_bib.id)})

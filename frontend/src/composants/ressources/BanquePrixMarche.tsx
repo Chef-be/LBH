@@ -4,36 +4,55 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { api, ErreurApi } from "@/crochets/useApi";
+import { useNotifications } from "@/contextes/FournisseurNotifications";
 import {
   Search, TrendingUp, RefreshCw, BookOpen, CheckCircle2,
-  ArrowUpRight, Filter, ChevronDown, ChevronRight,
+  ArrowUpRight, ChevronDown, ChevronRight, AlertTriangle,
 } from "lucide-react";
+
+type ValeurApi = number | string | null | undefined;
 
 interface LignePrixMarche {
   id: string;
   designation: string;
   unite: string;
-  prix_ht_original: number;
-  prix_ht_actualise: number | null;
+  numero?: string;
+  prix_ht_original: ValeurApi;
+  prix_ht_actualise: ValeurApi;
   date_indice_actualisation: string | null;
   indice_code: string;
-  indice_valeur_base: number | null;
-  indice_valeur_actuelle: number | null;
+  indice_valeur_base: ValeurApi;
+  indice_valeur_actuelle: ValeurApi;
   localite: string;
   corps_etat: string;
   corps_etat_libelle: string;
-  kpv_estime: number | null;
-  pct_mo_estime: number | null;
-  pct_materiaux_estime: number | null;
-  pct_materiel_estime: number | null;
+  kpv_estime: ValeurApi;
+  pct_mo_estime: ValeurApi;
+  pct_materiaux_estime: ValeurApi;
+  pct_materiel_estime: ValeurApi;
+  statut_controle?: string;
+  type_ligne?: string;
+  score_confiance?: ValeurApi;
+  donnees_import?: {
+    chapitre?: string;
+    capitalisable?: boolean;
+    nettoyage_designation?: boolean;
+    [key: string]: unknown;
+  };
   est_ligne_commune: boolean;
   nb_occurrences: number;
   ligne_bibliotheque: string | null;
 }
 
-function formaterMontant(v: number | null | undefined): string {
+function nombreDecimal(v: ValeurApi): number {
+  if (v == null || v === "") return 0;
+  const n = typeof v === "number" ? v : Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formaterMontant(v: ValeurApi): string {
   if (v == null) return "—";
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(v);
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(nombreDecimal(v));
 }
 
 function classeKpv(kpv: number): string {
@@ -65,9 +84,19 @@ const CORPS_ETAT_OPTIONS = [
 
 function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapitaliser: (id: string) => void }) {
   const [deplie, setDeplie] = useState(false);
-  const variation = ligne.prix_ht_actualise && ligne.prix_ht_original
-    ? ((ligne.prix_ht_actualise - ligne.prix_ht_original) / ligne.prix_ht_original) * 100
+  const prixOriginal = nombreDecimal(ligne.prix_ht_original);
+  const prixActualise = nombreDecimal(ligne.prix_ht_actualise);
+  const kpv = nombreDecimal(ligne.kpv_estime);
+  const capitalisable = ligne.type_ligne === "article"
+    && !["erreur", "ignoree"].includes(ligne.statut_controle || "")
+    && Boolean(ligne.designation && ligne.unite)
+    && prixOriginal > 0
+    && nombreDecimal(ligne.score_confiance ?? 1) >= 0.55
+    && ligne.donnees_import?.capitalisable !== false;
+  const variation = prixActualise && prixOriginal
+    ? ((prixActualise - prixOriginal) / prixOriginal) * 100
     : 0;
+  const designation = ligne.designation || "Donnée à vérifier";
 
   return (
     <>
@@ -79,8 +108,12 @@ function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapi
           <div className="flex items-center gap-2">
             {deplie ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
             <div>
-              <p className="font-medium text-slate-800 text-sm">{ligne.designation.length > 60 ? `${ligne.designation.slice(0, 60)}…` : ligne.designation}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{ligne.corps_etat_libelle || ligne.corps_etat || "Non classifié"}</p>
+              <p className="font-medium text-slate-800 text-sm">{designation.length > 60 ? `${designation.slice(0, 60)}…` : designation}</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {ligne.numero && <span className="mr-1">N° {ligne.numero}</span>}
+                {ligne.donnees_import?.chapitre && <span className="mr-1">{String(ligne.donnees_import.chapitre)}</span>}
+                {ligne.corps_etat_libelle || ligne.corps_etat || "Non classifié"}
+              </p>
             </div>
           </div>
         </td>
@@ -89,7 +122,7 @@ function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapi
           <p className="font-mono font-bold text-slate-800 text-sm">{formaterMontant(ligne.prix_ht_original)}</p>
         </td>
         <td className="py-3 pr-4 text-right">
-          {ligne.prix_ht_actualise ? (
+          {prixActualise ? (
             <div>
               <p className="font-mono font-bold text-indigo-700 text-sm">{formaterMontant(ligne.prix_ht_actualise)}</p>
               {Math.abs(variation) > 0.1 && (
@@ -104,12 +137,18 @@ function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapi
         <td className="py-3 pr-4 text-xs text-slate-500">{ligne.localite || "—"}</td>
         <td className="py-3 pr-4 text-xs font-mono text-slate-500">
           {ligne.indice_code}
-          {ligne.indice_valeur_base && <span className="text-slate-300 ml-1">= {ligne.indice_valeur_base}</span>}
+              {ligne.indice_valeur_base && <span className="text-slate-300 ml-1">= {nombreDecimal(ligne.indice_valeur_base)}</span>}
         </td>
         <td className="py-3 text-right">
           <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
             {ligne.est_ligne_commune && (
               <span className="text-xs bg-indigo-50 text-indigo-600 rounded-full px-2 py-0.5">×{ligne.nb_occurrences}</span>
+            )}
+            {ligne.statut_controle === "alerte" && (
+              <span className="text-xs bg-orange-50 text-orange-700 rounded-full px-2 py-0.5">À vérifier</span>
+            )}
+            {!capitalisable && !ligne.ligne_bibliotheque && (
+              <span className="text-xs bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">Non capitalisable</span>
             )}
             {ligne.ligne_bibliotheque ? (
               <span className="text-xs bg-green-50 text-green-600 rounded-full px-2 py-0.5 flex items-center gap-1">
@@ -120,6 +159,7 @@ function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapi
                 type="button"
                 className="btn-secondaire text-xs"
                 onClick={() => onCapitaliser(ligne.id)}
+                disabled={!capitalisable}
               >
                 <BookOpen className="h-3 w-3" />
                 Capitaliser
@@ -135,24 +175,24 @@ function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapi
               <div>
                 <p className="text-slate-400 mb-1 font-medium">SDP estimé</p>
                 <div className="space-y-0.5">
-                  <div className="flex justify-between"><span className="text-slate-500">MO</span><span className="font-mono text-indigo-600">{ligne.pct_mo_estime?.toFixed(0)}%</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">Matériaux</span><span className="font-mono text-emerald-600">{ligne.pct_materiaux_estime?.toFixed(0)}%</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">Matériel</span><span className="font-mono text-amber-600">{ligne.pct_materiel_estime?.toFixed(0)}%</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">MO</span><span className="font-mono text-indigo-600">{nombreDecimal(ligne.pct_mo_estime).toFixed(0)}%</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Matériaux</span><span className="font-mono text-emerald-600">{nombreDecimal(ligne.pct_materiaux_estime).toFixed(0)}%</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Matériel</span><span className="font-mono text-amber-600">{nombreDecimal(ligne.pct_materiel_estime).toFixed(0)}%</span></div>
                 </div>
               </div>
               <div>
                 <p className="text-slate-400 mb-1 font-medium">Actualisation</p>
                 <div className="space-y-0.5">
-                  <div className="flex justify-between"><span className="text-slate-500">Indice base</span><span className="font-mono">{ligne.indice_valeur_base ?? "—"}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">Indice actuel</span><span className="font-mono">{ligne.indice_valeur_actuelle ?? "—"}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Indice base</span><span className="font-mono">{ligne.indice_valeur_base == null ? "—" : nombreDecimal(ligne.indice_valeur_base)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Indice actuel</span><span className="font-mono">{ligne.indice_valeur_actuelle == null ? "—" : nombreDecimal(ligne.indice_valeur_actuelle)}</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Date</span><span className="font-mono">{ligne.date_indice_actualisation ? new Date(ligne.date_indice_actualisation).toLocaleDateString("fr-FR") : "—"}</span></div>
                 </div>
               </div>
               <div>
                 <p className="text-slate-400 mb-1 font-medium">Coefficient Kpv</p>
-                {ligne.kpv_estime ? (
-                  <p className={clsx("text-2xl font-bold font-mono", classeKpv(ligne.kpv_estime))}>
-                    {ligne.kpv_estime.toFixed(3)}
+                {kpv ? (
+                  <p className={clsx("text-2xl font-bold font-mono", classeKpv(kpv))}>
+                    {kpv.toFixed(3)}
                   </p>
                 ) : <p className="text-slate-400">Non calculé</p>}
                 <p className="text-slate-400 mt-1">Plage normale : 1.25 – 1.55</p>
@@ -167,6 +207,7 @@ function LignePrixRow({ ligne, onCapitaliser }: { ligne: LignePrixMarche; onCapi
 
 export default function BanquePrixMarche() {
   const queryClient = useQueryClient();
+  const notifications = useNotifications();
   const [recherche, setRecherche] = useState("");
   const [filtreCorpsEtat, setFiltreCorpsEtat] = useState("");
   const [filtreLocalite, setFiltreLocalite] = useState("");
@@ -177,7 +218,7 @@ export default function BanquePrixMarche() {
   if (filtreCorpsEtat) params.set("corps_etat", filtreCorpsEtat);
   if (filtreLocalite) params.set("localite", filtreLocalite);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["prix-marche", recherche, filtreCorpsEtat, filtreLocalite],
     queryFn: () => api.get(`/api/ressources/prix-marche/?${params.toString()}`),
   });
@@ -187,8 +228,9 @@ export default function BanquePrixMarche() {
     try {
       await api.post(`/api/ressources/prix-marche/${id}/capitaliser/`, {});
       queryClient.invalidateQueries({ queryKey: ["prix-marche"] });
+      notifications.succes("Ligne capitalisée en bibliothèque.");
     } catch (e) {
-      alert(e instanceof ErreurApi ? e.detail : "Erreur lors de la capitalisation.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Erreur lors de la capitalisation.");
     }
   };
 
@@ -197,9 +239,9 @@ export default function BanquePrixMarche() {
     try {
       const res = await api.post<{ detail: string }>("/api/ressources/prix-marche/actualiser/", { code_indice: "BT01" });
       queryClient.invalidateQueries({ queryKey: ["prix-marche"] });
-      alert(res.detail);
+      notifications.succes(res.detail);
     } catch (e) {
-      alert(e instanceof ErreurApi ? e.detail : "Erreur.");
+      notifications.erreur(e instanceof ErreurApi ? e.detail : "Erreur lors de l'actualisation.");
     } finally {
       setActualisationEnCours(false);
     }
@@ -257,7 +299,20 @@ export default function BanquePrixMarche() {
       </div>
 
       {/* Tableau */}
-      {isLoading ? (
+      {isError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-6 text-sm text-red-800">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-semibold">Erreur de chargement des prix marché</p>
+              <p className="mt-1 text-red-700">Les données reçues sont indisponibles ou incomplètes. La page reste accessible.</p>
+              <button type="button" className="btn-secondaire mt-3 text-xs" onClick={() => refetch()}>
+                Réessayer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : isLoading ? (
         <div className="py-12 text-center text-slate-400 text-sm">Chargement…</div>
       ) : lignes.length === 0 ? (
         <div className="py-16 text-center border border-dashed border-slate-200 rounded-2xl">

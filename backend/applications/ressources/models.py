@@ -176,9 +176,17 @@ class LignePrixMarche(models.Model):
         choices=[
             ("article", "Article"),
             ("titre", "Titre"),
+            ("chapitre", "Chapitre"),
+            ("sous_chapitre", "Sous-chapitre"),
+            ("entete_tableau", "Entête tableau"),
             ("sous_total", "Sous-total"),
             ("total", "Total"),
+            ("total_general", "Total général"),
             ("commentaire", "Commentaire"),
+            ("ligne_vide", "Ligne vide"),
+            ("ligne_pointilles", "Ligne de pointillés"),
+            ("ligne_a_verifier", "Ligne à vérifier"),
+            ("ignoree", "Ignorée"),
         ],
         default="article",
     )

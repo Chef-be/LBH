@@ -23,15 +23,22 @@ RE_NOMBRE = re.compile(r"\d{1,3}(?:[ \u00a0]\d{3})+(?:[,.]\d+)?(?!\d)|\d+[,.]\d+
 RE_MONTANT_FRAGMENT = re.compile(r"^(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[,.]\d+)?\s*€$")
 RE_POURCENTAGE_FRAGMENT = re.compile(r"^\d+(?:[,.]\d+)?%$")
 RE_FRAGMENT_NUMERIQUE = re.compile(r"^(?:€|\d+(?:[,.]\d+)?|(?:\d{1,3}[ \u00a0])+\d{3}(?:[,.]\d+)?|[\d\s\u00a0,.]+€|\d+(?:[,.]\d+)?%)$")
-RE_NUMERO_SEUL = re.compile(r"^\s*((?:\d+[,.])+\d+|\d+[A-Za-z]?|[A-Za-z])\s*$")
-RE_NUMERO_DEBUT = re.compile(r"^\s*((?:\d+[,.])+\d+|\d+[A-Za-z]?|[A-Za-z])(?:\s+|$)(.*)$")
+RE_NUMERO_SEUL = re.compile(r"^\s*((?:\d+[,.])+\d+|\d+[A-Za-z]?|\d+[-–][A-Za-z]|[A-Za-z])\s*$")
+RE_NUMERO_DEBUT = re.compile(r"^\s*((?:\d+[,.])+\d+|\d+[A-Za-z]?|\d+[-–][A-Za-z]|[A-Za-z])(?:\s+|$)(.*)$")
 RE_SOUS_ARTICLE = re.compile(r"^(.*?)(?:\s+|^)([a-z])\s*[_\-–—]?\s*(.+)$", re.IGNORECASE)
 
 MOTS_TOTAL = ("total", "sous-total", "sous total", "montant total", "total ht", "total h.t")
 MOTS_ENTETE = (
     "désignation", "designation", "prix unitaire", "prix total", "quantité",
-    "quantite", "somme h.t", "total ht", "n°", "unité", "unite",
+    "quantite", "somme h.t", "somme (€ h", "total ht", "h.t", "ttc",
+    "montant", "p.u", "pu", "n°", "n° prix", "unité", "unite", "postes",
 )
+MOTS_CHAPITRE = {
+    "travaux preparatoires", "travaux préparatoires", "basse tension",
+    "terrassements", "gros oeuvre", "gros œuvre", "vrd", "electricite",
+    "électricité", "reseaux", "réseaux", "eclairage public", "éclairage public",
+    "assainissement", "voirie", "fondations", "demolitions", "démolitions",
+}
 MOTS_DESIGNATION_METIER = {
     "installation", "chantier", "démolition", "demolition", "déblais", "deblais",
     "remblai", "béton", "beton", "coffrage", "ferraillage", "purge",
@@ -56,10 +63,13 @@ class LigneCandidate:
     ecart_montant_ht: Decimal | None = None
     designation_originale: str = ""
     fragments_supprimes: list[str] = field(default_factory=list)
+    fragments_ignores: list[str] = field(default_factory=list)
     nettoyage_designation: bool = False
+    chapitre: str = ""
     type_ligne: str = "article"
     statut_controle: str = "ok"
     score_confiance: Decimal = Decimal("0.80")
+    alertes: list[str] = field(default_factory=list)
     corrections_proposees: list[str] = field(default_factory=list)
 
 
@@ -163,6 +173,23 @@ def nettoyer_designation_prix_extraite(texte: str) -> tuple[str, list[str]]:
     if not brut:
         return "", []
 
+    fragments_colonnes = [
+        r"\bsommes?\s*\(?.{0,4}h\.?t\.?\)?",
+        r"\bh\.?\s*t\.?\b",
+        r"\bp\.?\s*u\.?\b",
+        r"\bprix\s+unitaire\b",
+        r"\bprix\s+total\b",
+        r"\bquantit[eé]\b",
+        r"\bunit[eé]\b",
+        r"\bd[eé]signation\b",
+    ]
+    for motif in fragments_colonnes:
+        brut = re.sub(motif, " ", brut, flags=re.IGNORECASE)
+    brut = re.sub(r"[.\-–—_]{5,}", " ", brut)
+    brut = nettoyer_ligne(brut)
+    if not brut:
+        return "", []
+
     debut = detecter_debut_designation_metier(brut)
     fragments: list[str] = []
     nettoye = brut[debut:].strip(" -–—:;|")
@@ -185,6 +212,10 @@ def nettoyer_designation_prix_extraite(texte: str) -> tuple[str, list[str]]:
             nettoye = apres
 
     nettoye = re.sub(r"^(?:€|\d+(?:[,.]\d+)?%?|\d[\d \u00a0,.]*€)\s+", "", nettoye).strip(" -–—:;|")
+    match_numero = RE_NUMERO_DEBUT.match(nettoye)
+    if match_numero and re.search(r"[A-Za-zÀ-ÿ]{4,}", match_numero.group(2) or ""):
+        fragments.append(match_numero.group(1))
+        nettoye = nettoyer_ligne(match_numero.group(2))
     nettoye = re.sub(r"\s+", " ", nettoye)
     return nettoye, fragments
 
@@ -217,22 +248,99 @@ def valider_designation_extraite(designation: str) -> tuple[bool, list[str]]:
     return not alertes, alertes
 
 
-def classifier_ligne(texte: str) -> str:
+def est_ligne_pointilles(texte: str) -> bool:
+    propre = nettoyer_ligne(texte)
+    caracteres = [c for c in propre if not c.isspace()]
+    if not caracteres:
+        return False
+    ponctuation = sum(1 for c in caracteres if c in ".-_–—")
+    mots = re.findall(r"[A-Za-zÀ-ÿ]{3,}", propre)
+    return ponctuation / len(caracteres) > 0.50 and len(mots) <= 1
+
+
+def est_entete_tableau(texte: str) -> bool:
     bas = nettoyer_ligne(texte).lower()
     if not bas:
-        return "ignoree"
-    if any(mot in bas for mot in MOTS_ENTETE):
-        if not RE_UNITE.search(bas) or "prix unitaire" in bas:
-            return "ignoree"
+        return False
+    touches = sum(1 for mot in MOTS_ENTETE if mot in bas)
+    if touches >= 2:
+        return True
+    if "somme" in bas and ("h.t" in bas or "ht" in bas or "(€" in bas):
+        return True
+    if bas in {"pu", "p.u.", "prix", "total", "montant", "unité", "unite", "quantité", "quantite"}:
+        return True
+    return False
+
+
+def _ratio_majuscules(texte: str) -> float:
+    lettres = [c for c in texte if c.isalpha()]
+    if not lettres:
+        return 0
+    return sum(1 for c in lettres if c.upper() == c) / len(lettres)
+
+
+def est_chapitre(texte: str) -> bool:
+    propre = nettoyer_ligne(texte)
+    bas = propre.lower()
+    if not propre or RE_UNITE.search(propre) or est_entete_tableau(propre):
+        return False
+    if any(mot in bas for mot in MOTS_CHAPITRE):
+        return len(RE_NOMBRE.findall(propre)) <= 1
+    mots = re.findall(r"[A-Za-zÀ-ÿ]{3,}", propre)
+    return len(mots) >= 1 and _ratio_majuscules(propre) >= 0.75 and len(RE_NOMBRE.findall(propre)) == 0
+
+
+def classifier_ligne(texte: str) -> str:
+    propre = nettoyer_ligne(texte)
+    bas = propre.lower()
+    if not bas:
+        return "ligne_vide"
+    if est_ligne_pointilles(propre):
+        return "ligne_pointilles"
+    if est_entete_tableau(propre):
+        return "entete_tableau"
     if any(mot in bas for mot in MOTS_TOTAL):
-        return "total" if "total" in bas and "sous" not in bas else "sous_total"
-    if RE_UNITE.search(bas):
+        return "total_general" if "total" in bas and "sous" not in bas else "sous_total"
+    if est_chapitre(propre):
+        return "chapitre"
+    unite_match = RE_UNITE.search(propre)
+    if unite_match and len(_nombres_apres_unite(propre[unite_match.end():])) >= 2:
         return "article"
-    if RE_UNITE.search(bas) and len(RE_NOMBRE.findall(bas)) >= 2:
-        return "article"
+    if unite_match:
+        return "ligne_a_verifier"
     if len(bas) < 4:
         return "ignoree"
-    return "titre"
+    return "commentaire"
+
+
+def separer_chapitre_designation(texte: str) -> tuple[str, str]:
+    propre = nettoyer_ligne(texte)
+    match = re.match(r"^([A-ZÀ-Ÿ0-9 '/&().]+)\s*[-–—]\s*(.+)$", propre)
+    if not match:
+        return "", propre
+    chapitre = nettoyer_ligne(match.group(1)).strip(" -–—:")
+    designation = nettoyer_ligne(match.group(2)).strip(" -–—:")
+    if chapitre and (_ratio_majuscules(chapitre) >= 0.70 or chapitre.lower() in MOTS_CHAPITRE):
+        return chapitre, designation[:1].upper() + designation[1:] if designation else designation
+    return "", propre
+
+
+def extraire_numero_article(texte: str) -> tuple[str, str]:
+    propre = nettoyer_ligne(texte)
+    match = RE_NUMERO_DEBUT.match(propre)
+    if not match:
+        return "", propre
+    numero = match.group(1).replace(".", ",")
+    reste = nettoyer_ligne(match.group(2))
+    if not reste:
+        return numero, ""
+    premier_reste = reste.split(" ", 1)[0]
+    debut_pollue = premier_reste.startswith("€") or bool(RE_POURCENTAGE_FRAGMENT.match(premier_reste)) or (
+        sum(1 for t, _d, _f in _tokens_avec_positions(reste[:detecter_debut_designation_metier(reste)]) if _est_fragment_colonne(t)) >= 2
+    )
+    if debut_pollue:
+        return "", propre
+    return numero, reste
 
 
 def _nombres_apres_unite(texte: str) -> list[tuple[Decimal, str, int]]:
@@ -252,6 +360,18 @@ def _nombres_apres_unite(texte: str) -> list[tuple[Decimal, str, int]]:
         valeur = convertir_decimal(match.group(0))
         if valeur is not None:
             valeurs.append((valeur, match.group(0), match.start()))
+    if valeurs:
+        premier_valeur, premier_texte, premier_position = valeurs[0]
+        match_split = re.match(r"^(\d{1,3})[ \u00a0](\d{1,3}(?:[,.]\d+)?)$", premier_texte)
+        if match_split and len(valeurs) >= 2:
+            qte = convertir_decimal(match_split.group(1))
+            pu = convertir_decimal(match_split.group(2))
+            if qte is not None and pu is not None and qte <= 999:
+                valeurs = [
+                    (qte, match_split.group(1), premier_position),
+                    (pu, match_split.group(2), premier_position + len(match_split.group(1)) + 1),
+                    *valeurs[1:],
+                ]
     return valeurs
 
 
@@ -304,6 +424,119 @@ def _choisir_triplet_prix(nombres: list[tuple[Decimal, str, int]]) -> tuple[Deci
     return quantite, pu, montant, ecart, corrections
 
 
+def choisir_triplet_quantite_pu_montant(
+    nombres: list[Decimal],
+    contexte_colonnes=None,
+) -> tuple[Decimal | None, Decimal | None, Decimal | None, Decimal | None, list[str]]:
+    nombres_positions = [(valeur, str(valeur), index) for index, valeur in enumerate(nombres)]
+    return _choisir_triplet_prix(nombres_positions)
+
+
+def analyser_structure_ligne_prix(texte: str, contexte: dict | None = None) -> dict:
+    brut = nettoyer_ligne(texte)
+    type_ligne = classifier_ligne(brut)
+    resultat = {
+        "numero": "",
+        "chapitre": "",
+        "designation": "",
+        "designation_originale": brut,
+        "unite": "",
+        "quantite": None,
+        "prix_unitaire_ht": None,
+        "montant_ht": None,
+        "montant_recalcule_ht": None,
+        "ecart_montant_ht": None,
+        "type_ligne": type_ligne,
+        "statut_controle": "ok",
+        "alertes": [],
+        "fragments_supprimes": [],
+        "fragments_ignores": [],
+        "corrections_proposees": [],
+        "score_confiance": Decimal("0.80"),
+    }
+
+    if type_ligne in {"ligne_vide", "ligne_pointilles", "entete_tableau", "sous_total", "total_general", "ignoree"}:
+        resultat["statut_controle"] = "ignoree"
+        resultat["score_confiance"] = Decimal("0")
+        return resultat
+    if type_ligne == "chapitre":
+        resultat["chapitre"] = brut
+        resultat["designation"] = brut
+        resultat["statut_controle"] = "ignoree"
+        resultat["score_confiance"] = Decimal("0")
+        return resultat
+
+    unite_match = RE_UNITE.search(brut)
+    if not unite_match:
+        resultat["type_ligne"] = "ligne_a_verifier"
+        resultat["statut_controle"] = "alerte"
+        resultat["alertes"].append("Unité non détectée.")
+        resultat["score_confiance"] = Decimal("0.35")
+        return resultat
+
+    avant = nettoyer_ligne(brut[:unite_match.start()])
+    apres = nettoyer_ligne(brut[unite_match.end():])
+    chapitre, designation_source = separer_chapitre_designation(avant)
+    numero, designation_source = extraire_numero_article(designation_source)
+    if not chapitre and contexte:
+        chapitre = str(contexte.get("chapitre_courant") or "")
+
+    designation_nettoyee, fragments_supprimes = nettoyer_designation_prix_extraite(designation_source)
+    resultat.update({
+        "numero": numero,
+        "chapitre": chapitre,
+        "designation": designation_nettoyee,
+        "designation_originale": designation_source or avant,
+        "unite": normaliser_unite(unite_match.group(1)),
+        "fragments_supprimes": fragments_supprimes,
+    })
+
+    if not designation_nettoyee:
+        resultat["type_ligne"] = "ligne_a_verifier"
+        resultat["statut_controle"] = "alerte"
+        resultat["alertes"].append("Désignation métier non détectée.")
+        resultat["score_confiance"] = Decimal("0.25")
+        return resultat
+
+    nombres = _nombres_apres_unite(apres)
+    qte, pu, montant, ecart, corrections = _choisir_triplet_prix(nombres)
+    resultat.update({
+        "quantite": qte,
+        "prix_unitaire_ht": pu,
+        "montant_ht": montant,
+        "ecart_montant_ht": ecart,
+        "corrections_proposees": corrections,
+    })
+    if qte and pu:
+        resultat["montant_recalcule_ht"] = (qte * pu).quantize(Decimal("0.01"))
+
+    if not pu or not montant:
+        resultat["statut_controle"] = "alerte"
+        resultat["alertes"].append("Prix unitaire ou montant absent.")
+        resultat["corrections_proposees"].append("Triplet quantité / PU / montant à vérifier.")
+
+    designation_valide, alertes_designation = valider_designation_extraite(designation_nettoyee)
+    if fragments_supprimes:
+        resultat["corrections_proposees"].append("Désignation reconstruite avec nettoyage de fragments numériques.")
+    if not designation_valide:
+        resultat["statut_controle"] = "alerte"
+        resultat["alertes"].extend(alertes_designation)
+        resultat["corrections_proposees"].append("Désignation polluée par des valeurs numériques : vérifier le libellé extrait.")
+
+    mots_metier = re.findall(r"[A-Za-zÀ-ÿ]{4,}", designation_nettoyee)
+    contient_code_utile = bool(re.search(r"(?:c\d+/\d+|dn\s*\d+|ø\s*\d+|t\d\b|\d+/\d)", designation_nettoyee, flags=re.IGNORECASE))
+    if len(mots_metier) < 2 and not contient_code_utile and designation_nettoyee.lower() not in MOTS_DESIGNATION_METIER:
+        resultat["statut_controle"] = "alerte"
+        resultat["alertes"].append("Désignation métier courte ou insuffisante.")
+        resultat["corrections_proposees"].append("Désignation à vérifier avant capitalisation.")
+
+    if resultat["statut_controle"] == "alerte":
+        resultat["score_confiance"] = Decimal("0.55") if not fragments_supprimes else Decimal("0.60")
+    elif fragments_supprimes:
+        resultat["score_confiance"] = Decimal("0.70")
+    return resultat
+
+
 def controler_ligne(ligne: LigneCandidate) -> LigneCandidate:
     qte = ligne.quantite
     pu = ligne.prix_unitaire_ht
@@ -332,63 +565,37 @@ def parser_ligne_prix_candidate(texte: str) -> LigneCandidate | None:
     brut = nettoyer_ligne(texte)
     if not brut:
         return None
-    type_ligne = classifier_ligne(brut)
-    if type_ligne != "article":
-        return LigneCandidate(designation=brut, type_ligne=type_ligne, statut_controle="ignoree")
-
-    unite_match = RE_UNITE.search(brut)
-    if not unite_match:
-        return None
-
-    avant = nettoyer_ligne(brut[:unite_match.start()])
-    apres = nettoyer_ligne(brut[unite_match.end():])
-    unite = normaliser_unite(unite_match.group(1))
-    numero = ""
-    designation = avant
-
-    match_numero = RE_NUMERO_DEBUT.match(avant)
-    if match_numero:
-        reste = nettoyer_ligne(match_numero.group(2))
-        premier_reste = reste.split(" ", 1)[0] if reste else ""
-        debut_pollue = premier_reste.startswith("€") or RE_POURCENTAGE_FRAGMENT.match(premier_reste) or (
-            sum(1 for t, _d, _f in _tokens_avec_positions(reste[:detecter_debut_designation_metier(reste)]) if _est_fragment_colonne(t)) >= 2
+    structure = analyser_structure_ligne_prix(brut)
+    if structure["type_ligne"] != "article" and structure["statut_controle"] == "ignoree":
+        return LigneCandidate(
+            designation=structure.get("designation") or brut,
+            type_ligne=structure["type_ligne"],
+            statut_controle="ignoree",
+            chapitre=structure.get("chapitre") or "",
+            score_confiance=Decimal("0"),
         )
-        if not debut_pollue:
-            numero = match_numero.group(1).replace(".", ",")
-            designation = reste
-
-    designation_originale = designation
-    designation_nettoyee, fragments_supprimes = nettoyer_designation_prix_extraite(designation)
-    if not designation_nettoyee:
+    if not structure["designation"] or (not structure["montant_ht"] and not structure["prix_unitaire_ht"]):
         return None
-    designation = designation_nettoyee
-
-    nombres = _nombres_apres_unite(apres)
-    quantite, pu, montant, ecart, corrections = _choisir_triplet_prix(nombres)
-    if not montant and not pu:
-        return None
-
-    designation_valide, alertes_designation = valider_designation_extraite(designation)
-    if fragments_supprimes:
-        corrections.append("Désignation reconstruite avec nettoyage de fragments numériques.")
-    if not designation_valide:
-        corrections.append("Désignation polluée par des valeurs numériques : vérifier le libellé extrait.")
-        corrections.extend(alertes_designation)
 
     ligne = LigneCandidate(
-        numero=numero,
-        designation=designation,
-        designation_originale=designation_originale,
-        fragments_supprimes=fragments_supprimes,
-        nettoyage_designation=bool(fragments_supprimes or designation != designation_originale),
-        unite=unite,
-        quantite=quantite,
-        prix_unitaire_ht=pu,
-        montant_ht=montant,
-        ecart_montant_ht=ecart,
-        statut_controle="alerte" if not designation_valide or fragments_supprimes else "ok",
-        score_confiance=Decimal("0.60") if not designation_valide else (Decimal("0.70") if fragments_supprimes else Decimal("0.80")),
-        corrections_proposees=corrections,
+        numero=structure["numero"],
+        designation=structure["designation"],
+        designation_originale=structure["designation_originale"],
+        fragments_supprimes=structure["fragments_supprimes"],
+        fragments_ignores=structure["fragments_ignores"],
+        nettoyage_designation=bool(structure["fragments_supprimes"] or structure["designation"] != structure["designation_originale"]),
+        chapitre=structure["chapitre"],
+        unite=structure["unite"],
+        quantite=structure["quantite"],
+        prix_unitaire_ht=structure["prix_unitaire_ht"],
+        montant_ht=structure["montant_ht"],
+        montant_recalcule_ht=structure["montant_recalcule_ht"],
+        ecart_montant_ht=structure["ecart_montant_ht"],
+        type_ligne=structure["type_ligne"],
+        statut_controle=structure["statut_controle"],
+        score_confiance=structure["score_confiance"],
+        alertes=structure["alertes"],
+        corrections_proposees=structure["corrections_proposees"],
     )
     return controler_ligne(ligne)
 
@@ -433,13 +640,17 @@ def reconstruire_lignes_depuis_texte(texte: str) -> tuple[list[dict], dict]:
     buffer: list[str] = []
     numero_en_attente = ""
     parent: tuple[str, str] | None = None
+    contexte = {"chapitre_courant": "", "sous_chapitre_courant": "", "lot_courant": ""}
 
     def tenter_buffer() -> bool:
-        nonlocal buffer, rejetees, parent
+        nonlocal buffer, rejetees, parent, contexte
         if not buffer:
             return False
-        candidat = parser_ligne_prix_candidate(" ".join(buffer))
+        texte_buffer = " ".join(buffer)
+        structure = analyser_structure_ligne_prix(texte_buffer, contexte)
+        candidat = parser_ligne_prix_candidate(texte_buffer)
         if candidat and candidat.type_ligne == "article" and candidat.designation:
+            candidat.chapitre = candidat.chapitre or structure.get("chapitre") or contexte.get("chapitre_courant", "")
             candidat = _appliquer_parent(candidat, parent)
             if candidat.prix_unitaire_ht and candidat.prix_unitaire_ht > 0:
                 resultats.append(candidat)
@@ -449,9 +660,16 @@ def reconstruire_lignes_depuis_texte(texte: str) -> tuple[list[dict], dict]:
 
     for ligne in lignes:
         classe = classifier_ligne(ligne)
-        if classe == "ignoree" and buffer and re.fullmatch(r"[\d\s\u00a0,.€]+", ligne):
+        if classe in {"ligne_vide", "ignoree"} and buffer and re.fullmatch(r"[\d\s\u00a0,.€]+", ligne):
             classe = "article"
-        if classe in {"ignoree", "total", "sous_total"}:
+        if classe == "chapitre":
+            if buffer and not tenter_buffer():
+                rejetees += 1
+                buffer = []
+            contexte["chapitre_courant"] = ligne
+            parent = None
+            continue
+        if classe in {"ligne_vide", "ligne_pointilles", "entete_tableau", "ignoree", "total", "sous_total", "total_general"}:
             if buffer and not tenter_buffer():
                 rejetees += 1
                 buffer = []
@@ -490,7 +708,9 @@ def reconstruire_lignes_depuis_texte(texte: str) -> tuple[list[dict], dict]:
             "numero": ligne.numero,
             "designation": ligne.designation,
             "designation_originale": ligne.designation_originale or ligne.designation,
+            "chapitre": ligne.chapitre,
             "fragments_supprimes": ligne.fragments_supprimes,
+            "fragments_ignores": ligne.fragments_ignores,
             "nettoyage_designation": ligne.nettoyage_designation,
             "unite": ligne.unite,
             "quantite": ligne.quantite,
@@ -501,6 +721,7 @@ def reconstruire_lignes_depuis_texte(texte: str) -> tuple[list[dict], dict]:
             "type_ligne": ligne.type_ligne,
             "statut_controle": ligne.statut_controle,
             "score_confiance": ligne.score_confiance,
+            "alertes": ligne.alertes,
             "corrections_proposees": ligne.corrections_proposees,
         })
 
