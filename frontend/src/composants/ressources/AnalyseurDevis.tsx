@@ -94,9 +94,15 @@ interface DiagnosticExtraction {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formaterMontant(v: number | null | undefined): string {
+function nombreDecimal(v: number | string | null | undefined): number {
+  if (v == null || v === "") return 0;
+  const n = typeof v === "number" ? v : Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formaterMontant(v: number | string | null | undefined): string {
   if (v == null) return "—";
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(v);
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(nombreDecimal(v));
 }
 
 function classeKpv(kpv: number): string {
@@ -133,8 +139,11 @@ const INDICES_DISPONIBLES = ["BTM", "TPM", "BT01", "BT02", "BT10", "BT20", "BT28
 
 function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
   const [deplie, setDeplie] = useState(false);
-  const kpv = ligne.kpv_estime || 0;
-  const ds = ligne.debourse_sec_estime || 0;
+  const kpv = nombreDecimal(ligne.kpv_estime);
+  const ds = nombreDecimal(ligne.debourse_sec_estime);
+  const pctMo = nombreDecimal(ligne.pct_mo_estime);
+  const pctMateriaux = nombreDecimal(ligne.pct_materiaux_estime);
+  const pctMateriel = nombreDecimal(ligne.pct_materiel_estime);
 
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden">
@@ -205,24 +214,24 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
                 </div>
                 <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
                   <p className="text-slate-400">MO</p>
-                  <p className="font-mono font-bold text-indigo-600 mt-0.5">{ligne.pct_mo_estime?.toFixed(0)}%</p>
-                  <p className="text-slate-400 text-xs">{formaterMontant((ds * (ligne.pct_mo_estime || 0)) / 100)}</p>
+                  <p className="font-mono font-bold text-indigo-600 mt-0.5">{pctMo.toFixed(0)}%</p>
+                  <p className="text-slate-400 text-xs">{formaterMontant((ds * pctMo) / 100)}</p>
                 </div>
                 <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
                   <p className="text-slate-400">Matériaux</p>
-                  <p className="font-mono font-bold text-emerald-600 mt-0.5">{ligne.pct_materiaux_estime?.toFixed(0)}%</p>
-                  <p className="text-slate-400 text-xs">{formaterMontant((ds * (ligne.pct_materiaux_estime || 0)) / 100)}</p>
+                  <p className="font-mono font-bold text-emerald-600 mt-0.5">{pctMateriaux.toFixed(0)}%</p>
+                  <p className="text-slate-400 text-xs">{formaterMontant((ds * pctMateriaux) / 100)}</p>
                 </div>
                 <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
                   <p className="text-slate-400">Matériel</p>
-                  <p className="font-mono font-bold text-amber-600 mt-0.5">{ligne.pct_materiel_estime?.toFixed(0)}%</p>
-                  <p className="text-slate-400 text-xs">{formaterMontant((ds * (ligne.pct_materiel_estime || 0)) / 100)}</p>
+                  <p className="font-mono font-bold text-amber-600 mt-0.5">{pctMateriel.toFixed(0)}%</p>
+                  <p className="text-slate-400 text-xs">{formaterMontant((ds * pctMateriel) / 100)}</p>
                 </div>
               </div>
               <div className="mt-2 flex h-2 rounded-full overflow-hidden bg-slate-200">
-                <div style={{ width: `${ligne.pct_mo_estime || 0}%`, backgroundColor: "#6366f1" }} title="MO" />
-                <div style={{ width: `${ligne.pct_materiaux_estime || 0}%`, backgroundColor: "#10b981" }} title="Matériaux" />
-                <div style={{ width: `${ligne.pct_materiel_estime || 0}%`, backgroundColor: "#f59e0b" }} title="Matériel" />
+                <div style={{ width: `${pctMo}%`, backgroundColor: "#6366f1" }} title="MO" />
+                <div style={{ width: `${pctMateriaux}%`, backgroundColor: "#10b981" }} title="Matériaux" />
+                <div style={{ width: `${pctMateriel}%`, backgroundColor: "#f59e0b" }} title="Matériel" />
               </div>
               <div className="mt-3 space-y-0.5 text-xs">
                 {(() => {

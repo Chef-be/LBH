@@ -158,10 +158,10 @@ class LignePrixMarche(models.Model):
     )
     ordre = models.PositiveIntegerField(default=0)
     numero = models.CharField(max_length=80, blank=True)
-    designation = models.CharField(max_length=500, verbose_name="Désignation")
+    designation = models.TextField(verbose_name="Désignation")
     designation_originale = models.TextField(blank=True)
-    designation_normalisee = models.CharField(
-        max_length=500, blank=True,
+    designation_normalisee = models.TextField(
+        blank=True,
         verbose_name="Désignation normalisée",
         help_text="Version nettoyée pour la détection de similarité.",
     )
