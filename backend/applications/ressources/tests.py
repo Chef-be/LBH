@@ -10,7 +10,13 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .models import DevisAnalyse, LignePrixMarche
-from .moteur_import_prix import LigneCandidate, controler_ligne, reconstruire_lignes_depuis_texte
+from .moteur_import_prix import (
+    LigneCandidate,
+    controler_ligne,
+    nettoyer_designation_prix_extraite,
+    parser_ligne_prix_candidate,
+    reconstruire_lignes_depuis_texte,
+)
 from .services import analyser_devis
 from .taches import tache_analyser_devis
 
@@ -134,6 +140,80 @@ class MoteurImportPrixTests(TestCase):
         self.assertEqual(ligne.statut_controle, "alerte")
         self.assertGreater(ligne.ecart_montant_ht, Decimal("0"))
 
+    def test_nettoie_montants_avant_designation(self):
+        designation, fragments = nettoyer_designation_prix_extraite("295 € 480 6,3% 135 € Démolition d'ouvrages")
+        self.assertEqual(designation, "Démolition d'ouvrages")
+        self.assertIn("295", fragments)
+
+    def test_ligne_polluee_demolition(self):
+        ligne = parser_ligne_prix_candidate("295 € 480 6,3% 135 € Démolition d'ouvrages U 1 2 000 € 2 000 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Démolition d'ouvrages")
+        self.assertEqual(ligne.unite, "U")
+        self.assertEqual(ligne.quantite, Decimal("1"))
+        self.assertEqual(ligne.prix_unitaire_ht, Decimal("2000"))
+        self.assertEqual(ligne.montant_ht, Decimal("2000"))
+        self.assertTrue(ligne.nettoyage_designation)
+        self.assertIn("295", ligne.designation_originale)
+
+    def test_ligne_polluee_periode_preparation(self):
+        ligne = parser_ligne_prix_candidate(
+            "Période de préparation 15 22 500 € 0,00% 0 € Installation de chantier % 1 15 000 € 15 000 €"
+        )
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Installation de chantier")
+        self.assertEqual(ligne.unite, "%")
+        self.assertEqual(ligne.prix_unitaire_ht, Decimal("15000"))
+
+    def test_ligne_polluee_deblais(self):
+        ligne = parser_ligne_prix_candidate("330 € 258 10,0% 1 030 € Evacuation des déblais excédentaires de fouilles m³ 1 45,00 € 45,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Evacuation des déblais excédentaires de fouilles")
+        self.assertEqual(ligne.unite, "m³")
+        self.assertEqual(ligne.prix_unitaire_ht, Decimal("45.00"))
+        self.assertEqual(ligne.montant_ht, Decimal("45.00"))
+
+    def test_ligne_polluee_beton_c3037(self):
+        ligne = parser_ligne_prix_candidate("€ 9 9,2% 38 € Béton C30/37 m³ 1 19 000,00 € 19 000,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Béton C30/37")
+
+    def test_ligne_polluee_beton_c3037_variante(self):
+        ligne = parser_ligne_prix_candidate("450 € 193 9,0% 777 € Béton C30/37 m³ 1 38 000,00 € 38 000,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Béton C30/37")
+
+    def test_conserve_pourcentage_final_du_libelle(self):
+        ligne = parser_ligne_prix_candidate("12,6% 223 € 1230 Divers non détaillé 12% Ft 1 7 000,00 € 7 000,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Divers non détaillé 12%")
+
+    def test_conserve_nombre_utile_epaisseur(self):
+        ligne = parser_ligne_prix_candidate("Béton de propreté (ep = 10 cm) m² 1 75,00 € 75,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Béton de propreté (ep = 10 cm)")
+
+    def test_conserve_diametre_pehd(self):
+        ligne = parser_ligne_prix_candidate("Canalisation PEHD Ø160 ml 25 85,00 € 2 125,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Canalisation PEHD Ø160")
+
+    def test_conserve_granulometrie(self):
+        ligne = parser_ligne_prix_candidate("Grave 0/31,5 m³ 10 42,00 € 420,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.designation, "Grave 0/31,5")
+
+    def test_designation_brute_a_verifier(self):
+        ligne = parser_ligne_prix_candidate("brute % 1 1 110,00 € 1 110,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertEqual(ligne.statut_controle, "alerte")
+
+    def test_designation_originale_conserve_chaine_brute(self):
+        ligne = parser_ligne_prix_candidate("450 € 193 9,0% 777 € Béton C30/37 m³ 1 38 000,00 € 38 000,00 €")
+        self.assertIsNotNone(ligne)
+        self.assertIn("450 €", ligne.designation_originale)
+        self.assertEqual(ligne.designation, "Béton C30/37")
+
 
 @override_settings(MEDIA_ROOT=MEDIA_ROOT_TEST)
 class AnalyseDevisTests(TestCase):
@@ -202,3 +282,16 @@ class AnalyseDevisTests(TestCase):
         self.assertLessEqual(len(ligne.designation), 500)
         self.assertGreater(len(ligne.designation_originale), 500)
         self.assertLessEqual(len(ligne.designation_normalisee), 500)
+
+    def test_analyse_devis_trace_nettoyage_designation(self):
+        devis = _devis("pollue.pdf")
+        texte = "295 € 480 6,3% 135 € Démolition d'ouvrages U 1 2 000 € 2 000 €"
+        with patch("applications.ressources.services.requests.post", return_value=FauxReponsePdf(texte)):
+            lignes = analyser_devis(devis)
+
+        self.assertEqual(len(lignes), 1)
+        ligne = LignePrixMarche.objects.get(devis_source=devis)
+        self.assertEqual(ligne.designation, "Démolition d'ouvrages")
+        self.assertIn("295 €", ligne.designation_originale)
+        self.assertTrue(ligne.donnees_import["nettoyage_designation"])
+        self.assertIn("295", ligne.donnees_import["fragments_supprimes"])

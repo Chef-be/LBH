@@ -20,6 +20,9 @@ RE_UNITE = re.compile(
     re.IGNORECASE,
 )
 RE_NOMBRE = re.compile(r"\d{1,3}(?:[ \u00a0]\d{3})+(?:[,.]\d+)?(?!\d)|\d+[,.]\d+|\d+")
+RE_MONTANT_FRAGMENT = re.compile(r"^(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[,.]\d+)?\s*€$")
+RE_POURCENTAGE_FRAGMENT = re.compile(r"^\d+(?:[,.]\d+)?%$")
+RE_FRAGMENT_NUMERIQUE = re.compile(r"^(?:€|\d+(?:[,.]\d+)?|(?:\d{1,3}[ \u00a0])+\d{3}(?:[,.]\d+)?|[\d\s\u00a0,.]+€|\d+(?:[,.]\d+)?%)$")
 RE_NUMERO_SEUL = re.compile(r"^\s*((?:\d+[,.])+\d+|\d+[A-Za-z]?|[A-Za-z])\s*$")
 RE_NUMERO_DEBUT = re.compile(r"^\s*((?:\d+[,.])+\d+|\d+[A-Za-z]?|[A-Za-z])(?:\s+|$)(.*)$")
 RE_SOUS_ARTICLE = re.compile(r"^(.*?)(?:\s+|^)([a-z])\s*[_\-–—]?\s*(.+)$", re.IGNORECASE)
@@ -29,6 +32,16 @@ MOTS_ENTETE = (
     "désignation", "designation", "prix unitaire", "prix total", "quantité",
     "quantite", "somme h.t", "total ht", "n°", "unité", "unite",
 )
+MOTS_DESIGNATION_METIER = {
+    "installation", "chantier", "démolition", "demolition", "déblais", "deblais",
+    "remblai", "béton", "beton", "coffrage", "ferraillage", "purge",
+    "nettoyage", "traitement", "évacuation", "evacuation", "terrassement",
+    "canalisation", "bordure", "dalle", "radier", "voile", "enduit",
+    "peinture", "fourniture", "pose", "étude", "etude", "contrôle",
+    "controle", "laboratoire", "suivi", "géotechnique", "geotechnique",
+    "divers", "propreté", "proprete", "ouvrage", "ouvrages",
+}
+MOTS_DESIGNATION_FAIBLES = {"brute", "net", "total", "poste"}
 
 
 @dataclass
@@ -41,6 +54,9 @@ class LigneCandidate:
     montant_ht: Decimal | None = None
     montant_recalcule_ht: Decimal | None = None
     ecart_montant_ht: Decimal | None = None
+    designation_originale: str = ""
+    fragments_supprimes: list[str] = field(default_factory=list)
+    nettoyage_designation: bool = False
     type_ligne: str = "article"
     statut_controle: str = "ok"
     score_confiance: Decimal = Decimal("0.80")
@@ -83,6 +99,122 @@ def nettoyer_ligne(texte: str) -> str:
     texte = (texte or "").replace("\u00a0", " ")
     texte = re.sub(r"\s+", " ", texte)
     return texte.strip(" \t|;")
+
+
+def _tokens_avec_positions(texte: str) -> list[tuple[str, int, int]]:
+    return [(m.group(0), m.start(), m.end()) for m in re.finditer(r"\S+", texte or "")]
+
+
+def _est_fragment_colonne(token: str) -> bool:
+    propre = token.strip(" ;|")
+    if not propre:
+        return True
+    return bool(RE_FRAGMENT_NUMERIQUE.match(propre))
+
+
+def _est_debut_designation_credible(token: str) -> bool:
+    propre = token.strip(" :;|,")
+    if not propre or propre.startswith("€"):
+        return False
+    if _est_fragment_colonne(propre):
+        return False
+    if not re.search(r"[A-Za-zÀ-ÿ]", propre):
+        return False
+    mot = propre.lower()
+    mot_alpha = re.sub(r"[^A-Za-zÀ-ÿ]", "", mot)
+    return len(mot_alpha) > 3 or mot in MOTS_DESIGNATION_METIER
+
+
+def detecter_debut_designation_metier(texte: str) -> int:
+    """Retourne l'index probable du premier mot métier utile dans une désignation brute."""
+    propre = nettoyer_ligne(texte)
+    tokens = _tokens_avec_positions(propre)
+    if not tokens:
+        return 0
+
+    candidats: list[tuple[int, int, int]] = []
+    for index, (token, debut, _fin) in enumerate(tokens):
+        if not _est_debut_designation_credible(token):
+            continue
+        avant = tokens[:index]
+        fragments_avant = sum(1 for t, _d, _f in avant if _est_fragment_colonne(t))
+        euros_avant = sum(1 for t, _d, _f in avant if "€" in t or t == "€")
+        pourcentages_avant = sum(1 for t, _d, _f in avant if RE_POURCENTAGE_FRAGMENT.match(t.strip()))
+        mot = re.sub(r"[^A-Za-zÀ-ÿ]", "", token.lower())
+        score = 10
+        if mot in MOTS_DESIGNATION_METIER:
+            score += 12
+        if fragments_avant:
+            score += min(18, fragments_avant * 3)
+        if euros_avant or pourcentages_avant:
+            score += 16
+        if index == 0:
+            score += 4
+        candidats.append((score, -index, debut))
+
+    if not candidats:
+        return 0
+    return max(candidats)[2]
+
+
+def nettoyer_designation_prix_extraite(texte: str) -> tuple[str, list[str]]:
+    """Retire les fragments de colonnes qui précèdent le libellé métier."""
+    brut = nettoyer_ligne(texte)
+    if not brut:
+        return "", []
+
+    debut = detecter_debut_designation_metier(brut)
+    fragments: list[str] = []
+    nettoye = brut[debut:].strip(" -–—:;|")
+    prefixe = brut[:debut].strip()
+    if prefixe:
+        fragments.extend(t for t, _d, _f in _tokens_avec_positions(prefixe))
+
+    # Cas PDF fréquent : ancien libellé ou valeurs, puis montants, puis vrai libellé.
+    tokens = _tokens_avec_positions(nettoye)
+    dernier_fragment_fin = -1
+    nb_fragments = 0
+    for token, _debut, fin in tokens:
+        if _est_fragment_colonne(token):
+            dernier_fragment_fin = fin
+            nb_fragments += 1
+    if nb_fragments >= 3 and 0 <= dernier_fragment_fin < len(nettoye):
+        apres = nettoye[dernier_fragment_fin:].strip(" -–—:;|")
+        if _est_debut_designation_credible(apres.split(" ", 1)[0] if apres else ""):
+            fragments.extend(t for t, _d, _f in tokens if _f <= dernier_fragment_fin)
+            nettoye = apres
+
+    nettoye = re.sub(r"^(?:€|\d+(?:[,.]\d+)?%?|\d[\d \u00a0,.]*€)\s+", "", nettoye).strip(" -–—:;|")
+    nettoye = re.sub(r"\s+", " ", nettoye)
+    return nettoye, fragments
+
+
+def valider_designation_extraite(designation: str) -> tuple[bool, list[str]]:
+    propre = nettoyer_ligne(designation)
+    alertes: list[str] = []
+    if not propre or len(propre) < 5:
+        alertes.append("Désignation trop courte.")
+    if propre.startswith("€"):
+        alertes.append("Désignation commençant par un symbole monétaire.")
+    if RE_MONTANT_FRAGMENT.match(propre.split(" ", 1)[0] if propre else ""):
+        alertes.append("Désignation commençant par un montant.")
+    if RE_POURCENTAGE_FRAGMENT.match(propre.split(" ", 1)[0] if propre else ""):
+        alertes.append("Désignation commençant par un pourcentage.")
+    if propre.lower() in MOTS_DESIGNATION_FAIBLES:
+        alertes.append("Désignation métier insuffisante.")
+    caracteres = [c for c in propre if not c.isspace()]
+    if caracteres:
+        ratio_numerique = sum(1 for c in caracteres if c.isdigit()) / len(caracteres)
+        if ratio_numerique > 0.40:
+            alertes.append("Désignation contenant trop de caractères numériques.")
+    if len(re.findall(r"\d[\d \u00a0,.]*\s*€", propre)) > 2:
+        alertes.append("Désignation contenant plusieurs montants.")
+    premier_mot_match = re.search(r"[A-Za-zÀ-ÿ]{4,}", propre)
+    if premier_mot_match:
+        prefixe = propre[:premier_mot_match.start()]
+        if len(RE_POURCENTAGE_FRAGMENT.findall(prefixe)) > 1:
+            alertes.append("Plusieurs pourcentages détectés avant le premier mot métier.")
+    return not alertes, alertes
 
 
 def classifier_ligne(texte: str) -> str:
@@ -216,22 +348,46 @@ def parser_ligne_prix_candidate(texte: str) -> LigneCandidate | None:
 
     match_numero = RE_NUMERO_DEBUT.match(avant)
     if match_numero:
-        numero = match_numero.group(1).replace(".", ",")
-        designation = nettoyer_ligne(match_numero.group(2))
+        reste = nettoyer_ligne(match_numero.group(2))
+        premier_reste = reste.split(" ", 1)[0] if reste else ""
+        debut_pollue = premier_reste.startswith("€") or RE_POURCENTAGE_FRAGMENT.match(premier_reste) or (
+            sum(1 for t, _d, _f in _tokens_avec_positions(reste[:detecter_debut_designation_metier(reste)]) if _est_fragment_colonne(t)) >= 2
+        )
+        if not debut_pollue:
+            numero = match_numero.group(1).replace(".", ",")
+            designation = reste
+
+    designation_originale = designation
+    designation_nettoyee, fragments_supprimes = nettoyer_designation_prix_extraite(designation)
+    if not designation_nettoyee:
+        return None
+    designation = designation_nettoyee
 
     nombres = _nombres_apres_unite(apres)
     quantite, pu, montant, ecart, corrections = _choisir_triplet_prix(nombres)
     if not montant and not pu:
         return None
 
+    designation_valide, alertes_designation = valider_designation_extraite(designation)
+    if fragments_supprimes:
+        corrections.append("Désignation reconstruite avec nettoyage de fragments numériques.")
+    if not designation_valide:
+        corrections.append("Désignation polluée par des valeurs numériques : vérifier le libellé extrait.")
+        corrections.extend(alertes_designation)
+
     ligne = LigneCandidate(
         numero=numero,
         designation=designation,
+        designation_originale=designation_originale,
+        fragments_supprimes=fragments_supprimes,
+        nettoyage_designation=bool(fragments_supprimes or designation != designation_originale),
         unite=unite,
         quantite=quantite,
         prix_unitaire_ht=pu,
         montant_ht=montant,
         ecart_montant_ht=ecart,
+        statut_controle="alerte" if not designation_valide or fragments_supprimes else "ok",
+        score_confiance=Decimal("0.60") if not designation_valide else (Decimal("0.70") if fragments_supprimes else Decimal("0.80")),
         corrections_proposees=corrections,
     )
     return controler_ligne(ligne)
@@ -333,7 +489,9 @@ def reconstruire_lignes_depuis_texte(texte: str) -> tuple[list[dict], dict]:
             "ordre": index,
             "numero": ligne.numero,
             "designation": ligne.designation,
-            "designation_originale": ligne.designation,
+            "designation_originale": ligne.designation_originale or ligne.designation,
+            "fragments_supprimes": ligne.fragments_supprimes,
+            "nettoyage_designation": ligne.nettoyage_designation,
             "unite": ligne.unite,
             "quantite": ligne.quantite,
             "prix_unitaire": ligne.prix_unitaire_ht,

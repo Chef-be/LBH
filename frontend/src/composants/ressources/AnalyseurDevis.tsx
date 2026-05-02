@@ -65,7 +65,12 @@ interface LignePrixMarche {
   statut_controle: "ok" | "alerte" | "erreur" | "ignoree" | "corrigee";
   score_confiance: number | string;
   corrections_proposees: string[];
-  donnees_import: Record<string, unknown>;
+  donnees_import: {
+    fragments_supprimes?: string[];
+    nettoyage_designation?: boolean;
+    designation_originale?: string;
+    [key: string]: unknown;
+  };
   decision_import: string;
   corps_etat: string;
   corps_etat_libelle: string;
@@ -103,6 +108,11 @@ function nombreDecimal(v: number | string | null | undefined): number {
 function formaterMontant(v: number | string | null | undefined): string {
   if (v == null) return "—";
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(nombreDecimal(v));
+}
+
+function fragmentsSupprimes(ligne: LignePrixMarche): string[] {
+  const fragments = ligne.donnees_import?.fragments_supprimes;
+  return Array.isArray(fragments) ? fragments.map(String).filter(Boolean) : [];
 }
 
 function classeKpv(kpv: number): string {
@@ -144,6 +154,9 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
   const pctMo = nombreDecimal(ligne.pct_mo_estime);
   const pctMateriaux = nombreDecimal(ligne.pct_materiaux_estime);
   const pctMateriel = nombreDecimal(ligne.pct_materiel_estime);
+  const fragments = fragmentsSupprimes(ligne);
+  const nettoyageDesignation = Boolean(ligne.donnees_import?.nettoyage_designation || fragments.length > 0);
+  const designationOriginale = ligne.designation_originale || String(ligne.donnees_import?.designation_originale || "");
 
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden">
@@ -165,6 +178,16 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
           {ligne.est_ligne_commune && (
             <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">
               Fusion ×{ligne.nb_occurrences}
+            </span>
+          )}
+          {ligne.statut_controle === "alerte" && (
+            <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">
+              À vérifier
+            </span>
+          )}
+          {nettoyageDesignation && (
+            <span className="text-xs bg-sky-100 text-sky-700 rounded-full px-2 py-0.5">
+              Libellé nettoyé
             </span>
           )}
           {ligne.ligne_bibliotheque && (
@@ -191,6 +214,17 @@ function LigneSDP({ ligne }: { ligne: LignePrixMarche }) {
 
       {deplie && (
         <div className="border-t border-slate-100 px-4 py-4 bg-slate-50 space-y-3">
+          {nettoyageDesignation && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              <p className="font-semibold">Des fragments numériques ont été retirés automatiquement.</p>
+              {designationOriginale && designationOriginale !== ligne.designation && (
+                <p className="mt-1"><span className="font-medium">Libellé original :</span> {designationOriginale}</p>
+              )}
+              {fragments.length > 0 && (
+                <p className="mt-1"><span className="font-medium">Fragments retirés :</span> {fragments.join(" ")}</p>
+              )}
+            </div>
+          )}
           {ligne.statut_controle !== "ok" && (
             <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
               Ligne à vérifier

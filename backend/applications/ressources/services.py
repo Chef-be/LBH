@@ -408,6 +408,9 @@ def analyser_devis(devis_analyse) -> list[dict]:
             if indice_base and indice_actuel:
                 prix_actualise = actualiser_prix(prix_ht, indice_base, indice_actuel)
 
+            designation_originale = str(ligne.get("designation_originale") or designation)
+            fragments_supprimes = ligne.get("fragments_supprimes") or []
+            nettoyage_designation = bool(ligne.get("nettoyage_designation") or fragments_supprimes)
             designation_courte = tronquer_champ(designation, 500)
             designation_norm = tronquer_champ(normaliser_designation(designation), 500)
             ligne_proche = trouver_ligne_similaire(designation_norm, code_lot, seuil_similarite())
@@ -416,7 +419,7 @@ def analyser_devis(devis_analyse) -> list[dict]:
                 ordre=int(ligne.get("ordre") or 0),
                 numero=str(ligne.get("numero") or ""),
                 designation=designation_courte,
-                designation_originale=str(ligne.get("designation_originale") or designation),
+                designation_originale=designation_originale,
                 designation_normalisee=designation_norm,
                 unite=unite,
                 quantite=quantite,
@@ -432,6 +435,9 @@ def analyser_devis(devis_analyse) -> list[dict]:
                     "ligne_prix_marche_proche": str(ligne_proche.id) if ligne_proche else "",
                     "score_similarite": similarite_cosinus(designation_norm, ligne_proche.designation_normalisee) if ligne_proche else 0,
                     "methode_extraction": diagnostic.get("methode"),
+                    "designation_originale": designation_originale,
+                    "fragments_supprimes": fragments_supprimes,
+                    "nettoyage_designation": nettoyage_designation,
                 },
                 decision_import="a_decider",
                 prix_ht_actualise=prix_actualise,
