@@ -596,6 +596,63 @@ class ApiProjetsTests(TestCase):
         self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
         self.assertEqual(reponse.data["contexte_metier"]["famille_client"]["libelle"], "Maîtrise d'ouvrage")
         self.assertEqual(reponse.data["contexte_metier"]["nature_ouvrage"]["libelle"], "Infrastructure / VRD")
+        self.assertIn("resume", reponse.data)
+        self.assertNotEqual(reponse.data["resume"]["titre"], "—")
+        self.assertIn("kpi", reponse.data)
+        self.assertIn("visualisations", reponse.data)
+
+    def test_fiche_projet_ne_duplique_pas_contexte_et_cadre(self):
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "maitrise_ouvrage",
+                "sous_type_client": "collectivite",
+                "cadre_juridique": "public",
+                "mode_commande": "consultation_directe",
+                "mission_principale": "verifier_enveloppe",
+                "phase_intervention": "faisabilite",
+                "nature_ouvrage": "batiment",
+            }
+        }
+        self.projet.save(update_fields=["qualification_wizard"])
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/fiche-metier/")
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertIn("cadre_juridique", reponse.data["contexte_detaille"])
+        self.assertIn("mode_commande", reponse.data["contexte_detaille"])
+        self.assertNotIn("contexte_contractuel", reponse.data["contexte_metier"])
+        self.assertNotIn("nature_marche", reponse.data["contexte_metier"])
+
+    def test_fiche_moa_pro_dce_signale_incoherence_et_suggestion(self):
+        self.projet.qualification_wizard = {
+            "contexte_projet": {
+                "famille_client": "maitrise_ouvrage",
+                "sous_type_client": "collectivite",
+                "cadre_juridique": "public",
+                "mode_commande": "consultation_directe",
+                "mission_principale": "verifier_enveloppe",
+                "phase_intervention": "pro_dce",
+                "nature_ouvrage": "infrastructure",
+                "role_lbh": "observateur_conseil",
+            }
+        }
+        self.projet.save(update_fields=["qualification_wizard"])
+        reponse = self.client.get(f"/api/projets/{self.projet.id}/fiche-metier/")
+        self.assertEqual(reponse.status_code, status.HTTP_200_OK, reponse.data)
+        self.assertEqual(reponse.data["resume"]["statut_global"], "incoherent")
+        self.assertIn("moa_phase_pro", [a["code"] for a in reponse.data["alertes_metier"]])
+        self.assertIn("revue_estimation_pro", [s["code"] for s in reponse.data["suggestions_correction"]])
+
+    def test_economie_detaillee_active_metres_obligatoire(self):
+        modules = construire_modules_actifs({"famille_client": "maitrise_oeuvre", "phase_intervention": "pro"})
+        modules_par_code = {m["code"]: m for m in modules}
+        self.assertIn("metres", modules_par_code)
+        self.assertEqual(modules_par_code["metres"]["niveau_pertinence"], "obligatoire")
+        self.assertIn("metres", modules_par_code["economie"]["dependances"])
+
+    def test_economie_amont_n_impose_pas_metres(self):
+        modules = construire_modules_actifs({"famille_client": "maitrise_ouvrage", "phase_intervention": "faisabilite"})
+        modules_par_code = {m["code"]: m for m in modules}
+        self.assertIn("economie", modules_par_code)
+        self.assertNotIn("metres", modules_par_code)
 
     def test_modules_actifs_raisons_adaptees(self):
         moa = construire_modules_actifs({"famille_client": "maitrise_ouvrage"})

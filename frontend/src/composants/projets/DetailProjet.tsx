@@ -263,7 +263,7 @@ export function DetailProjet({ id }: { id: string }) {
     queryKey: ["projet", id],
     queryFn: () => api.get<ProjetDetail>(`/api/projets/${id}/`),
   });
-  const { data: ficheMetier } = useQuery<any>({
+  const { data: ficheMetier, isError: ficheMetierErreur, refetch: rechargerFicheMetier } = useQuery<any>({
     queryKey: ["projet-fiche-metier", id],
     queryFn: () => api.get(`/api/projets/${id}/fiche-metier/`),
     enabled: Boolean(projet),
@@ -384,7 +384,7 @@ export function DetailProjet({ id }: { id: string }) {
             onClick={() => window.dispatchEvent(new CustomEvent("ouvrir-modal-contexte"))}
             className="btn-secondaire text-xs"
           >
-            Contexte détaillé
+            Voir contexte
           </button>
           {estGestionProjet && (
             <Link href={`/projets/${id}/modifier`} className="btn-primaire text-xs">
@@ -422,7 +422,13 @@ export function DetailProjet({ id }: { id: string }) {
         }}
       />
 
-      {ficheMetier ? (
+      {ficheMetierErreur ? (
+        <div className="rounded-2xl border px-5 py-6 text-sm" style={{ background: "var(--fond-carte)", borderColor: "var(--bordure)", color: "var(--texte-2)" }}>
+          <p className="font-semibold text-red-400">Impossible de charger la fiche métier interactive.</p>
+          <p className="mt-1">Le projet reste accessible. Relancez le chargement de la fiche.</p>
+          <button type="button" className="btn-secondaire mt-3 text-xs" onClick={() => rechargerFicheMetier()}>Réessayer</button>
+        </div>
+      ) : ficheMetier ? (
         <FicheMetierProjet projetId={id} fiche={ficheMetier} />
       ) : (
         <div className="carte py-10 text-center text-sm" style={{ color: "var(--texte-3)" }}>
@@ -471,7 +477,7 @@ function ModalContexte({ projet }: { projet: ProjetDetail }) {
   const pr = projet.processus_recommande;
   const vp = projet.mode_variation_prix;
   const codesMission = new Set([
-    c?.mission_principale.code,
+    c?.mission_principale?.code,
     ...(c?.missions_associees ?? []).map((mission) => mission.code),
     c?.phase_intervention?.code,
   ].filter(Boolean));
@@ -511,12 +517,12 @@ function ModalContexte({ projet }: { projet: ProjetDetail }) {
             <h3 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--texte-3)" }}>Client et mission</h3>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: "Famille client", valeur: c.famille_client.libelle },
-                { label: "Sous-type", valeur: c.sous_type_client.libelle },
-                { label: "Contexte contractuel", valeur: c.contexte_contractuel.libelle },
-                { label: "Mission principale", valeur: c.mission_principale.libelle },
-                { label: "Nature d'ouvrage", valeur: c.nature_ouvrage || "—" },
-                { label: "Nature du marché", valeur: c.nature_marche || "—" },
+                { label: "Type client", valeur: c.famille_client?.libelle || "Non renseigné" },
+                { label: "Sous-type", valeur: c.sous_type_client?.libelle || "Non renseigné" },
+                { label: "Cadre juridique", valeur: c.nature_marche || "Non renseigné" },
+                { label: "Mode de commande", valeur: c.contexte_contractuel?.libelle || "Non renseigné" },
+                { label: "Mission principale", valeur: c.mission_principale?.libelle || "Non renseigné" },
+                { label: "Nature d'ouvrage", valeur: c.nature_ouvrage || "Non renseigné" },
                 { label: "Partie contractante", valeur: c.partie_contractante || "—" },
                 { label: "Méthode d'estimation", valeur: c.methode_estimation || "—" },
               ].map(({ label, valeur }) => (

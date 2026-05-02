@@ -112,7 +112,8 @@ PHASES_MOE = [
 PHASES_AMO = [
     option("programmation", "Programmation"), option("faisabilite", "Faisabilité"),
     option("revue_aps", "Revue APS"), option("revue_apd", "Revue APD"),
-    option("revue_pro", "Revue PRO"), option("revue_act", "Revue ACT"),
+    option("revue_pro", "Revue PRO"), option("revue_dce", "Revue DCE"),
+    option("pro_dce", "PRO / DCE"), option("revue_act", "Revue ACT"),
     option("suivi_execution", "Suivi exécution"),
 ]
 PHASES_ENTREPRISE = [
@@ -196,6 +197,8 @@ LIBELLES_CODES = {
     **{o["code"]: o["libelle"] for valeurs in ROLES_LBH.values() for o in valeurs},
     **{o["code"]: o["libelle"] for valeurs in MISSIONS.values() for o in valeurs},
     "batiment": "Bâtiment", "infrastructure": "Infrastructure / VRD", "mixte": "Mixte",
+    "marche_public": "Marché public", "marche_prive": "Marché privé",
+    "pro_dce": "PRO / DCE",
 }
 
 
@@ -261,8 +264,11 @@ def suggerer_missions(payload: dict[str, Any]) -> list[dict[str, Any]]:
         return [m for m in missions if m["code"] in {"analyse_offres", "estimation"}]
     if tc == "maitrise_oeuvre" and phase in {"pro", "dce"}:
         return [m for m in missions if m["code"] in {"economie_conception", "redaction_pieces_ecrites", "estimation"}]
-    if tc == "maitrise_ouvrage" and phase == "pro":
-        return [option("revue_estimation_pro", "AMO — revue de l'estimation PRO"), option("audit_economique", "Audit économique")]
+    if tc == "maitrise_ouvrage" and phase in {"pro", "dce", "pro_dce"}:
+        return [
+            option("revue_estimation_pro", "AMO — revue de l'estimation PRO/DCE"),
+            option("audit_economique", "Audit économique"),
+        ]
     return missions
 
 
@@ -320,20 +326,56 @@ def construire_modules_actifs(payload: dict[str, Any]) -> list[dict[str, Any]]:
     phase = _phase(payload)
     nature = payload.get("nature_ouvrage") or "batiment"
 
-    def module(code, libelle, raison, niveau="recommande", actif=True, ordre=10):
-        return {"code": code, "libelle": libelle, "actif": actif, "raison_activation": raison, "niveau_pertinence": niveau, "dependances": [], "livrables_associes": [], "actions_recommandees": [], "ordre": ordre}
+    def module(code, libelle, raison, niveau="recommande", actif=True, ordre=10, dependances=None, actions=None, livrables=None):
+        return {
+            "code": code,
+            "libelle": libelle,
+            "actif": actif,
+            "raison_activation": raison,
+            "niveau_pertinence": niveau,
+            "dependances": dependances or [],
+            "livrables_associes": livrables or [],
+            "actions_recommandees": actions or [],
+            "ordre": ordre,
+            "statut": "non_demarre",
+        }
 
     modules = [module("documents", "Documents", "Les pièces sources et livrables doivent être classés.", "obligatoire", ordre=10)]
     if tc == "maitrise_ouvrage":
-        modules += [module("ressources", "Ressources économiques", "Comparaison avec ratios, références économiques et retours d'expérience.", ordre=20), module("economie", "Économie", "Suivi de l'enveloppe et des scénarios budgétaires.", "obligatoire", ordre=30)]
+        libelle_economie = "Revue économique" if phase in {"revue_pro", "revue_dce", "pro_dce"} or "revue_estimation_pro" in _missions(payload) else "Économie amont"
+        modules += [
+            module("ressources", "Ressources économiques", "Comparaison avec ratios, références économiques et retours d'expérience.", ordre=20, actions=["Comparer avec les références économiques"]),
+            module("economie", libelle_economie, "Ratios, références économiques, enveloppe et scénarios budgétaires.", "obligatoire", ordre=30, actions=["Produire ou contrôler la note budgétaire"]),
+        ]
+        if libelle_economie == "Revue économique":
+            modules.append(module("metres", "Métrés", "Contrôle quantitatif optionnel pour vérifier l'estimation revue.", "optionnel", ordre=35))
     elif tc == "maitrise_oeuvre":
-        modules += [module("economie", "Économie", "Production de l'estimation et suivi économique par phase.", "obligatoire", ordre=20)]
-        if phase in {"pro", "dce"}:
-            modules += [module("metres", "Métrés", "Avant-métré nécessaire à la génération de la DPGF.", "obligatoire", ordre=30), module("pieces-ecrites", "Pièces écrites", "CCTP et pièces marché attendus en PRO / DCE.", "obligatoire", ordre=40)]
+        economie_detaillee = phase in {"pro", "dce", "pro_dce"}
+        modules += [module(
+            "economie",
+            "Économie de conception" if economie_detaillee else "Économie",
+            "Estimation détaillée à produire à partir des métrés, DPGF et pièces écrites." if economie_detaillee else "Production de l'estimation et suivi économique par phase.",
+            "obligatoire",
+            ordre=20,
+            dependances=["metres"] if economie_detaillee else [],
+            actions=["Créer l'étude économique depuis la DPGF"] if economie_detaillee else ["Ouvrir l'étude économique"],
+            livrables=["estimation", "dpgf"] if economie_detaillee else ["note_economique"],
+        )]
+        if economie_detaillee:
+            modules += [
+                module("metres", "Métrés", "Un quantitatif est nécessaire pour produire une estimation détaillée, une DPGF, un BPU ou une étude de prix.", "obligatoire", ordre=30, actions=["Créer ou importer un avant-métré"], livrables=["avant_metre"]),
+                module("pieces-ecrites", "Pièces écrites", "CCTP et pièces marché attendus en PRO / DCE.", "obligatoire", ordre=40, actions=["Rédiger le CCTP"], livrables=["cctp"]),
+            ]
         if phase == "act":
             modules.append(module("appels-offres", "Appels d'offres", "Rapport d'analyse et tableau comparatif attendus en ACT.", "obligatoire", ordre=50))
     elif tc == "entreprise":
-        modules += [module("ressources", "Ressources", "Analyse de DCE, BPU, DPGF et prix de marché.", "obligatoire", ordre=20), module("economie", "Économie", "Étude de prix, déboursés secs et coefficient K.", "obligatoire", ordre=30), module("pieces-ecrites", "Pièces écrites", "Mémoire technique et offre écrite.", ordre=40), module("planning", "Planning", "Planning de remise ou d'exécution selon le dossier.", ordre=50)]
+        modules += [
+            module("ressources", "Ressources", "Analyse de DCE, BPU, DPGF et prix de marché.", "obligatoire", ordre=20, actions=["Analyser DCE, BPU ou DPGF"]),
+            module("metres", "Métrés", "Un quantitatif est nécessaire pour contrôler les quantités, DPGF, BPU, DQE ou l'étude de prix.", "obligatoire", ordre=25, actions=["Vérifier ou compléter les quantités"]),
+            module("economie", "Étude de prix", "Étude de prix détaillée avec sous-détails, déboursés secs et coefficient K.", "obligatoire", ordre=30, dependances=["metres"], actions=["Créer l'étude de prix"], livrables=["etude_prix"]),
+            module("pieces-ecrites", "Pièces écrites", "Mémoire technique et offre écrite.", ordre=40, actions=["Préparer le mémoire technique"]),
+            module("planning", "Planning", "Planning de remise ou d'exécution selon le dossier.", ordre=50, actions=["Produire le planning d'exécution"]),
+        ]
         if payload.get("contexte_contractuel") == "appel_offres" or "reponse_appel_offres" in _missions(payload):
             modules.append(module("appels-offres", "Appels d'offres", "Réponse à consultation et suivi des pièces de remise.", "recommande", ordre=60))
     elif tc in {"cotraitance", "sous_traitance", "amo"}:
@@ -352,9 +394,13 @@ def valider_combinaison_projet(payload: dict[str, Any]) -> dict[str, Any]:
     bloquant: list[dict[str, str]] = []
     alertes: list[dict[str, str]] = []
     suggestions: list[dict[str, str]] = []
-    if tc == "maitrise_ouvrage" and phase in {"pro", "dce"} and "verifier_enveloppe" in missions:
-        bloquant.append({"code": "moa_phase_pro", "message": "La phase PRO correspond normalement à une mission de conception MOE. Pour une maîtrise d'ouvrage, reformulez la mission en AMO — revue de l'estimation PRO ou choisissez une phase de programmation/faisabilité."})
-        suggestions.append({"code": "revue_estimation_pro", "message": "Choisir AMO — revue de l'estimation PRO."})
+    if tc == "maitrise_ouvrage" and phase in {"pro", "dce", "pro_dce"} and "verifier_enveloppe" in missions:
+        bloquant.append({"code": "moa_phase_pro", "message": "Une vérification d'enveloppe pour une maîtrise d'ouvrage ne doit pas être qualifiée comme production PRO/DCE. Choisissez une phase amont, ou reformulez la mission en AMO — revue de l'estimation PRO/DCE."})
+        suggestions.extend([
+            {"code": "revue_estimation_pro", "message": "Requalifier en AMO — revue de l'estimation PRO/DCE."},
+            {"code": "phase_faisabilite", "message": "Remplacer la phase par Faisabilité ou Programmation."},
+            {"code": "moe_economie_conception", "message": "Requalifier en Maîtrise d'œuvre / Économie de conception si LBH produit le PRO/DCE."},
+        ])
     if tc == "maitrise_oeuvre" and any(m in {p["code"] for p in PHASES_MOE} for m in missions):
         alertes.append({"code": "phase_en_mission", "message": "Les phases ESQ, APS, APD, PRO, DCE, ACT, VISA, DET, OPC et AOR doivent être renseignées comme phases, pas comme missions principales."})
     if tc == "cotraitance" and not payload.get("role_lbh"):
@@ -365,6 +411,26 @@ def valider_combinaison_projet(payload: dict[str, Any]) -> dict[str, Any]:
             if not donnees.get(champ) and not payload.get(champ):
                 alertes.append({"code": f"{champ}_manquant", "message": f"Le {libelle} doit être précisé pour une sous-traitance."})
     return {"valide": not bloquant, "bloquant": bloquant, "alertes": alertes, "suggestions": suggestions}
+
+
+def calculer_score_coherence_projet(projet, fiche: dict[str, Any]) -> int:
+    """Calcule un score métier simple et stable entre 0 et 100."""
+    alertes = fiche.get("alertes_metier") or []
+    kpi = fiche.get("kpi") or {}
+    score = 100
+    score -= int(kpi.get("alertes_bloquantes") or 0) * 28
+    score -= int(kpi.get("alertes_attention") or 0) * 8
+    total_pieces = int(kpi.get("pieces_sources_total") or 0)
+    pieces_dispo = int(kpi.get("pieces_sources_disponibles") or 0)
+    if total_pieces and pieces_dispo == 0:
+        score -= 12
+    total_livrables = int(kpi.get("livrables_total") or 0)
+    livrables_valides = int(kpi.get("livrables_valides") or 0)
+    if total_livrables and livrables_valides == 0:
+        score -= 8
+    if any(a.get("code") == "economie_detaillee_sans_metres" for a in alertes):
+        score -= 25
+    return max(0, min(100, score))
 
 
 def construire_options_wizard_contexte(payload: dict[str, Any]) -> dict[str, Any]:

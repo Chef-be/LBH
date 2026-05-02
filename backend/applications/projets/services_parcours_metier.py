@@ -9,6 +9,7 @@ from typing import Any
 from .models import LivrableProjet, LivrableType, MissionClient
 from .referentiels import contexte_projet_pour_projet
 from .services_coherence_projet import (
+    calculer_score_coherence_projet,
     construire_livrables_attendus,
     construire_modules_actifs as construire_modules_actifs_coherence,
     libeller_code,
@@ -60,6 +61,8 @@ def _contexte_normalise(projet) -> dict[str, Any]:
     famille = _code_option(contexte.get("famille_client")) or _famille_depuis_clientele(projet.clientele_cible)
     sous_type = _code_option(contexte.get("sous_type_client"))
     contexte_contractuel = _code_option(contexte.get("contexte_contractuel"))
+    mode_commande = _code_option(contexte.get("mode_commande")) or contexte_contractuel
+    cadre_juridique = _code_option(contexte.get("cadre_juridique") or contexte.get("nature_marche"))
     mission = _code_option(contexte.get("mission_principale")) or projet.objectif_mission
     phase = _code_option(contexte.get("phase_intervention")) or normaliser_phase_projet(projet.phase_actuelle)
     missions_associees = [_code_option(m) for m in contexte.get("missions_associees", [])]
@@ -68,13 +71,15 @@ def _contexte_normalise(projet) -> dict[str, Any]:
         "source": contexte,
         "famille_client": famille,
         "sous_type_client": sous_type,
-        "contexte_contractuel": contexte_contractuel,
+        "contexte_contractuel": mode_commande,
+        "mode_commande": mode_commande,
         "mission_principale": mission,
         "missions_associees": [m for m in missions_associees if m],
         "sous_missions": [m for m in sous_missions if m],
         "phase_intervention": phase,
         "nature_ouvrage": _code_option(contexte.get("nature_ouvrage")) or "batiment",
-        "nature_marche": _code_option(contexte.get("nature_marche") or contexte.get("cadre_juridique")),
+        "nature_marche": cadre_juridique,
+        "cadre_juridique": cadre_juridique,
         "partie_contractante": str(contexte.get("partie_contractante") or ""),
         "role_lbh": _code_option(contexte.get("role_lbh")),
     }
@@ -128,12 +133,14 @@ def construire_modules_actifs(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     modules = construire_modules_actifs_coherence({
         "famille_client": ctx["famille_client"],
         "sous_type_client": ctx["sous_type_client"],
-        "contexte_contractuel": ctx["contexte_contractuel"],
+        "contexte_contractuel": ctx["mode_commande"],
+        "mode_commande": ctx["mode_commande"],
         "phase_intervention": ctx["phase_intervention"],
         "mission_principale": ctx["mission_principale"],
         "missions_principales": ctx["missions_associees"],
         "nature_ouvrage": ctx["nature_ouvrage"],
-        "nature_marche": ctx["nature_marche"],
+        "nature_marche": ctx["cadre_juridique"],
+        "cadre_juridique": ctx["cadre_juridique"],
         "role_lbh": ctx["role_lbh"],
     })
     if modules:
@@ -324,7 +331,8 @@ def _alertes_et_actions(projet, ctx: dict[str, Any], pieces_attendues: list[dict
     controle = valider_combinaison_projet({
         "famille_client": ctx["famille_client"],
         "sous_type_client": ctx["sous_type_client"],
-        "contexte_contractuel": ctx["contexte_contractuel"],
+        "contexte_contractuel": ctx["mode_commande"],
+        "mode_commande": ctx["mode_commande"],
         "phase_intervention": ctx["phase_intervention"],
         "mission_principale": ctx["mission_principale"],
         "missions_principales": [ctx["mission_principale"], *ctx["missions_associees"]],
@@ -333,6 +341,105 @@ def _alertes_et_actions(projet, ctx: dict[str, Any], pieces_attendues: list[dict
     for alerte in [*controle["bloquant"], *controle["alertes"]]:
         alertes.append({"niveau": "bloquant" if alerte in controle["bloquant"] else "attention", "code": alerte["code"], "message": alerte["message"]})
     return alertes, actions
+
+
+def _module_est_pret(module: dict[str, Any], livrables: list[dict[str, Any]]) -> bool:
+    codes_livrables = set(module.get("livrables_associes") or [])
+    if not codes_livrables:
+        return False
+    return any(l.get("code") in codes_livrables and l.get("statut") in {"produit", "soumis", "valide"} for l in livrables)
+
+
+def _kpi_fiche(pieces_attendues, pieces_detectees, livrables, modules, alertes) -> dict[str, int]:
+    livrables_produits = [l for l in livrables if l.get("statut") in {"produit", "soumis", "valide"}]
+    livrables_valides = [l for l in livrables if l.get("statut") == "valide"]
+    modules_obligatoires = [m for m in modules if m.get("niveau_pertinence") == "obligatoire"]
+    modules_prets = [m for m in modules_obligatoires if _module_est_pret(m, livrables)]
+    bloquantes = [a for a in alertes if a.get("niveau") == "bloquant"]
+    attention = [a for a in alertes if a.get("niveau") != "bloquant"]
+    total_pieces = len(pieces_attendues)
+    pieces_ok = min(len(pieces_detectees), total_pieces) if total_pieces else 0
+    total_livrables = len(livrables)
+    total_modules = len(modules_obligatoires)
+    progression = 0
+    poids = 0
+    if total_pieces:
+        progression += int((pieces_ok / total_pieces) * 30)
+        poids += 30
+    if total_livrables:
+        progression += int((len(livrables_produits) / total_livrables) * 35)
+        poids += 35
+    if total_modules:
+        progression += int((len(modules_prets) / total_modules) * 25)
+        poids += 25
+    progression += max(0, 10 - len(bloquantes) * 10 - len(attention) * 3)
+    poids += 10
+    return {
+        "pieces_sources_total": total_pieces,
+        "pieces_sources_disponibles": pieces_ok,
+        "pieces_sources_manquantes": max(0, total_pieces - pieces_ok),
+        "livrables_total": total_livrables,
+        "livrables_produits": len(livrables_produits),
+        "livrables_valides": len(livrables_valides),
+        "modules_obligatoires": total_modules,
+        "modules_prets": len(modules_prets),
+        "alertes_bloquantes": len(bloquantes),
+        "alertes_attention": len(attention),
+        "progression_globale_pct": max(0, min(100, int((progression / poids) * 100) if poids else 0)),
+    }
+
+
+def _visualisations(kpi: dict[str, int], modules: list[dict[str, Any]], livrables: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "progression_dossier": [{"code": "global", "libelle": "Progression globale", "valeur": kpi["progression_globale_pct"]}],
+        "etat_modules": [
+            {"code": m["code"], "libelle": m["libelle"], "niveau": m.get("niveau_pertinence"), "statut": m.get("statut", "non_demarre")}
+            for m in modules
+        ],
+        "etat_livrables": [
+            {"code": "produits", "libelle": "Produits", "valeur": kpi["livrables_produits"]},
+            {"code": "attendus", "libelle": "Attendus", "valeur": kpi["livrables_total"]},
+        ],
+        "etat_pieces_sources": [
+            {"code": "disponibles", "libelle": "Disponibles", "valeur": kpi["pieces_sources_disponibles"]},
+            {"code": "attendues", "libelle": "Attendues", "valeur": kpi["pieces_sources_total"]},
+        ],
+        "alertes_par_niveau": [
+            {"code": "bloquant", "libelle": "Bloquantes", "valeur": kpi["alertes_bloquantes"]},
+            {"code": "attention", "libelle": "À surveiller", "valeur": kpi["alertes_attention"]},
+        ],
+    }
+
+
+def _parcours_interactif(kpi: dict[str, int], modules: list[dict[str, Any]], livrables: list[dict[str, Any]]) -> dict[str, Any]:
+    def etape(code, libelle, progression, action, alerte=""):
+        statut = "pret" if progression >= 100 else "a_completer" if progression < 50 else "en_cours"
+        return {"code": code, "libelle": libelle, "statut": statut, "progression_pct": progression, "action_principale": action, "alerte": alerte}
+
+    pieces_pct = int((kpi["pieces_sources_disponibles"] / kpi["pieces_sources_total"]) * 100) if kpi["pieces_sources_total"] else 0
+    livrables_pct = int((kpi["livrables_produits"] / kpi["livrables_total"]) * 100) if kpi["livrables_total"] else 0
+    modules_pct = int((kpi["modules_prets"] / kpi["modules_obligatoires"]) * 100) if kpi["modules_obligatoires"] else 0
+    return {
+        "etapes": [
+            etape("qualification", "Qualification", 100 if kpi["alertes_bloquantes"] == 0 else 45, "Contrôler la cohérence métier", "Incohérence à corriger" if kpi["alertes_bloquantes"] else ""),
+            etape("sources", "Pièces sources", pieces_pct, "Importer les pièces sources"),
+            etape("analyse", "Analyse", modules_pct, "Ouvrir les modules obligatoires"),
+            etape("production", "Production", modules_pct, "Produire les documents métier"),
+            etape("controle", "Contrôle", 100 if kpi["alertes_bloquantes"] == 0 and kpi["alertes_attention"] == 0 else 40, "Lever les alertes métier"),
+            etape("livrables", "Livrables", livrables_pct, "Gérer les livrables"),
+            etape("cloture", "Clôture", 100 if livrables_pct == 100 and kpi["alertes_bloquantes"] == 0 else 10, "Vérifier la clôture métier"),
+        ]
+    }
+
+
+def _statut_global(kpi: dict[str, int], score: int) -> tuple[str, str]:
+    if kpi["alertes_bloquantes"]:
+        return "incoherent", "Incohérent"
+    if score < 70 or kpi["alertes_attention"]:
+        return "a_verifier", "À vérifier"
+    if kpi["progression_globale_pct"] >= 90:
+        return "pret", "Prêt"
+    return "coherent", "Cohérent"
 
 
 def construire_fiche_metier_projet(projet) -> dict[str, Any]:
@@ -363,13 +470,72 @@ def construire_fiche_metier_projet(projet) -> dict[str, Any]:
     ] or livrables_attendus
     documents = _documents_a_produire(ctx, livrables_attendus)
     alertes, actions = _alertes_et_actions(projet, ctx, pieces_attendues, pieces_detectees, livrables_attendus)
+    modules_codes = {m["code"] for m in modules}
+    economie_detaillee = any(m["code"] == "economie" and "metres" in (m.get("dependances") or []) for m in modules)
+    if economie_detaillee and "metres" not in modules_codes:
+        alertes.append({
+            "niveau": "bloquant",
+            "code": "economie_detaillee_sans_metres",
+            "message": "Une économie détaillée nécessite un quantitatif : le module Métrés doit être actif et relié à l'Économie.",
+        })
+    kpi = _kpi_fiche(pieces_attendues, pieces_detectees, livrables, modules, alertes)
+    fiche_partielle = {"kpi": kpi, "alertes_metier": alertes}
+    score = calculer_score_coherence_projet(projet, fiche_partielle)
+    statut_global, badge_coherence = _statut_global(kpi, score)
+    mission_resume = libeller_code(ctx["mission_principale"])["libelle"] if ctx["mission_principale"] else (projet.get_objectif_mission_display() if getattr(projet, "objectif_mission", "") else projet.intitule)
+    if not mission_resume or mission_resume == "—":
+        mission_resume = projet.intitule or projet.reference
+    contexte_resume = [
+        libeller_code(ctx["famille_client"])["libelle"],
+        libeller_code(ctx["sous_type_client"])["libelle"],
+        libeller_code(ctx["cadre_juridique"])["libelle"],
+        libeller_code(ctx["mode_commande"])["libelle"],
+        libeller_code(ctx["role_lbh"])["libelle"],
+    ]
+    contexte_compact = [
+        {"code": "type_client", "valeur_code": ctx["famille_client"], "libelle": libeller_code(ctx["famille_client"])["libelle"]},
+        {"code": "sous_type_client", "valeur_code": ctx["sous_type_client"], "libelle": libeller_code(ctx["sous_type_client"])["libelle"]},
+        {"code": "cadre_juridique", "valeur_code": ctx["cadre_juridique"], "libelle": libeller_code(ctx["cadre_juridique"])["libelle"]},
+        {"code": "mode_commande", "valeur_code": ctx["mode_commande"], "libelle": libeller_code(ctx["mode_commande"])["libelle"]},
+        {"code": "role_lbh", "valeur_code": ctx["role_lbh"], "libelle": libeller_code(ctx["role_lbh"])["libelle"]},
+    ]
+    contexte_detaille = {
+        "type_client": libeller_code(ctx["famille_client"]),
+        "sous_type_client": libeller_code(ctx["sous_type_client"]),
+        "cadre_juridique": libeller_code(ctx["cadre_juridique"]),
+        "mode_commande": libeller_code(ctx["mode_commande"]),
+        "role_lbh": libeller_code(ctx["role_lbh"]),
+        "mission_principale": libeller_code(ctx["mission_principale"]),
+        "phase_intervention": libeller_code(ctx["phase_intervention"]),
+        "nature_ouvrage": libeller_code(ctx["nature_ouvrage"]),
+        "donnees_entree": ctx["source"].get("donnees_entree", {}) if isinstance(ctx.get("source"), dict) else {},
+    }
+    suggestions_correction = valider_combinaison_projet({
+        "famille_client": ctx["famille_client"],
+        "phase_intervention": ctx["phase_intervention"],
+        "mission_principale": ctx["mission_principale"],
+        "missions_principales": [ctx["mission_principale"], *ctx["missions_associees"]],
+        "role_lbh": ctx["role_lbh"],
+    }).get("suggestions", [])
+
     return {
         "profil_fiche": profil,
+        "resume": {
+            "titre": mission_resume,
+            "sous_titre": " · ".join([v for v in contexte_resume if v and v != "Non renseigné"]),
+            "badge_coherence": badge_coherence,
+            "score_coherence": score,
+            "statut_global": statut_global,
+        },
+        "contexte_compact": contexte_compact,
+        "contexte_detaille": contexte_detaille,
+        "kpi": kpi,
+        "visualisations": _visualisations(kpi, modules, livrables),
         "en_tete": {
             "reference": projet.reference,
             "intitule": projet.intitule,
             "client": projet.maitre_ouvrage.nom if projet.maitre_ouvrage_id else "",
-            "role_lbh": ctx["role_lbh"],
+            "role_lbh": libeller_code(ctx["role_lbh"])["libelle"],
             "type_client": _libelle_option(ctx["source"].get("famille_client"), ctx["famille_client"]),
             "mission": _libelle_option(ctx["source"].get("mission_principale"), ctx["mission_principale"]),
             "phase": libelle_phase_projet(ctx["phase_intervention"]) or ctx["phase_intervention"],
@@ -378,20 +544,18 @@ def construire_fiche_metier_projet(projet) -> dict[str, Any]:
         "contexte_metier": {
             "famille_client": libeller_code(ctx["famille_client"]),
             "sous_type_client": libeller_code(ctx["sous_type_client"]),
-            "contexte_contractuel": libeller_code(ctx["contexte_contractuel"]),
-            "mode_commande": libeller_code(ctx["contexte_contractuel"]),
+            "mode_commande": libeller_code(ctx["mode_commande"]),
             "mission_principale": libeller_code(ctx["mission_principale"]),
             "missions_associees": [libeller_code(code) for code in ctx["missions_associees"]],
             "phase_intervention": libeller_code(ctx["phase_intervention"]),
             "nature_ouvrage": libeller_code(ctx["nature_ouvrage"]),
-            "nature_marche": libeller_code(ctx["nature_marche"]),
-            "cadre_juridique": libeller_code(ctx["nature_marche"]),
+            "cadre_juridique": libeller_code(ctx["cadre_juridique"]),
             "partie_contractante": ctx["partie_contractante"],
             "role_lbh": libeller_code(ctx["role_lbh"]),
         },
         "parcours_metier": {
             "profil": profil,
-            "etapes": [module["libelle"] for module in modules],
+            **_parcours_interactif(kpi, modules, livrables),
         },
         "blocs_fiche": [
             "en_tete", "contexte_metier", "parcours_metier", "pieces_sources",
@@ -412,6 +576,7 @@ def construire_fiche_metier_projet(projet) -> dict[str, Any]:
         "synthese_economique": _synthese_economique(projet),
         "alertes_metier": alertes,
         "actions_recommandees": actions,
+        "suggestions_correction": suggestions_correction,
         "chaines_production": [
             {"code": "sources_production_validation", "libelle": "Pièces sources → production métier → contrôle → livrable validé"}
         ],
