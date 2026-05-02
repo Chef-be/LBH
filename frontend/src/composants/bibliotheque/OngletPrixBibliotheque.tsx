@@ -217,6 +217,11 @@ interface PropositionComplementSdp {
   };
 }
 
+interface ReponseRecalculSdp {
+  detail: string;
+  apres?: Partial<Record<keyof LigneBibliotheque, string>>;
+}
+
 // Couleurs par type de ressource (SDP)
 const COULEURS_RESSOURCE: Record<string, string> = {
   mo: "#6366f1",
@@ -400,13 +405,18 @@ function ModalAuditSdpDs({
 }
 
 function PanneauDetailLigne({
-  ligne,
+  ligne: ligneInitiale,
   onFermer,
 }: {
   ligne: LigneBibliotheque;
   onFermer: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [ligne, setLigne] = useState(ligneInitiale);
+  useEffect(() => {
+    setLigne(ligneInitiale);
+  }, [ligneInitiale]);
+
   const ds = toNumber(ligne.debourse_sec_unitaire);
   const pv = toNumber(ligne.prix_vente_unitaire);
   const kpv = ds > 0 && pv > 0 ? pv / ds : 0;
@@ -446,11 +456,29 @@ function PanneauDetailLigne({
 
   const recalculerDepuisSdp = async () => {
     setActionAudit("recalculer-sdp");
+    setMessageActionSdp(null);
     try {
-      await api.post(`/api/bibliotheque/${ligne.id}/recalculer-ds-depuis-sdp/`, {});
+      const resultat = await api.post<ReponseRecalculSdp>(`/api/bibliotheque/${ligne.id}/recalculer-ds-depuis-sdp/`, {});
+      if (resultat.apres) {
+        setLigne((ligneCourante) => ({
+          ...ligneCourante,
+          debourse_sec_unitaire: resultat.apres?.debourse_sec_unitaire ?? ligneCourante.debourse_sec_unitaire,
+          temps_main_oeuvre: resultat.apres?.temps_main_oeuvre ?? ligneCourante.temps_main_oeuvre,
+          cout_horaire_mo: resultat.apres?.cout_horaire_mo ?? ligneCourante.cout_horaire_mo,
+          cout_matieres: resultat.apres?.cout_matieres ?? ligneCourante.cout_matieres,
+          cout_materiel: resultat.apres?.cout_materiel ?? ligneCourante.cout_materiel,
+          cout_consommables: resultat.apres?.cout_consommables ?? ligneCourante.cout_consommables,
+          cout_sous_traitance: resultat.apres?.cout_sous_traitance ?? ligneCourante.cout_sous_traitance,
+          cout_transport: resultat.apres?.cout_transport ?? ligneCourante.cout_transport,
+          cout_frais_divers: resultat.apres?.cout_frais_divers ?? ligneCourante.cout_frais_divers,
+        }));
+      }
+      setMessageActionSdp(resultat.detail || "Déboursé sec recalculé depuis le sous-détail de prix.");
       queryClient.invalidateQueries({ queryKey: ["bibliotheque"] });
-      rechargerAudit();
-      rechargerSD();
+      await rechargerAudit();
+      await rechargerSD();
+    } catch (e) {
+      setMessageActionSdp(e instanceof ErreurApi ? e.detail : "Impossible de recalculer le DS depuis le SDP.");
     } finally {
       setActionAudit(null);
     }
@@ -801,6 +829,11 @@ function PanneauDetailLigne({
                       </div>
                     </div>
                   </div>
+                )}
+                {messageActionSdp && (
+                  <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    {messageActionSdp}
+                  </p>
                 )}
               </div>
             </section>
