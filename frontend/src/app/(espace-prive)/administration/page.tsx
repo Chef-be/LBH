@@ -6,6 +6,7 @@ import {
   Activity,
   BarChart2,
   BookOpen,
+  Bot,
   BriefcaseBusiness,
   Building2,
   Calculator,
@@ -95,6 +96,13 @@ const SECTIONS: SectionAdmin[] = [
     iconeSection: Cog,
     couleurSection: "text-primaire-600",
     cartes: [
+      {
+        chemin: "/administration/intelligence-artificielle-metier",
+        icone: Bot,
+        titre: "Intelligence artificielle métier",
+        description: "Configurations par module, prompts, seuils, validations, journaux et coûts.",
+        couleur: "text-cyan-700 bg-cyan-50",
+      },
       {
         chemin: "/parametres",
         icone: Zap,

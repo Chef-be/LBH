@@ -7,6 +7,8 @@ import { BookOpen, DollarSign, Euro, FileText, Plus, UploadCloud, X } from "luci
 import { OngletPrixBibliotheque } from "@/composants/bibliotheque/OngletPrixBibliotheque";
 import { OngletCCTPBibliotheque } from "@/composants/bibliotheque/OngletCCTPBibliotheque";
 import { ModalImportBibliotheque } from "@/composants/bibliotheque/ModalImportBibliotheque";
+import { ActionsAnalyseIA } from "@/composants/ressources/ActionsAnalyseIA";
+import { api } from "@/crochets/useApi";
 
 type OngletActif = "prix" | "cctp";
 
@@ -78,6 +80,13 @@ export default function PageBibliotheque() {
   });
   const [modalImport, setModalImport] = useState(false);
   const [modalNouvelleEntree, setModalNouvelleEntree] = useState(false);
+  const [rechercheIntelligente, setRechercheIntelligente] = useState("");
+  const [resultatsRecherche, setResultatsRecherche] = useState<string | null>(null);
+
+  const rechercher = async () => {
+    const reponse = await api.get<{ groupes?: { prix?: unknown[] } }>(`/api/bibliotheque/recherche-intelligente/?q=${encodeURIComponent(rechercheIntelligente)}`);
+    setResultatsRecherche(`${reponse.groupes?.prix?.length || 0} résultat(s) prix trouvés.`);
+  };
 
   return (
     <div className="space-y-6">
@@ -95,6 +104,7 @@ export default function PageBibliotheque() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ActionsAnalyseIA type="bibliotheque" />
           <button
             type="button"
             className="btn-secondaire text-sm"
@@ -112,6 +122,19 @@ export default function PageBibliotheque() {
             Nouvelle entrée
           </button>
         </div>
+      </div>
+
+      <div className="carte space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            className="champ-saisie flex-1"
+            placeholder="Rechercher un article, un prix, une unité ou une intention..."
+            value={rechercheIntelligente}
+            onChange={(e) => setRechercheIntelligente(e.target.value)}
+          />
+          <button className="btn-secondaire" onClick={rechercher}>Rechercher</button>
+        </div>
+        {resultatsRecherche && <p className="text-sm text-slate-500">{resultatsRecherche}</p>}
       </div>
 
       {/* Onglets principaux */}

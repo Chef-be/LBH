@@ -193,6 +193,7 @@ class ArticleCCTP(models.Model):
 
     STATUTS = [
         ("brouillon", "Brouillon"),
+        ("a_verifier", "À vérifier"),
         ("a_completer", "À compléter — créé depuis le métré"),
         ("valide", "Validé — article complet"),
     ]

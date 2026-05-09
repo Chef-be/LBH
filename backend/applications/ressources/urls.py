@@ -17,6 +17,7 @@ urlpatterns = [
     path("devis/<uuid:pk>/", views.VueDetailDevis.as_view(), name="ressources-devis-detail"),
     path("devis/<uuid:pk>/relancer/", views.vue_relancer_analyse, name="ressources-devis-relancer"),
     path("devis/<uuid:pk>/lignes/", views.vue_lignes_devis, name="ressources-devis-lignes"),
+    path("devis/<uuid:pk>/analyser-ia/", views.vue_analyser_devis_ia, name="ressources-devis-analyser-ia"),
     path("devis/<uuid:pk>/texte-extrait/", views.vue_texte_extrait_devis, name="ressources-devis-texte-extrait"),
     path("devis/<uuid:pk>/mapping/preparer/", views.vue_mapping_preparer, name="ressources-devis-mapping-preparer"),
     path("devis/<uuid:pk>/mapping/previsualiser/", views.vue_mapping_previsualiser, name="ressources-devis-mapping-previsualiser"),
@@ -30,12 +31,14 @@ urlpatterns = [
 
     # Banque de prix marché
     path("prix-marche/", views.VueListePrixMarche.as_view(), name="ressources-prix-marche"),
+    path("prix-marche/analyser-ia/", views.vue_analyser_prix_marche_ia, name="ressources-prix-marche-analyser-ia"),
     path("prix-marche/actualiser/", views.vue_actualiser_prix, name="ressources-prix-actualiser"),
     path("prix-marche/<uuid:pk>/", views.VueDetailPrixMarche.as_view(), name="ressources-prix-marche-detail"),
     path("prix-marche/<uuid:pk>/capitaliser/", views.vue_capitaliser_ligne, name="ressources-prix-capitaliser"),
 
     # Estimations et fiches ratio
     path("estimations/", views.VueListeEstimations.as_view(), name="ressources-estimations"),
+    path("estimations/generer-ia/", views.vue_generer_estimation_ia, name="ressources-estimations-generer-ia"),
     path("estimations/<uuid:pk>/", views.VueDetailEstimation.as_view(), name="ressources-estimation-detail"),
     path("fiches-ratio/", views.VueListeFichesRatio.as_view(), name="ressources-fiches-ratio"),
     path("fiches-ratio/references/", views.vue_ratios_reference, name="ressources-ratios-reference"),

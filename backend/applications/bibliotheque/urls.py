@@ -7,6 +7,8 @@ urlpatterns = [
     # Bibliothèque — liste et création
     path("", views.VueListeBibliotheque.as_view(), name="bibliotheque-liste"),
     path("familles/", views.vue_familles, name="bibliotheque-familles"),
+    path("recherche-intelligente/", views.vue_recherche_intelligente, name="bibliotheque-recherche-intelligente"),
+    path("generer-article-cctp/", views.vue_generer_article_cctp, name="bibliotheque-generer-article-cctp"),
     path("lots-cctp/", views.vue_lots_cctp, name="bibliotheque-lots-cctp"),
     path("importer-bordereaux/", views.vue_importer_bordereaux_prix, name="bibliotheque-importer-bordereaux"),
     path("importer-fichiers/", views.vue_importer_bordereaux_fichiers, name="bibliotheque-importer-fichiers"),

@@ -1,14 +1,24 @@
 """Vues API pour les paramètres système — Plateforme LBH."""
 
+from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import generics, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from .models import Parametre, FonctionnaliteActivable, JournalModificationParametre
+from .models import (
+    ConfigurationIAFonctionnelle,
+    FonctionnaliteActivable,
+    JournalModificationParametre,
+    Parametre,
+    TraitementIA,
+)
 from .serialiseurs import (
+    ConfigurationIAFonctionnelleSerialiseur,
     ParametreSerialiseur,
     FonctionnaliteActivableSerialiseur,
     JournalModificationSerialiseur,
+    TraitementIASerialiseur,
 )
 
 
@@ -120,3 +130,86 @@ class VueJournalParametres(generics.ListAPIView):
         if cle:
             qs = qs.filter(parametre__cle=cle)
         return qs
+
+
+class VueListeConfigurationsIA(generics.ListCreateAPIView):
+    """Configurations des traitements métier automatisés."""
+
+    permission_classes = [EstSuperAdmin]
+    serializer_class = ConfigurationIAFonctionnelleSerialiseur
+
+    def get_queryset(self):
+        qs = ConfigurationIAFonctionnelle.objects.all()
+        module = self.request.query_params.get("module")
+        if module:
+            qs = qs.filter(module=module)
+        actif = self.request.query_params.get("actif")
+        if actif == "1":
+            qs = qs.filter(est_actif=True)
+        return qs
+
+
+class VueDetailConfigurationIA(generics.RetrieveUpdateAPIView):
+    permission_classes = [EstSuperAdmin]
+    serializer_class = ConfigurationIAFonctionnelleSerialiseur
+    queryset = ConfigurationIAFonctionnelle.objects.all()
+
+
+class VueListeJournauxIA(generics.ListAPIView):
+    permission_classes = [EstSuperAdmin]
+    serializer_class = TraitementIASerialiseur
+
+    def get_queryset(self):
+        qs = TraitementIA.objects.select_related("configuration", "utilisateur").prefetch_related("corrections")
+        module = self.request.query_params.get("module")
+        if module:
+            qs = qs.filter(module=module)
+        return qs
+
+
+@api_view(["GET"])
+@permission_classes([EstSuperAdmin])
+def vue_couts_ia(request):
+    """Synthèse des coûts journalisés par module."""
+
+    lignes = (
+        TraitementIA.objects.values("module")
+        .annotate(cout_estime_total=Sum("cout_estime"), cout_reel_total=Sum("cout_reel"))
+        .order_by("module")
+    )
+    return Response({
+        "couts": list(lignes),
+        "total_estime": TraitementIA.objects.aggregate(total=Sum("cout_estime"))["total"] or 0,
+        "total_reel": TraitementIA.objects.aggregate(total=Sum("cout_reel"))["total"] or 0,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([EstSuperAdmin])
+def vue_tester_configuration_ia(request, pk):
+    """Teste une configuration sans appeler de fournisseur si la clé serveur est absente."""
+
+    configuration = generics.get_object_or_404(ConfigurationIAFonctionnelle, pk=pk)
+    prompt = request.data.get("prompt") or configuration.prompt_controle or configuration.prompt_systeme
+    traitement = TraitementIA.objects.create(
+        module=configuration.module,
+        objet_type="configuration_ia",
+        objet_id=str(configuration.id),
+        configuration=configuration,
+        statut="termine",
+        entree={"prompt": prompt[:4000], "modele": configuration.modele},
+        sortie={
+            "resume": "Configuration disponible pour un traitement contrôlé.",
+            "validation_humaine_obligatoire": configuration.validation_humaine_obligatoire,
+            "schema_sortie": configuration.schema_sortie,
+        },
+        score_confiance=configuration.seuil_confiance,
+        cout_estime=0,
+        cout_reel=0,
+        utilisateur=request.user,
+        date_fin=timezone.now(),
+    )
+    return Response({
+        "detail": "Test enregistré. Aucun secret fournisseur n'est exposé par l'API.",
+        "traitement": TraitementIASerialiseur(traitement).data,
+    })

@@ -425,3 +425,133 @@ class FonctionnaliteActivable(models.Model):
             ):
                 return False
         return True
+
+
+class ConfigurationIAFonctionnelle(models.Model):
+    """Configuration administrable des traitements métier automatisés."""
+
+    MODULES = [
+        ("ressources_devis", "Analyse des devis / BPU / DPGF / DQE"),
+        ("ressources_prix_marche", "Prix marché"),
+        ("ressources_estimations", "Estimations & ratios"),
+        ("bibliotheque_prix", "Bibliothèque de prix"),
+        ("bibliotheque_cctp", "CCTP / pièces écrites"),
+        ("pieces_ecrites", "Pièces écrites"),
+    ]
+
+    FOURNISSEURS = [
+        ("openai", "OpenAI"),
+        ("autre", "Autre fournisseur"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=100, unique=True)
+    libelle = models.CharField(max_length=200)
+    module = models.CharField(max_length=40, choices=MODULES)
+    fournisseur = models.CharField(max_length=30, choices=FOURNISSEURS, default="openai")
+    modele = models.CharField(max_length=120, blank=True)
+    modele_fallback = models.CharField(max_length=120, blank=True)
+    temperature = models.DecimalField(max_digits=4, decimal_places=2, default=0.20)
+    top_p = models.DecimalField(max_digits=4, decimal_places=2, default=1)
+    max_tokens = models.PositiveIntegerField(default=2500)
+    prompt_systeme = models.TextField(blank=True)
+    prompt_controle = models.TextField(blank=True)
+    schema_sortie = models.JSONField(default=dict, blank=True)
+    seuil_confiance = models.DecimalField(max_digits=5, decimal_places=2, default=0.75)
+    seuil_validation_automatique = models.DecimalField(max_digits=5, decimal_places=2, default=0.92)
+    activer_correction_texte = models.BooleanField(default=True)
+    activer_normalisation = models.BooleanField(default=True)
+    activer_classification = models.BooleanField(default=True)
+    activer_rapprochement = models.BooleanField(default=True)
+    activer_generation = models.BooleanField(default=False)
+    activer_validation_auto = models.BooleanField(default=False)
+    validation_humaine_obligatoire = models.BooleanField(default=True)
+    cout_max_par_traitement = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    est_actif = models.BooleanField(default=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "parametres_configuration_ia_fonctionnelle"
+        ordering = ["module", "libelle"]
+        verbose_name = "Configuration métier automatisée"
+        verbose_name_plural = "Configurations métier automatisées"
+
+    def __str__(self):
+        return f"{self.libelle} ({self.module})"
+
+
+class TraitementIA(models.Model):
+    """Journal d'un traitement métier automatisé et de son résultat."""
+
+    STATUTS = [
+        ("prepare", "Préparé"),
+        ("en_cours", "En cours"),
+        ("termine", "Terminé"),
+        ("erreur", "Erreur"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    module = models.CharField(max_length=80)
+    objet_type = models.CharField(max_length=120, blank=True)
+    objet_id = models.CharField(max_length=80, blank=True)
+    configuration = models.ForeignKey(
+        ConfigurationIAFonctionnelle,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="traitements",
+    )
+    statut = models.CharField(max_length=20, choices=STATUTS, default="prepare")
+    entree = models.JSONField(default=dict, blank=True)
+    sortie = models.JSONField(default=dict, blank=True)
+    score_confiance = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    cout_estime = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    cout_reel = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    utilisateur = models.ForeignKey(
+        "comptes.Utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="traitements_metier",
+    )
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_fin = models.DateTimeField(null=True, blank=True)
+    erreur = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "parametres_traitement_ia"
+        ordering = ["-date_creation"]
+        verbose_name = "Journal de traitement métier"
+        verbose_name_plural = "Journaux de traitements métier"
+
+    def __str__(self):
+        return f"{self.module} — {self.statut}"
+
+
+class CorrectionIA(models.Model):
+    """Correction proposée par un traitement métier, validée séparément par l'utilisateur."""
+
+    STATUTS = [
+        ("proposee", "Proposée"),
+        ("acceptee", "Acceptée"),
+        ("refusee", "Refusée"),
+        ("appliquee", "Appliquée"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    traitement = models.ForeignKey(TraitementIA, on_delete=models.CASCADE, related_name="corrections")
+    objet_type = models.CharField(max_length=120)
+    objet_id = models.CharField(max_length=80)
+    champ = models.CharField(max_length=120)
+    valeur_originale = models.TextField(blank=True)
+    valeur_proposee = models.TextField(blank=True)
+    statut = models.CharField(max_length=20, choices=STATUTS, default="proposee")
+    justification = models.TextField(blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "parametres_correction_ia"
+        ordering = ["-date_creation"]
+        verbose_name = "Correction métier proposée"
+        verbose_name_plural = "Corrections métier proposées"

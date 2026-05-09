@@ -11,6 +11,7 @@ from health_check.views import HealthCheckView
 
 from applications.site_public.views import vue_configuration
 from applications.societe import views as vues_societe
+from applications.parametres import views as vues_parametres
 
 # URL admin personnalisée (définie dans les paramètres, jamais /admin/ en production)
 _url_admin = getattr(settings, "ADMIN_URL", "administration-technique/")
@@ -66,6 +67,13 @@ urlpatterns = [
 
     # API — Paramètres et fonctionnalités activables
     path("api/parametres/", include("applications.parametres.urls")),
+
+    # API — Administration des traitements métier automatisés
+    path("api/administration/ia/configurations/", vues_parametres.VueListeConfigurationsIA.as_view(), name="administration-ia-configurations"),
+    path("api/administration/ia/configurations/<uuid:pk>/", vues_parametres.VueDetailConfigurationIA.as_view(), name="administration-ia-configuration-detail"),
+    path("api/administration/ia/configurations/<uuid:pk>/tester/", vues_parametres.vue_tester_configuration_ia, name="administration-ia-configuration-tester"),
+    path("api/administration/ia/journaux/", vues_parametres.VueListeJournauxIA.as_view(), name="administration-ia-journaux"),
+    path("api/administration/ia/couts/", vues_parametres.vue_couts_ia, name="administration-ia-couts"),
 
     # API — Messagerie et webmail
     path("api/messagerie/", include("applications.messagerie.urls")),

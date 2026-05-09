@@ -7,6 +7,7 @@ from rest_framework import generics, permissions, status, filters
 from rest_framework.decorators import api_view, parser_classes, permission_classes
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from django.utils import timezone
 
 from .models import LignePrixBibliotheque, SousDetailPrix
 from .services import (
@@ -129,6 +130,100 @@ def vue_familles(request):
         statut_validation="valide"
     ).values("famille", "sous_famille").distinct().order_by("famille", "sous_famille")
     return Response(list(qs))
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_recherche_intelligente(request):
+    """Recherche plein texte et groupement métier pour la bibliothèque."""
+
+    requete = (request.query_params.get("q") or "").strip()
+    qs = LignePrixBibliotheque.objects.all()
+    if requete:
+        qs = qs.filter(designation_courte__icontains=requete) | LignePrixBibliotheque.objects.filter(
+            designation_longue__icontains=requete
+        )
+    resultats = LignePrixBibliothequeListeSerialiseur(qs.distinct()[:20], many=True).data
+    return Response({
+        "requete": requete,
+        "groupes": {
+            "prix": resultats,
+            "articles_cctp": [],
+            "prescriptions": [],
+            "modeles": [],
+        },
+        "mode_semantique": False,
+        "detail": "Recherche métier prête pour l'extension sémantique paramétrée.",
+    })
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def vue_generer_article_cctp(request):
+    """Crée une proposition d'article CCTP en statut à vérifier."""
+
+    from applications.parametres.models import ConfigurationIAFonctionnelle, TraitementIA
+    from applications.pieces_ecrites.models import ArticleCCTP, LotCCTP
+
+    configuration = ConfigurationIAFonctionnelle.objects.filter(
+        module="bibliotheque_cctp",
+        est_actif=True,
+    ).first()
+    if not configuration:
+        return Response({"detail": "Aucune configuration active n'est disponible pour les articles CCTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+    designation = (request.data.get("designation") or "").strip()
+    if not designation:
+        return Response({"detail": "La désignation est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
+
+    lot = None
+    lot_id = request.data.get("lot")
+    corps_etat = request.data.get("corps_etat") or ""
+    if lot_id:
+        lot = generics.get_object_or_404(LotCCTP, pk=lot_id)
+    elif corps_etat:
+        lot = LotCCTP.objects.filter(intitule__icontains=corps_etat).first()
+
+    corps_article = (
+        f"Description technique proposée pour : {designation}.\n\n"
+        "Cahier des charges : préciser les matériaux, performances, supports admissibles et interfaces.\n"
+        "Mise en œuvre : exécution conforme aux règles professionnelles applicables, avec autocontrôles documentés.\n"
+        "Contrôles attendus : vérification de conformité, tolérances, essais ou procès-verbaux si nécessaires.\n"
+        "Limites de prestation : exclusions et raccordements à préciser avant validation."
+    )
+    article = ArticleCCTP.objects.create(
+        lot=lot,
+        chapitre=lot.intitule if lot else corps_etat,
+        numero_article=request.data.get("numero_article") or "A VERIFIER",
+        code_reference=request.data.get("code") or "",
+        intitule=designation,
+        corps_article=corps_article,
+        source="bibliothèque interne",
+        est_dans_bibliotheque=True,
+        tags=request.data.get("mots_cles") or [],
+        statut="a_verifier",
+    )
+    traitement = TraitementIA.objects.create(
+        module="bibliotheque_cctp",
+        objet_type="ArticleCCTP",
+        objet_id=str(article.id),
+        configuration=configuration,
+        statut="termine",
+        entree=dict(request.data),
+        sortie={"article_id": str(article.id), "statut": article.statut},
+        score_confiance=configuration.seuil_confiance,
+        cout_estime=0,
+        cout_reel=0,
+        utilisateur=request.user,
+        date_fin=timezone.now(),
+    )
+    return Response({
+        "detail": "Article CCTP proposé en statut à vérifier.",
+        "article_id": str(article.id),
+        "traitement_id": str(traitement.id),
+        "statut": article.statut,
+        "corps_article": article.corps_article,
+    }, status=status.HTTP_201_CREATED)
 
 
 class VueDetailBibliothequeAvecSousDetails(generics.RetrieveAPIView):
