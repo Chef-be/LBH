@@ -415,16 +415,39 @@ class VueDetailUtilisateur(generics.RetrieveUpdateDestroyAPIView):
             return Utilisateur.objects.none()
         return Utilisateur.objects.select_related("profil", "organisation")
 
+    def update(self, requete, *args, **kwargs):
+        objet = self.get_object()
+        if objet.est_super_admin and objet.est_actif and requete.data.get("est_actif") is False:
+            autre_super_admin = Utilisateur.objects.filter(est_super_admin=True, est_actif=True).exclude(pk=objet.pk).exists()
+            if not autre_super_admin:
+                return Response(
+                    {"detail": "Le dernier super-administrateur actif ne peut pas être désactivé."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        return super().update(requete, *args, **kwargs)
+
     def destroy(self, requete, *args, **kwargs):
         objet = self.get_object()
         if objet.pk == requete.user.pk:
             return Response({"detail": "Vous ne pouvez pas supprimer votre propre compte."}, status=status.HTTP_400_BAD_REQUEST)
-        if objet.est_super_admin:
-            return Response({"detail": "Un super-administrateur ne peut pas être supprimé depuis cet écran."}, status=status.HTTP_400_BAD_REQUEST)
+        if objet.est_super_admin and objet.est_actif:
+            autre_super_admin = Utilisateur.objects.filter(est_super_admin=True, est_actif=True).exclude(pk=objet.pk).exists()
+            if not autre_super_admin:
+                return Response(
+                    {"detail": "Le dernier super-administrateur actif ne peut pas être désactivé ni supprimé."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         if objet.est_actif:
             objet.est_actif = False
             objet.save(update_fields=["est_actif"])
             return Response({"detail": "Compte désactivé.", "suppression_definitive": False}, status=status.HTTP_200_OK)
+
+        motif = (requete.data.get("motif") or requete.query_params.get("motif") or "").strip()
+        if not motif:
+            return Response(
+                {"detail": "Le motif est obligatoire pour une suppression définitive."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         cible = _obtenir_super_admin_reaffectation(objet)
         if cible is None:

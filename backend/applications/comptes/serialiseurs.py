@@ -26,6 +26,10 @@ class UtilisateurSerialiseur(serializers.ModelSerializer):
     profil_libelle = serializers.CharField(source="profil.libelle", read_only=True)
     organisation_nom = serializers.CharField(source="organisation.nom", read_only=True)
     invitation_en_attente = serializers.BooleanField(read_only=True)
+    derniere_connexion = serializers.DateTimeField(source="last_login", read_only=True)
+    peut_etre_desactive = serializers.SerializerMethodField()
+    peut_etre_supprime = serializers.SerializerMethodField()
+    dependances_administration = serializers.SerializerMethodField()
 
     class Meta:
         model = Utilisateur
@@ -36,10 +40,50 @@ class UtilisateurSerialiseur(serializers.ModelSerializer):
             "profil", "profil_libelle",
             "est_actif", "est_super_admin",
             "langue", "fuseau_horaire", "notifications_courriel",
-            "date_creation", "derniere_connexion_ip",
+            "date_creation", "derniere_connexion", "derniere_connexion_ip",
             "courriel_verifie_le", "invitation_envoyee_le", "invitation_en_attente",
+            "peut_etre_desactive", "peut_etre_supprime", "dependances_administration",
         ]
         read_only_fields = ["id", "date_creation", "est_super_admin"]
+
+    def _est_dernier_super_admin_actif(self, obj) -> bool:
+        if not obj.est_super_admin or not obj.est_actif:
+            return False
+        return not Utilisateur.objects.filter(est_super_admin=True, est_actif=True).exclude(pk=obj.pk).exists()
+
+    def get_peut_etre_desactive(self, obj) -> bool:
+        request = self.context.get("request")
+        if request and request.user and obj.pk == request.user.pk:
+            return False
+        return not self._est_dernier_super_admin_actif(obj)
+
+    def get_peut_etre_supprime(self, obj) -> bool:
+        request = self.context.get("request")
+        if request and request.user and obj.pk == request.user.pk:
+            return False
+        if obj.est_actif:
+            return False
+        if self._est_dernier_super_admin_actif(obj):
+            return False
+        return not any(item["nombre"] > 0 and item["bloquant"] for item in self.get_dependances_administration(obj))
+
+    def get_dependances_administration(self, obj) -> list[dict]:
+        dependances = []
+        for relation in obj._meta.related_objects:
+            modele = relation.related_model
+            champ = relation.field
+            try:
+                nombre = modele._default_manager.filter(**{champ.name: obj}).count()
+            except Exception:
+                continue
+            if nombre:
+                dependances.append({
+                    "libelle": modele._meta.verbose_name_plural.title(),
+                    "champ": champ.name,
+                    "nombre": nombre,
+                    "bloquant": not champ.null,
+                })
+        return dependances
 
 
 class UtilisateurCreationSerialiseur(serializers.ModelSerializer):

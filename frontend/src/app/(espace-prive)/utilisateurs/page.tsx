@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api, ErreurApi, extraireListeResultats } from "@/crochets/useApi";
-import { Plus, Search, UserCheck, UserX, Pencil, Users, Trash2, KeyRound, MailPlus, X, Save } from "lucide-react";
+import { useSessionStore } from "@/crochets/useSession";
+import { Plus, Search, UserCheck, UserX, Pencil, Users, Trash2, KeyRound, MailPlus, X, Save, Eye } from "lucide-react";
 
 interface ProfilDroit {
   id: number;
@@ -27,7 +28,11 @@ interface Utilisateur {
   invitation_en_attente?: boolean;
   courriel_verifie_le?: string | null;
   date_creation: string;
+  derniere_connexion?: string | null;
   derniere_connexion_ip: string | null;
+  peut_etre_desactive?: boolean;
+  peut_etre_supprime?: boolean;
+  dependances_administration?: { libelle: string; champ: string; nombre: number; bloquant: boolean }[];
 }
 
 export default function PageUtilisateurs() {
@@ -37,11 +42,15 @@ export default function PageUtilisateurs() {
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState<"tous" | "actifs" | "inactifs">("actifs");
   const [utilisateurEdition, setUtilisateurEdition] = useState<Utilisateur | null>(null);
+  const [utilisateurDetail, setUtilisateurDetail] = useState<Utilisateur | null>(null);
   const [utilisateurSuppression, setUtilisateurSuppression] = useState<Utilisateur | null>(null);
+  const [modeSuppression, setModeSuppression] = useState<"desactiver" | "supprimer">("desactiver");
+  const [motifSuppression, setMotifSuppression] = useState("");
   const [form, setForm] = useState({ prenom: "", nom: "", telephone: "", fonction: "", profil: "" as number | "" });
   const [actionEnCours, setActionEnCours] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
+  const utilisateurCourant = useSessionStore((etat) => etat.utilisateur);
 
   const chargerUtilisateurs = () =>
     api.get<Utilisateur[]>("/api/auth/utilisateurs/")
@@ -105,11 +114,13 @@ export default function PageUtilisateurs() {
 
   const supprimerUtilisateur = () => {
     if (!utilisateurSuppression) return;
+    const suffixe = modeSuppression === "supprimer" ? `?motif=${encodeURIComponent(motifSuppression)}` : "";
     executerAction(
       `suppression-${utilisateurSuppression.id}`,
       async () => {
-        const reponse = await api.supprimer(`/api/auth/utilisateurs/${utilisateurSuppression.id}/`) as { detail?: string; suppression_definitive?: boolean; reaffecte_a?: string };
+        const reponse = await api.supprimer(`/api/auth/utilisateurs/${utilisateurSuppression.id}/${suffixe}`) as { detail?: string; suppression_definitive?: boolean; reaffecte_a?: string };
         setUtilisateurSuppression(null);
+        setMotifSuppression("");
         if (reponse?.detail) setMessage(reponse.detail + (reponse.reaffecte_a ? ` Reprise par ${reponse.reaffecte_a}.` : ""));
       },
       utilisateurSuppression.est_actif ? "Compte utilisateur désactivé." : "Compte utilisateur supprimé définitivement."
@@ -129,6 +140,15 @@ export default function PageUtilisateurs() {
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+
+  const formaterDateLongue = (iso: string) =>
+    new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const ouvrirSuppression = (u: Utilisateur) => {
+    setUtilisateurSuppression(u);
+    setModeSuppression(u.est_actif ? "desactiver" : "supprimer");
+    setMotifSuppression("");
+  };
 
   return (
     <div className="space-y-6">
@@ -204,9 +224,9 @@ export default function PageUtilisateurs() {
               <thead>
                 <tr className="border-b border-slate-100">
                   <th className="text-left py-3 pr-4 font-medium text-slate-500">Utilisateur</th>
-                  <th className="text-left py-3 pr-4 font-medium text-slate-500 hidden sm:table-cell">Profil</th>
-                  <th className="text-left py-3 pr-4 font-medium text-slate-500 hidden lg:table-cell">Organisation</th>
-                  <th className="text-left py-3 pr-4 font-medium text-slate-500 hidden md:table-cell">Créé le</th>
+                  <th className="text-left py-3 pr-4 font-medium text-slate-500 hidden md:table-cell">Fonction / poste</th>
+                  <th className="text-left py-3 pr-4 font-medium text-slate-500 hidden sm:table-cell">Profil de droits</th>
+                  <th className="text-left py-3 pr-4 font-medium text-slate-500 hidden lg:table-cell">Dernière connexion</th>
                   <th className="text-center py-3 pr-4 font-medium text-slate-500">Statut</th>
                   <th className="text-right py-3 font-medium text-slate-500">Actions</th>
                 </tr>
@@ -224,11 +244,11 @@ export default function PageUtilisateurs() {
                         <div>
                           <p className="font-medium text-slate-800">{u.nom_complet}</p>
                           <p className="text-xs text-slate-400">{u.courriel}</p>
-                          {u.fonction && (
-                            <p className="text-xs text-slate-500">{u.fonction}</p>
-                          )}
                         </div>
                       </div>
+                    </td>
+                    <td className="py-3 pr-4 text-slate-500 text-xs hidden md:table-cell">
+                      {u.fonction || "—"}
                     </td>
                     <td className="py-3 pr-4 hidden sm:table-cell">
                       {u.est_super_admin ? (
@@ -239,11 +259,8 @@ export default function PageUtilisateurs() {
                         <span className="text-slate-400 text-xs">—</span>
                       )}
                     </td>
-                    <td className="py-3 pr-4 text-slate-500 text-xs hidden lg:table-cell">
-                      {u.organisation_nom ?? "—"}
-                    </td>
-                    <td className="py-3 pr-4 text-slate-400 text-xs hidden md:table-cell">
-                      {formatDate(u.date_creation)}
+                    <td className="py-3 pr-4 text-slate-400 text-xs hidden lg:table-cell">
+                      {u.derniere_connexion ? formaterDateLongue(u.derniere_connexion) : "Jamais"}
                     </td>
                     <td className="py-3 pr-4 text-center">
                       {u.est_actif ? (
@@ -264,6 +281,14 @@ export default function PageUtilisateurs() {
                     </td>
                     <td className="py-3 text-right">
                       <div className="flex flex-wrap justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setUtilisateurDetail(u)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-primaire-600 hover:bg-primaire-50 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Détail
+                        </button>
                         <button
                           type="button"
                           onClick={() => ouvrirEdition(u)}
@@ -302,14 +327,42 @@ export default function PageUtilisateurs() {
                             MDP
                           </button>
                         )}
-                        {!u.est_super_admin && (
+                        {u.est_actif && u.id !== utilisateurCourant?.id && (
                           <button
                             type="button"
-                            onClick={() => setUtilisateurSuppression(u)}
+                            onClick={() => executerAction(
+                              `desactivation-${u.id}`,
+                              () => api.patch(`/api/auth/utilisateurs/${u.id}/`, { est_actif: false }),
+                              "Compte utilisateur désactivé."
+                            )}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            Désactiver
+                          </button>
+                        )}
+                        {!u.est_actif && (
+                          <button
+                            type="button"
+                            onClick={() => executerAction(
+                              `reactivation-${u.id}`,
+                              () => api.patch(`/api/auth/utilisateurs/${u.id}/`, { est_actif: true }),
+                              "Compte utilisateur réactivé."
+                            )}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            Réactiver
+                          </button>
+                        )}
+                        {u.id !== utilisateurCourant?.id && (
+                          <button
+                            type="button"
+                            onClick={() => ouvrirSuppression(u)}
                             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            Supprimer
+                            {u.est_actif ? "Désactiver" : "Supprimer"}
                           </button>
                         )}
                       </div>
@@ -387,15 +440,69 @@ export default function PageUtilisateurs() {
         </div>
       )}
 
+      {utilisateurDetail && (
+        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-xl border-l shadow-2xl" style={{ background: "var(--fond-carte)", borderColor: "var(--bordure)" }}>
+          <div className="flex items-start justify-between border-b px-6 py-4" style={{ borderColor: "var(--bordure)" }}>
+            <div>
+              <h2 className="text-lg font-semibold" style={{ color: "var(--texte)" }}>Détail utilisateur</h2>
+              <p className="text-sm" style={{ color: "var(--texte-2)" }}>{utilisateurDetail.courriel}</p>
+            </div>
+            <button type="button" onClick={() => setUtilisateurDetail(null)} className="rounded-lg p-2" style={{ color: "var(--texte-2)" }}>
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="space-y-5 overflow-y-auto px-6 py-5">
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Identité</h3>
+              <dl className="grid grid-cols-2 gap-3 text-sm" style={{ color: "var(--texte-2)" }}>
+                <dt>Nom</dt><dd className="text-right">{utilisateurDetail.nom_complet}</dd>
+                <dt>Fonction</dt><dd className="text-right">{utilisateurDetail.fonction || "—"}</dd>
+                <dt>Profil</dt><dd className="text-right">{utilisateurDetail.est_super_admin ? "Super-admin" : utilisateurDetail.profil_libelle || "—"}</dd>
+                <dt>Organisation technique</dt><dd className="text-right">{utilisateurDetail.organisation_nom || "—"}</dd>
+                <dt>Dernière connexion</dt><dd className="text-right">{utilisateurDetail.derniere_connexion ? formaterDateLongue(utilisateurDetail.derniere_connexion) : "Jamais"}</dd>
+              </dl>
+            </section>
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Droits et sécurité</h3>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => ouvrirEdition(utilisateurDetail)} className="btn-secondaire text-xs"><Pencil className="h-3.5 w-3.5" />Modifier</button>
+                {utilisateurDetail.est_actif && <button onClick={() => executerAction(`reset-${utilisateurDetail.id}`, () => api.post(`/api/auth/utilisateurs/${utilisateurDetail.id}/envoyer-reinitialisation/`, {}), "Lien de réinitialisation envoyé.")} className="btn-secondaire text-xs"><KeyRound className="h-3.5 w-3.5" />Réinitialiser mot de passe</button>}
+                {!utilisateurDetail.est_actif && <button onClick={() => executerAction(`invitation-${utilisateurDetail.id}`, () => api.post(`/api/auth/utilisateurs/${utilisateurDetail.id}/renvoyer-invitation/`, {}), "Invitation envoyée.")} className="btn-secondaire text-xs"><MailPlus className="h-3.5 w-3.5" />Renvoyer invitation</button>}
+              </div>
+            </section>
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--texte)" }}>Historique d&apos;administration</h3>
+              <p className="text-sm" style={{ color: "var(--texte-2)" }}>
+                Créé le {formatDate(utilisateurDetail.date_creation)}. Les connexions et actions détaillées restent consultables dans les journaux de supervision.
+              </p>
+            </section>
+          </div>
+        </div>
+      )}
+
       {utilisateurSuppression && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <h2 className="text-lg font-semibold text-slate-900">Confirmer la suppression</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              {utilisateurSuppression.est_actif
-                ? `Le compte de ${utilisateurSuppression.nom_complet} sera désactivé.`
-                : `Le compte inactif de ${utilisateurSuppression.nom_complet} sera supprimé définitivement. Ses dossiers seront repris par un super-administrateur.`}
+          <div className="w-full max-w-2xl rounded-2xl p-6 shadow-2xl" style={{ background: "var(--fond-carte)", color: "var(--texte)" }}>
+            <h2 className="text-lg font-semibold">Désactivation ou suppression du compte</h2>
+            <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
+              {utilisateurSuppression.nom_complet} — {utilisateurSuppression.courriel} — {utilisateurSuppression.est_super_admin ? "Super-admin" : utilisateurSuppression.profil_libelle || "Sans profil"}
             </p>
+            <div className="mt-4 rounded-xl border p-3 text-sm" style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}>
+              {(utilisateurSuppression.dependances_administration || []).length === 0
+                ? "Aucune dépendance bloquante détectée par l'API."
+                : utilisateurSuppression.dependances_administration?.map((dep) => `${dep.libelle} : ${dep.nombre}`).join(" · ")}
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <button type="button" onClick={() => setModeSuppression("desactiver")} className={modeSuppression === "desactiver" ? "btn-primaire" : "btn-secondaire"}>Désactiver</button>
+              <button type="button" onClick={() => setModeSuppression("supprimer")} disabled={utilisateurSuppression.est_actif} className={modeSuppression === "supprimer" ? "btn-primaire" : "btn-secondaire"}>Supprimer définitivement</button>
+              <button type="button" className="btn-secondaire" disabled>Transférer</button>
+            </div>
+            {modeSuppression === "supprimer" && (
+              <div className="mt-4">
+                <label className="libelle-champ">Motif obligatoire</label>
+                <textarea className="champ-saisie w-full" value={motifSuppression} onChange={(e) => setMotifSuppression(e.target.value)} />
+              </div>
+            )}
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setUtilisateurSuppression(null)} className="btn-secondaire">Annuler</button>
               <button
@@ -405,7 +512,7 @@ export default function PageUtilisateurs() {
                 className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 <Trash2 className="h-4 w-4" />
-                {actionEnCours === `suppression-${utilisateurSuppression.id}` ? "Suppression…" : "Supprimer"}
+                {actionEnCours === `suppression-${utilisateurSuppression.id}` ? "Traitement…" : modeSuppression === "supprimer" ? "Supprimer" : "Désactiver"}
               </button>
             </div>
           </div>
