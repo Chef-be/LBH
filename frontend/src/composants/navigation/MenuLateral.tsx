@@ -9,7 +9,7 @@ import { useConfiguration } from "@/contextes/FournisseurConfiguration";
 import { api, extraireListeResultats } from "@/crochets/useApi";
 import {
   LayoutDashboard, FolderKanban, BookOpen,
-  Activity, Globe, Users, Mail, Shield,
+  Activity, Users, Mail, Shield,
   ChevronLeft, Menu, FileSearch, TrendingUp, BarChart3, LineChart,
   Briefcase,
 } from "lucide-react";
@@ -71,7 +71,6 @@ const GROUPE_ADMIN: GroupeMenu = {
     { libelle: "Administration", chemin: "/administration", icone: Shield },
     { libelle: "Utilisateurs", chemin: "/utilisateurs", icone: Users },
     { libelle: "Supervision", chemin: "/supervision", icone: Activity },
-    { libelle: "Site public", chemin: "/", icone: Globe, nouvelOnglet: true },
   ],
 };
 

@@ -12,9 +12,13 @@ export default function PageProjets() {
       <div className="flex items-center justify-between">
         <div>
           <h1>Projets</h1>
-          <p className="text-slate-500 mt-1">Gestion de l&apos;ensemble des affaires et missions</p>
+          <p className="text-slate-500 mt-1">Suivi des projets issus des affaires validées</p>
         </div>
         <BoutonNouveauProjet />
+      </div>
+
+      <div className="carte text-sm" style={{ color: "var(--texte-2)" }}>
+        Les projets sont créés depuis les affaires validées dans Pilotage société. Cette page reste dédiée au suivi opérationnel.
       </div>
 
       <ListeProjets />

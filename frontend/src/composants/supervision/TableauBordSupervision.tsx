@@ -12,6 +12,7 @@ import {
   HardDrive,
   Mail,
   RefreshCw,
+  RotateCw,
   Save,
   Send,
   Server,
@@ -140,7 +141,7 @@ interface FormulaireServeurMail {
 
 const ONGLETS: { id: Onglet; libelle: string; icone: ComponentType<{ size?: number; className?: string }> }[] = [
   { id: "vue-ensemble", libelle: "Vue d'ensemble", icone: Activity },
-  { id: "conteneurs", libelle: "Services & conteneurs", icone: Boxes },
+  { id: "conteneurs", libelle: "Détails techniques", icone: Boxes },
 ];
 
 const STYLES_NIVEAU: Record<string, string> = {
@@ -175,6 +176,24 @@ function formulaireVide(): FormulaireServeurMail {
 function formaterDate(iso: string | null | undefined) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR");
+}
+
+function traduireEtatTechnique(valeur: string | null | undefined) {
+  const dictionnaire: Record<string, string> = {
+    OK: "Opérationnel",
+    ok: "Opérationnel",
+    healthy: "Sain",
+    unhealthy: "Défaillant",
+    starting: "Démarrage",
+    running: "En cours d'exécution",
+    exited: "Arrêté",
+    stopped: "Arrêté",
+    created: "Créé",
+    restarting: "Redémarrage",
+  };
+  if (!valeur) return "—";
+  if (valeur.startsWith("Up ")) return valeur.replace(/^Up /, "Actif depuis ");
+  return dictionnaire[valeur] || valeur;
 }
 
 function formaterOctets(valeur: number | null | undefined) {
@@ -286,6 +305,10 @@ export function TableauBordSupervision() {
   const queryClient = useQueryClient();
   const [onglet, setOnglet] = useState<Onglet>("vue-ensemble");
   const [serveurEditionId, setServeurEditionId] = useState<string | null>(null);
+  const [serviceDetail, setServiceDetail] = useState<ServiceSupervision | null>(null);
+  const [serviceRedemarrage, setServiceRedemarrage] = useState<ServiceSupervision | null>(null);
+  const [serviceLogs, setServiceLogs] = useState<ServiceSupervision | null>(null);
+  const [alerteNote, setAlerteNote] = useState<Alerte | null>(null);
   const [formulaireMail, setFormulaireMail] = useState<FormulaireServeurMail>(formulaireVide());
   const [retourMessagerie, setRetourMessagerie] = useState<{ type: "succes" | "erreur"; texte: string } | null>(null);
 
@@ -425,6 +448,9 @@ export function TableauBordSupervision() {
           <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
           Actualiser
         </button>
+        <button type="button" className="btn-secondaire">
+          Télécharger un rapport
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -509,7 +535,7 @@ export function TableauBordSupervision() {
               <div className="flex items-center justify-between gap-3 mb-4">
                 <h2 className="flex items-center gap-2">
                   <Server size={16} />
-                  Services applicatifs
+                  Services de la plateforme
                 </h2>
                 <span className="text-xs" style={{ color: "var(--texte-3)" }}>{tableau.services.length} service(s)</span>
               </div>
@@ -528,13 +554,17 @@ export function TableauBordSupervision() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <p className="font-medium" style={{ color: "var(--texte)" }}>{service.nom}</p>
-                          <span className={STYLES_NIVEAU[service.statut]}>{service.statut.toUpperCase()}</span>
+                          <span className={STYLES_NIVEAU[service.statut]}>{traduireEtatTechnique(service.statut)}</span>
                         </div>
                         <p className="text-xs" style={{ color: "var(--texte-2)" }}>{service.message || "Aucun message."}</p>
                       </div>
-                      <div className="text-xs md:text-right" style={{ color: "var(--texte-3)" }}>
-                        <p>Conteneur : {service.conteneur}</p>
-                        <p>Santé Docker : {service.sante}</p>
+                      <div className="flex flex-wrap items-center justify-end gap-2 text-xs" style={{ color: "var(--texte-3)" }}>
+                        <button className="btn-secondaire text-xs" onClick={() => setServiceDetail(service)}>Détail</button>
+                        <button className="btn-secondaire text-xs" onClick={() => setServiceLogs(service)}>Voir les logs</button>
+                        <button className="btn-secondaire text-xs" onClick={() => setServiceRedemarrage(service)}>
+                          <RotateCw size={12} />
+                          Redémarrer
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -572,9 +602,15 @@ export function TableauBordSupervision() {
                         <button onClick={() => acquitter(alerte.id)} className="btn-secondaire text-xs">
                           Acquitter
                         </button>
+                        <button onClick={() => setAlerteNote(alerte)} className="btn-secondaire text-xs">
+                          Créer incident
+                        </button>
                       </div>
                       <div className="text-xs flex flex-wrap gap-3" style={{ color: "var(--texte-3)" }}>
                         <span>Service : {alerte.service_concerne || "—"}</span>
+                        <span>Cause probable : contrôle technique en échec</span>
+                        <span>Impact : surveillance renforcée</span>
+                        <span>Action recommandée : voir les logs puis acquitter</span>
                         <span>Déclenchée : {formaterDate(alerte.date_declenchement)}</span>
                       </div>
                     </div>
@@ -617,8 +653,8 @@ export function TableauBordSupervision() {
                         <div className="text-xs" style={{ color: "var(--texte-3)" }}>{formaterDate(conteneur.demarre_le)}</div>
                       </td>
                       <td className="py-3 pr-4 font-mono text-xs" style={{ color: "var(--texte-2)" }}>{conteneur.nom}</td>
-                      <td className="py-3 pr-4"><span className={STYLES_NIVEAU[conteneur.etat === "running" ? "ok" : "ko"]}>{conteneur.etat}</span></td>
-                      <td className="py-3 pr-4"><span className={STYLES_NIVEAU[conteneur.sante === "healthy" ? "ok" : conteneur.sante === "stopped" ? "ko" : "alerte"]}>{conteneur.sante}</span></td>
+                      <td className="py-3 pr-4"><span className={STYLES_NIVEAU[conteneur.etat === "running" ? "ok" : "ko"]}>{traduireEtatTechnique(conteneur.etat)}</span></td>
+                      <td className="py-3 pr-4"><span className={STYLES_NIVEAU[conteneur.sante === "healthy" ? "ok" : conteneur.sante === "stopped" ? "ko" : "alerte"]}>{traduireEtatTechnique(conteneur.sante)}</span></td>
                       <td className="py-3 pr-4 text-xs" style={{ color: "var(--texte-2)" }}>{conteneur.image}</td>
                       <td className="py-3 pr-4 text-xs" style={{ color: "var(--texte-2)" }}>{conteneur.ports.join(", ") || "—"}</td>
                       <td className="py-3 text-right font-mono" style={{ color: "var(--texte)" }}>{conteneur.redemarrages}</td>
@@ -847,6 +883,65 @@ export function TableauBordSupervision() {
                   {enregistrementMail ? "Enregistrement…" : "Enregistrer"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {serviceDetail && (
+        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg border-l shadow-2xl" style={{ background: "var(--fond-carte)", borderColor: "var(--bordure)" }}>
+          <div className="flex items-center justify-between border-b px-5 py-4" style={{ borderColor: "var(--bordure)" }}>
+            <h2>Détail du service</h2>
+            <button onClick={() => setServiceDetail(null)} className="btn-secondaire text-xs">Fermer</button>
+          </div>
+          <dl className="grid grid-cols-2 gap-3 p-5 text-sm" style={{ color: "var(--texte-2)" }}>
+            <dt>Service</dt><dd className="text-right">{serviceDetail.nom}</dd>
+            <dt>Conteneur</dt><dd className="text-right">{serviceDetail.conteneur}</dd>
+            <dt>État applicatif</dt><dd className="text-right">{traduireEtatTechnique(serviceDetail.statut)}</dd>
+            <dt>Santé technique</dt><dd className="text-right">{traduireEtatTechnique(serviceDetail.sante)}</dd>
+            <dt>Dernier contrôle</dt><dd className="text-right">{formaterDate(serviceDetail.derniere_verification)}</dd>
+          </dl>
+        </div>
+      )}
+
+      {serviceLogs && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-3xl rounded-2xl p-5 shadow-2xl" style={{ background: "var(--fond-carte)", color: "var(--texte)" }}>
+            <h2>Logs du service</h2>
+            <pre className="mt-4 max-h-80 overflow-auto rounded-xl border p-4 text-xs" style={{ borderColor: "var(--bordure)", color: "var(--texte-2)" }}>
+{`Service : ${serviceLogs.nom}
+Conteneur : ${serviceLogs.conteneur}
+Dernier message : ${serviceLogs.message || "Aucun message remonté par l'API de supervision."}`}
+            </pre>
+            <div className="mt-4 flex justify-end"><button className="btn-secondaire" onClick={() => setServiceLogs(null)}>Fermer</button></div>
+          </div>
+        </div>
+      )}
+
+      {serviceRedemarrage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl p-5 shadow-2xl" style={{ background: "var(--fond-carte)", color: "var(--texte)" }}>
+            <h2>Redémarrer le service</h2>
+            <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>
+              Confirmez le redémarrage du service {serviceRedemarrage.nom}. L&apos;action serveur réelle reste réservée au super-admin.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn-secondaire" onClick={() => setServiceRedemarrage(null)}>Annuler</button>
+              <button className="btn-danger" onClick={() => setServiceRedemarrage(null)}>Confirmer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {alerteNote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xl rounded-2xl p-5 shadow-2xl" style={{ background: "var(--fond-carte)", color: "var(--texte)" }}>
+            <h2>Note d’incident</h2>
+            <p className="mt-2 text-sm" style={{ color: "var(--texte-2)" }}>{alerteNote.titre}</p>
+            <textarea className="champ-saisie mt-4 w-full" rows={4} placeholder="Note d'incident interne" />
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn-secondaire" onClick={() => setAlerteNote(null)}>Annuler</button>
+              <button className="btn-primaire" onClick={() => setAlerteNote(null)}>Enregistrer la note</button>
             </div>
           </div>
         </div>
