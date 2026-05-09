@@ -160,9 +160,10 @@ def vue_recherche_intelligente(request):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def vue_generer_article_cctp(request):
-    """Crée une proposition d'article CCTP en statut à vérifier."""
+    """Crée une proposition d'article CCTP depuis le service métier paramétré."""
 
-    from applications.parametres.models import ConfigurationIAFonctionnelle, TraitementIA
+    from applications.parametres.models import ConfigurationIAFonctionnelle
+    from applications.parametres.services_ia_metier import executer_traitement_ia, fournisseur_disponible
     from applications.pieces_ecrites.models import ArticleCCTP, LotCCTP
 
     configuration = ConfigurationIAFonctionnelle.objects.filter(
@@ -176,6 +177,12 @@ def vue_generer_article_cctp(request):
     if not designation:
         return Response({"detail": "La désignation est obligatoire."}, status=status.HTTP_400_BAD_REQUEST)
 
+    if not fournisseur_disponible(configuration.fournisseur) or not configuration.mode_reel_autorise:
+        return Response(
+            {"detail": "La génération CCTP réelle n'est pas disponible : clé fournisseur absente ou mode réel désactivé. Créez un brouillon manuel si nécessaire."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     lot = None
     lot_id = request.data.get("lot")
     corps_etat = request.data.get("corps_etat") or ""
@@ -184,45 +191,72 @@ def vue_generer_article_cctp(request):
     elif corps_etat:
         lot = LotCCTP.objects.filter(intitule__icontains=corps_etat).first()
 
-    corps_article = (
-        f"Description technique proposée pour : {designation}.\n\n"
-        "Cahier des charges : préciser les matériaux, performances, supports admissibles et interfaces.\n"
-        "Mise en œuvre : exécution conforme aux règles professionnelles applicables, avec autocontrôles documentés.\n"
-        "Contrôles attendus : vérification de conformité, tolérances, essais ou procès-verbaux si nécessaires.\n"
-        "Limites de prestation : exclusions et raccordements à préciser avant validation."
+    entree = {
+        "designation": designation,
+        "corps_etat": corps_etat,
+        "lot": {"id": str(lot.id), "intitule": lot.intitule, "code": lot.code} if lot else None,
+        "unite": request.data.get("unite") or "",
+        "niveau_detail": request.data.get("niveau_detail") or "professionnel",
+        "contraintes": request.data.get("contraintes") or "",
+        "normes_connues": request.data.get("normes_connues") or [],
+    }
+    traitement = executer_traitement_ia(
+        configuration,
+        entree,
+        configuration.schema_sortie,
+        utilisateur=request.user,
+        objet_type="ArticleCCTP",
+        mode="reel",
     )
+    if traitement.statut != "termine":
+        return Response(
+            {"detail": traitement.erreur or "Génération CCTP indisponible.", "traitement_id": str(traitement.id)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    sortie = traitement.sortie or {}
+    titre = sortie.get("titre") or sortie.get("designation_courte") or designation
+    corps_article = "\n\n".join(
+        section
+        for section in [
+            sortie.get("description_technique"),
+            sortie.get("cahier_des_charges"),
+            sortie.get("mise_en_oeuvre"),
+            sortie.get("controles"),
+            sortie.get("limites_prestation"),
+            sortie.get("dechets"),
+            sortie.get("justification"),
+        ]
+        if section
+    )
+    if not corps_article:
+        return Response(
+            {"detail": "La sortie fournisseur ne contient pas de descriptif CCTP exploitable.", "traitement_id": str(traitement.id)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     article = ArticleCCTP.objects.create(
         lot=lot,
-        chapitre=lot.intitule if lot else corps_etat,
+        chapitre=lot.intitule if lot else (sortie.get("corps_etat") or corps_etat),
         numero_article=request.data.get("numero_article") or "A VERIFIER",
         code_reference=request.data.get("code") or "",
-        intitule=designation,
+        intitule=titre,
         corps_article=corps_article,
-        source="bibliothèque interne",
+        source="génération métier",
         est_dans_bibliotheque=True,
-        tags=request.data.get("mots_cles") or [],
+        tags=sortie.get("mots_cles") or request.data.get("mots_cles") or [],
+        normes_applicables=sortie.get("normes_references") or sortie.get("normes") or [],
         statut="a_verifier",
     )
-    traitement = TraitementIA.objects.create(
-        module="bibliotheque_cctp",
-        objet_type="ArticleCCTP",
-        objet_id=str(article.id),
-        configuration=configuration,
-        statut="termine",
-        entree=dict(request.data),
-        sortie={"article_id": str(article.id), "statut": article.statut},
-        score_confiance=configuration.seuil_confiance,
-        cout_estime=0,
-        cout_reel=0,
-        utilisateur=request.user,
-        date_fin=timezone.now(),
-    )
+    traitement.objet_id = str(article.id)
+    traitement.sortie = {**sortie, "article_id": str(article.id), "statut": article.statut}
+    traitement.save(update_fields=["objet_id", "sortie"])
     return Response({
         "detail": "Article CCTP proposé en statut à vérifier.",
         "article_id": str(article.id),
         "traitement_id": str(traitement.id),
         "statut": article.statut,
         "corps_article": article.corps_article,
+        "sortie": traitement.sortie,
     }, status=status.HTTP_201_CREATED)
 
 

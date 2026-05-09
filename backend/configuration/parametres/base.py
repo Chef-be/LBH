@@ -25,6 +25,8 @@ COLLABORA_URL = config("COLLABORA_URL", default="http://lbh-collabora:9980")
 # Doit être joignable depuis le conteneur lbh-collabora (URL interne backend ou publique).
 WOPI_BASE_URL = config("WOPI_BASE_URL", default="http://lbh-backend:8000")
 WOPI_SECRET = config("WOPI_SECRET", default="")
+OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+CLE_API_OPENAI = config("CLE_API_OPENAI", default="")
 
 # ============================================================
 # SÉCURITÉ

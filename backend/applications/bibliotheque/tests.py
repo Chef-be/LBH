@@ -24,6 +24,8 @@ from applications.bibliotheque.services import (
 )
 from applications.documents.models import Document, TypeDocument
 from applications.economie.models import ProfilMainOeuvre
+from applications.parametres.models import ConfigurationIAFonctionnelle, TraitementIA
+from applications.pieces_ecrites.models import ArticleCCTP, LotCCTP
 from applications.projets.models import Projet
 
 
@@ -519,3 +521,81 @@ class ApiBibliothequeTests(TestCase):
         self.assertEqual(str(sous_detail.quantite), "1.500000")
         self.assertGreater(sous_detail.taux_horaire, 0)
         self.assertEqual(sous_detail.cout_unitaire_ht, sous_detail.taux_horaire)
+
+
+class BibliothequeGenerationCCTPMetierTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = Utilisateur.objects.create_user(
+            courriel="admin-cctp@example.com",
+            password="secret-test-123",
+            prenom="Admin",
+            nom="CCTP",
+            est_staff=True,
+            est_super_admin=True,
+        )
+        self.client.force_authenticate(self.admin)
+        self.lot = LotCCTP.objects.create(code="GO", intitule="Gros œuvre", ordre=1)
+        self.configuration = ConfigurationIAFonctionnelle.objects.create(
+            code="CCTP_TEST",
+            libelle="Génération CCTP test",
+            module="bibliotheque_cctp",
+            fournisseur="openai",
+            modele="modele-test",
+            mode_reel_autorise=True,
+            schema_sortie={
+                "titre": "",
+                "description_technique": "",
+                "cahier_des_charges": "",
+                "mise_en_oeuvre": "",
+                "controles": "",
+                "limites_prestation": "",
+            },
+        )
+
+    @patch("applications.parametres.services_ia_metier.fournisseur_disponible", return_value=False)
+    def test_generation_cctp_sans_cle_ne_produit_pas_de_faux_texte(self, _mock_disponible):
+        reponse = self.client.post(
+            "/api/bibliotheque/generer-article-cctp/",
+            {"designation": "Voile béton", "lot": str(self.lot.id)},
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("génération CCTP réelle n'est pas disponible", reponse.data["detail"])
+        self.assertEqual(ArticleCCTP.objects.count(), 0)
+
+    @patch("applications.parametres.services_ia_metier.fournisseur_disponible", return_value=True)
+    @patch("applications.parametres.services_ia_metier.executer_traitement_ia")
+    def test_generation_cctp_service_mocke_cree_article_a_verifier(self, mock_executer, _mock_disponible):
+        traitement = TraitementIA.objects.create(
+            module="bibliotheque_cctp",
+            objet_type="ArticleCCTP",
+            configuration=self.configuration,
+            statut="termine",
+            mode_execution="reel",
+            sortie={
+                "titre": "Voile béton armé",
+                "description_technique": "Voile en béton armé coulé en place.",
+                "cahier_des_charges": "Béton conforme aux exigences du projet.",
+                "mise_en_oeuvre": "Coffrage, ferraillage et coulage contrôlés.",
+                "controles": "Contrôle des aciers, aplomb et parement.",
+                "limites_prestation": "Hors réservations non indiquées.",
+                "mots_cles": ["béton", "voile"],
+            },
+            utilisateur=self.admin,
+        )
+        mock_executer.return_value = traitement
+
+        reponse = self.client.post(
+            "/api/bibliotheque/generer-article-cctp/",
+            {"designation": "Voile béton", "lot": str(self.lot.id), "unite": "m²"},
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, status.HTTP_201_CREATED, reponse.data)
+        article = ArticleCCTP.objects.get(pk=reponse.data["article_id"])
+        self.assertEqual(article.statut, "a_verifier")
+        self.assertIn("Voile en béton armé", article.corps_article)
+        traitement.refresh_from_db()
+        self.assertEqual(traitement.objet_id, str(article.id))

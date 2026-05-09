@@ -106,22 +106,18 @@ class ConfigurationIAFonctionnelleSerialiseur(serializers.ModelSerializer):
             "id", "code", "libelle", "module", "module_libelle",
             "fournisseur", "fournisseur_libelle", "modele", "modele_fallback",
             "temperature", "top_p", "max_tokens",
-            "prompt_systeme", "prompt_controle", "schema_sortie",
+            "prompt_systeme", "prompt_controle", "prompt_correction",
+            "prompt_normalisation", "prompt_classification", "prompt_generation",
+            "schema_sortie", "exemple_sortie_attendue", "options_metier",
             "seuil_confiance", "seuil_validation_automatique",
             "activer_correction_texte", "activer_normalisation",
             "activer_classification", "activer_rapprochement",
             "activer_generation", "activer_validation_auto",
-            "validation_humaine_obligatoire", "cout_max_par_traitement",
+            "validation_humaine_obligatoire", "mode_simulation_autorise",
+            "mode_reel_autorise", "cout_max_par_traitement",
             "est_actif", "date_creation", "date_modification",
         ]
         read_only_fields = ["id", "date_creation", "date_modification", "module_libelle", "fournisseur_libelle"]
-
-    def validate(self, attrs):
-        fournisseur = attrs.get("fournisseur", getattr(self.instance, "fournisseur", "openai"))
-        modele = attrs.get("modele", getattr(self.instance, "modele", ""))
-        if fournisseur == "openai" and not modele:
-            raise serializers.ValidationError({"modele": "Le modèle doit rester paramétrable et renseigné pour ce fournisseur."})
-        return attrs
 
 
 class CorrectionIASerialiseur(serializers.ModelSerializer):
@@ -144,8 +140,11 @@ class TraitementIASerialiseur(serializers.ModelSerializer):
         model = TraitementIA
         fields = [
             "id", "module", "objet_type", "objet_id", "configuration",
-            "configuration_libelle", "statut", "entree", "sortie",
+            "configuration_libelle", "statut", "mode_execution",
+            "modele_utilise", "prompt_systeme", "prompt_utilisateur",
+            "entree", "sortie",
             "score_confiance", "cout_estime", "cout_reel",
+            "duree_ms", "tokens_entree", "tokens_sortie",
             "utilisateur", "utilisateur_nom", "date_creation", "date_fin",
             "erreur", "corrections",
         ]

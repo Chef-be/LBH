@@ -72,6 +72,9 @@ urlpatterns = [
     path("api/administration/ia/configurations/", vues_parametres.VueListeConfigurationsIA.as_view(), name="administration-ia-configurations"),
     path("api/administration/ia/configurations/<uuid:pk>/", vues_parametres.VueDetailConfigurationIA.as_view(), name="administration-ia-configuration-detail"),
     path("api/administration/ia/configurations/<uuid:pk>/tester/", vues_parametres.vue_tester_configuration_ia, name="administration-ia-configuration-tester"),
+    path("api/administration/ia/modeles-disponibles/", vues_parametres.vue_modeles_disponibles_ia, name="administration-ia-modeles-disponibles"),
+    path("api/administration/ia/presets/", vues_parametres.vue_presets_ia, name="administration-ia-presets"),
+    path("api/administration/ia/synthese/", vues_parametres.vue_synthese_ia, name="administration-ia-synthese"),
     path("api/administration/ia/journaux/", vues_parametres.VueListeJournauxIA.as_view(), name="administration-ia-journaux"),
     path("api/administration/ia/couts/", vues_parametres.vue_couts_ia, name="administration-ia-couts"),
 

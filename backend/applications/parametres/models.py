@@ -456,7 +456,13 @@ class ConfigurationIAFonctionnelle(models.Model):
     max_tokens = models.PositiveIntegerField(default=2500)
     prompt_systeme = models.TextField(blank=True)
     prompt_controle = models.TextField(blank=True)
+    prompt_correction = models.TextField(blank=True)
+    prompt_normalisation = models.TextField(blank=True)
+    prompt_classification = models.TextField(blank=True)
+    prompt_generation = models.TextField(blank=True)
     schema_sortie = models.JSONField(default=dict, blank=True)
+    exemple_sortie_attendue = models.JSONField(default=dict, blank=True)
+    options_metier = models.JSONField(default=dict, blank=True)
     seuil_confiance = models.DecimalField(max_digits=5, decimal_places=2, default=0.75)
     seuil_validation_automatique = models.DecimalField(max_digits=5, decimal_places=2, default=0.92)
     activer_correction_texte = models.BooleanField(default=True)
@@ -466,6 +472,8 @@ class ConfigurationIAFonctionnelle(models.Model):
     activer_generation = models.BooleanField(default=False)
     activer_validation_auto = models.BooleanField(default=False)
     validation_humaine_obligatoire = models.BooleanField(default=True)
+    mode_simulation_autorise = models.BooleanField(default=True)
+    mode_reel_autorise = models.BooleanField(default=False)
     cout_max_par_traitement = models.DecimalField(max_digits=10, decimal_places=4, default=0)
     est_actif = models.BooleanField(default=True)
     date_creation = models.DateTimeField(auto_now_add=True)
@@ -489,6 +497,7 @@ class TraitementIA(models.Model):
         ("en_cours", "En cours"),
         ("termine", "Terminé"),
         ("erreur", "Erreur"),
+        ("simulation", "Simulation"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -503,11 +512,18 @@ class TraitementIA(models.Model):
         related_name="traitements",
     )
     statut = models.CharField(max_length=20, choices=STATUTS, default="prepare")
+    mode_execution = models.CharField(max_length=20, blank=True, default="")
+    modele_utilise = models.CharField(max_length=120, blank=True)
+    prompt_systeme = models.TextField(blank=True)
+    prompt_utilisateur = models.TextField(blank=True)
     entree = models.JSONField(default=dict, blank=True)
     sortie = models.JSONField(default=dict, blank=True)
     score_confiance = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     cout_estime = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     cout_reel = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    duree_ms = models.PositiveIntegerField(null=True, blank=True)
+    tokens_entree = models.PositiveIntegerField(null=True, blank=True)
+    tokens_sortie = models.PositiveIntegerField(null=True, blank=True)
     utilisateur = models.ForeignKey(
         "comptes.Utilisateur",
         on_delete=models.SET_NULL,

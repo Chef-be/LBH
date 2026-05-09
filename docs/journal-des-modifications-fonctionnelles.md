@@ -10,6 +10,9 @@
 - Administration : ajout du paramétrage des traitements métier automatisés, journaux et coûts.
 - Ressources : ajout des lancements contrôlés devis, prix marché et estimations.
 - Bibliothèque : ajout recherche intelligente et génération CCTP en statut à vérifier.
+- Administration des traitements métier : suppression du modèle imposé par défaut, ajout de la récupération serveur des modèles disponibles, tests simulation/réel, préréglages métier, schémas JSON, options par module, synthèse, journaux et coûts.
+- Serveur : ajout du service centralisé `services_ia_metier`, journalisation enrichie des modèles, prompts, entrées, sorties, tokens, coûts, erreurs et utilisateur.
+- CCTP : suppression du faux contenu statique ; la génération exige un fournisseur réel disponible et crée uniquement des articles en statut `a_verifier`.
 
 ## Tests attendus
 

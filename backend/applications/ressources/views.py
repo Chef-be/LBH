@@ -223,9 +223,9 @@ def _configuration_traitement(configuration_id, module):
 
 
 def _journaliser_traitement(module, objet, configuration, utilisateur, entree, sortie, score="0.78"):
-    from applications.parametres.models import TraitementIA
+    from applications.parametres.services_ia_metier import journaliser_traitement_ia
 
-    return TraitementIA.objects.create(
+    return journaliser_traitement_ia(
         module=module,
         objet_type=objet.__class__.__name__,
         objet_id=str(objet.id),
@@ -237,7 +237,6 @@ def _journaliser_traitement(module, objet, configuration, utilisateur, entree, s
         cout_estime=0,
         cout_reel=0,
         utilisateur=utilisateur,
-        date_fin=timezone.now(),
     )
 
 
@@ -249,35 +248,37 @@ def vue_analyser_devis_ia(request, pk):
     configuration = _configuration_traitement(request.data.get("configuration"), "ressources_devis")
     if configuration is None:
         return Response({"detail": "Aucune configuration active n'est disponible pour l'analyse des devis."}, status=status.HTTP_400_BAD_REQUEST)
+    from applications.parametres.services_ia_metier import executer_traitement_ia, fournisseur_disponible
+
     lignes = list(LignePrixMarche.objects.filter(devis_source=devis).order_by("ordre", "date_creation")[:50])
-    corrections = []
-    anomalies = []
-    for ligne in lignes:
-        designation = (ligne.designation or "").strip()
-        if ligne.type_ligne != "article":
-            anomalies.append({"ligne": str(ligne.id), "niveau": "information", "message": "Ligne non capitalisable automatiquement."})
-        if not ligne.unite:
-            anomalies.append({"ligne": str(ligne.id), "niveau": "avertissement", "message": "Unité absente ou suspecte."})
-        normalisee = " ".join(designation.split())
-        if normalisee and normalisee != designation:
-            corrections.append({"ligne": str(ligne.id), "champ": "designation", "valeur_originale": designation, "valeur_proposee": normalisee})
-    sortie = {
-        "resume": f"{len(lignes)} ligne(s) contrôlée(s).",
-        "corrections": corrections,
-        "anomalies": anomalies,
-        "validation_humaine_obligatoire": configuration.validation_humaine_obligatoire,
+    entree = {
+        "options": request.data.get("options", {}),
+        "nom_original": devis.nom_original,
+        "lignes": [
+            {
+                "id": str(ligne.id),
+                "designation": ligne.designation,
+                "unite": ligne.unite,
+                "quantite": str(ligne.quantite) if ligne.quantite is not None else "",
+                "prix_unitaire_ht": str(ligne.prix_unitaire_ht) if ligne.prix_unitaire_ht is not None else "",
+                "type_ligne": ligne.type_ligne,
+            }
+            for ligne in lignes
+        ],
     }
-    traitement = _journaliser_traitement(
-        "ressources_devis",
-        devis,
+    mode = "reel" if fournisseur_disponible(configuration.fournisseur) and configuration.mode_reel_autorise else "simulation"
+    traitement = executer_traitement_ia(
         configuration,
-        request.user,
-        {"options": request.data.get("options", {}), "nom_original": devis.nom_original},
-        sortie,
+        entree,
+        configuration.schema_sortie,
+        utilisateur=request.user,
+        objet_type="DevisAnalyse",
+        objet_id=str(devis.id),
+        mode=mode,
     )
     devis.donnees_extraction = {**(devis.donnees_extraction or {}), "dernier_traitement_metier": str(traitement.id)}
     devis.save(update_fields=["donnees_extraction"])
-    return Response({"detail": "Analyse préparée et journalisée.", "traitement_id": str(traitement.id), **sortie})
+    return Response({"detail": "Analyse journalisée.", "traitement_id": str(traitement.id), **traitement.sortie})
 
 
 @api_view(["POST"])
@@ -287,27 +288,26 @@ def vue_analyser_prix_marche_ia(request):
     configuration = _configuration_traitement(request.data.get("configuration"), "ressources_prix_marche")
     if configuration is None:
         return Response({"detail": "Aucune configuration active n'est disponible pour les prix marché."}, status=status.HTTP_400_BAD_REQUEST)
+    from applications.parametres.services_ia_metier import executer_traitement_ia, fournisseur_disponible
+
     lignes = LignePrixMarche.objects.all().order_by("-date_creation")[:100]
-    a_verifier = [
-        str(ligne.id)
-        for ligne in lignes
-        if not ligne.designation_normalisee or not ligne.corps_etat_libelle or not ligne.unite
-    ]
-    doublons = []
-    vues = {}
-    for ligne in lignes:
-        cle = ((ligne.designation_normalisee or ligne.designation or "").lower(), ligne.unite.lower())
-        if cle in vues:
-            doublons.append({"ligne": str(ligne.id), "ligne_similaire": vues[cle]})
-        else:
-            vues[cle] = str(ligne.id)
-    sortie = {
-        "lignes_a_verifier": a_verifier,
-        "doublons_potentiels": doublons,
-        "validation_humaine_obligatoire": configuration.validation_humaine_obligatoire,
+    entree = {
+        "options": request.data.get("options", {}),
+        "lignes": [
+            {
+                "id": str(ligne.id),
+                "designation": ligne.designation,
+                "designation_normalisee": ligne.designation_normalisee,
+                "unite": ligne.unite,
+                "corps_etat": ligne.corps_etat_libelle,
+                "prix_unitaire_ht": str(ligne.prix_unitaire_ht) if ligne.prix_unitaire_ht is not None else "",
+            }
+            for ligne in lignes
+        ],
     }
-    traitement = _journaliser_traitement("ressources_prix_marche", configuration, configuration, request.user, dict(request.data), sortie)
-    return Response({"detail": "Analyse des prix marché journalisée.", "traitement_id": str(traitement.id), **sortie})
+    mode = "reel" if fournisseur_disponible(configuration.fournisseur) and configuration.mode_reel_autorise else "simulation"
+    traitement = executer_traitement_ia(configuration, entree, configuration.schema_sortie, utilisateur=request.user, objet_type="prix_marche", objet_id=str(configuration.id), mode=mode)
+    return Response({"detail": "Analyse des prix marché journalisée.", "traitement_id": str(traitement.id), **traitement.sortie})
 
 
 @api_view(["POST"])
@@ -317,20 +317,17 @@ def vue_generer_estimation_ia(request):
     configuration = _configuration_traitement(request.data.get("configuration"), "ressources_estimations")
     if configuration is None:
         return Response({"detail": "Aucune configuration active n'est disponible pour les estimations."}, status=status.HTTP_400_BAD_REQUEST)
+    from applications.parametres.services_ia_metier import executer_traitement_ia, fournisseur_disponible
+
     programme = request.data.get("programme") or "Programme à préciser"
-    sortie = {
+    entree = {
         "programme": programme,
-        "scenarios": [
-            {"code": "economique", "libelle": "Économique", "hypothese": "Solutions simples et ratios bas prudents."},
-            {"code": "standard", "libelle": "Standard", "hypothese": "Référentiel courant avec provisions usuelles."},
-            {"code": "renforce", "libelle": "Renforcé", "hypothese": "Exigences techniques et aléas renforcés."},
-            {"code": "haut_niveau", "libelle": "Haut niveau", "hypothese": "Prestations qualitatives et marges d'incertitude explicites."},
-        ],
-        "note_hypotheses": "Les prix doivent être rattachés à des références internes avant validation.",
-        "validation_humaine_obligatoire": True,
+        "options": request.data.get("options", {}),
+        "references": request.data.get("references", []),
     }
-    traitement = _journaliser_traitement("ressources_estimations", configuration, configuration, request.user, dict(request.data), sortie)
-    return Response({"detail": "Scénarios préparés et journalisés.", "traitement_id": str(traitement.id), **sortie})
+    mode = "reel" if fournisseur_disponible(configuration.fournisseur) and configuration.mode_reel_autorise else "simulation"
+    traitement = executer_traitement_ia(configuration, entree, configuration.schema_sortie, utilisateur=request.user, objet_type="estimation", objet_id=str(configuration.id), mode=mode)
+    return Response({"detail": "Scénarios journalisés.", "traitement_id": str(traitement.id), **traitement.sortie})
 
 
 @api_view(["GET"])

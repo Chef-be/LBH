@@ -6,7 +6,7 @@ Permettre aux pages devis, prix marché et estimations de lancer des analyses co
 
 ## Workflow
 
-L'utilisateur choisit une configuration, active les options de correction, normalisation, classification et rapprochement, puis lance l'analyse. Les propositions sont retournées et journalisées sans application automatique.
+L'utilisateur choisit une configuration active du module concerné, active les options de correction, normalisation, classification et rapprochement, puis lance l'analyse. Le backend appelle le service de traitements métier : simulation si le fournisseur n'est pas configuré, mode réel si la configuration l'autorise. Les propositions sont retournées et journalisées sans application automatique.
 
 ## Modèles backend
 
@@ -15,6 +15,7 @@ L'utilisateur choisit une configuration, active les options de correction, norma
 - `FicheRatioCout`
 - `TraitementIA`
 - `CorrectionIA`
+- `ConfigurationIAFonctionnelle`
 
 ## Endpoints
 
@@ -33,6 +34,8 @@ L'utilisateur choisit une configuration, active les options de correction, norma
 
 Les propositions n'écrasent pas le texte original. La capitalisation et les fusions restent soumises à validation humaine sauf configuration explicite.
 
+Les traitements stockent le modèle utilisé, le prompt système, le prompt utilisateur, l'entrée structurée, la sortie, le statut, l'utilisateur, les coûts estimés/réels et les erreurs éventuelles.
+
 ## Permissions
 
 Utilisateur authentifié pour lancer, super-administrateur pour configurer.
@@ -43,7 +46,7 @@ Utilisateur authentifié pour lancer, super-administrateur pour configurer.
 
 ## Limites connues
 
-Le premier lot prépare les traitements et les journaux ; l'appel fournisseur réel doit être branché derrière la configuration.
+L'application sélective des corrections proposées reste à finaliser dans les tableaux de lignes.
 
 ## Prochaines évolutions
 
